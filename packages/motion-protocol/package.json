@@ -1,0 +1,29 @@
+{
+  "name": "@motionvideo/motion-protocol",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./v2": "./dist/v2/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate:schema": "tsx scripts/generate-json-schema.ts",
+    "check:schema": "tsx scripts/generate-json-schema.ts && vitest run test/schema-files.test.ts",
+    "lint": "eslint src test --max-warnings 0"
+  },
+  "dependencies": {
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.23.12",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.10",
+    "zod-to-json-schema": "^3.25.2"
+  }
+}

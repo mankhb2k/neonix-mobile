@@ -1,0 +1,43 @@
+{
+  "format": "motion-protocol",
+  "formatVersion": 2,
+  "id": "flip-3d-demo",
+  "composition": { "width": 320, "height": 320, "fps": 30, "background": "#101820", "colorSpace": "srgb" },
+  "assets": [],
+  "layers": [
+    {
+      "id": "card",
+      "parentLayerId": null,
+      "order": 0,
+      "frame": { "width": 160, "height": 220 },
+      "transform": {
+        "translate": { "x": 0, "y": 0, "z": 0 },
+        "scale": { "x": 1, "y": 1, "z": 1 },
+        "rotate": { "x": 0, "y": -90, "z": 0 },
+        "skew": { "x": 0, "y": 0 },
+        "anchor": { "x": 0, "y": 0, "z": 0 },
+        "perspective": 600
+      },
+      "opacity": 1,
+      "timing": { "start": 0, "duration": 800 },
+      "type": "shape",
+      "payload": { "shape": "rectangle" },
+      "style": { "fill": "#F97316" },
+      "tracks": [
+        {
+          "id": "flip-y",
+          "path": "transform.rotate.y",
+          "keyframes": [
+            { "time": 0, "value": { "type": "number", "value": -90 } },
+            {
+              "time": 400,
+              "value": { "type": "number", "value": 0 },
+              "easing": { "type": "cubicBezier", "x1": 0.22, "y1": 1, "x2": 0.36, "y2": 1 }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "audio": { "sampleRate": 48000, "tracks": [] }
+}
