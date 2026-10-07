@@ -3,6 +3,138 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## `simctl` cannot synthesize real taps — a real `XCUITest` target caught a bug that build/screenshot verification never could
+
+Added 2026-10-07, `apps/ios-editor/UITests/` (`NeonixEditorUITests` target in
+`project.yml`, `EditorNavigationUITests.swift`). Every verification method
+used in this repo up to this point — `xcodebuild build`, `xcodebuild test`
+(unit tests), `simctl io screenshot` — can confirm code compiles, sampling
+logic is correct, and a screen *looks* right, but **none of them can press a
+button**. `simctl` has no tap/touch injection at all (confirmed early in the
+session). `XCUIApplication` (a real UI test target) is the one tool in this
+toolchain that actually synthesizes a touch through Accessibility, the same
+path a person's finger does.
+
+This gap was real, not theoretical: a user report ("Huỷ doesn't return to
+Folder") turned out to need this test to actually resolve, after several
+rounds of plausible-but-wrong fixes based on reasoning and screenshots alone
+(see `EditorShellView`'s and `PreviewCanvas`'s doc comments for the full
+root-cause story). **The found bug: `PreviewCanvas`'s `GeometryReader` +
+`.scaleEffect` combo silently absorbed real taps meant for `EditorShellView`'s
+`Huỷ`/`Xuất` buttons sitting above it, for 2 of 3 sample compositions,
+100% reproducibly — even with `.clipped()` already applied.** Fixed with
+`.allowsHitTesting(false)` on `PreviewCanvas` wherever it's embedded (it has
+no interactive content of its own, so this costs nothing and sidesteps
+needing to pin down the exact mechanism `.clipped()` wasn't fully covering).
+
+**Methodology that actually found it, after reasoning-based fixes failed
+twice**: add `NSLog` (not `print` — a UI test's app-under-test runs as a
+separate process, and `print()` output does not flow into `xcodebuild`'s own
+log stream; `NSLog` goes through the unified logging system, retrievable via
+`xcrun simctl spawn <udid> log show --predicate 'eventMessage CONTAINS
+"..."' --last 10m`) at each suspected layer, then eliminate one variable at a
+time under the *same* real UI test: not the Liquid Glass button style
+(reproduced with `.buttonStyle(.glass)` removed entirely), not an async
+video-decode race (reproduced with a 5s settle delay before the tap), not
+`titlebarHeight`'s `PreferenceKey` oscillation (reproduced after that was
+independently found and fixed — a real second bug, worth fixing on its own,
+but not the cause of this one), not the test code itself (reproduced using
+the exact passing test's own code, pointed at a different project) —
+narrowed to `PreviewCanvas` specifically by swapping it for a plain `Color`
+with the same frame chain, which made the tap work every time. Each of these
+eliminations took a real, separate `xcodebuild test` run against the
+simulator; there was no shortcut once reasoning alone stopped being reliable.
+
+**Running these from the command line (reference, since each is a multi-step
+flow a future session will need again)**:
+```
+xcodebuild -project NeonixEditor.xcodeproj -scheme NeonixEditor \
+  -destination 'platform=iOS Simulator,name=iPhone 17' test \
+  -only-testing:NeonixEditorUITests
+```
+(`-only-testing:NeonixEditorUITests/EditorNavigationUITests/<methodName>`
+to isolate one test — UI tests are slow, 15-20s+ each, launching the real
+app and synthesizing real events, not instant like the unit tests).
+
+## Regenerating `NeonixEditor.xcodeproj` via `xcodegen` can orphan DerivedData under a new hash — check for duplicates before trusting what the simulator shows
+
+Found 2026-10-07: at one point there were **3** different
+`NeonixEditor-<hash>` folders under `~/Library/Developer/Xcode/DerivedData/`
+simultaneously, from 3 different days. Root cause: `xcodegen generate`
+rewrites `project.pbxproj` with fresh internal object identifiers every
+time it runs, and Xcode's own DerivedData hash is sensitive to that — so
+a session that calls `xcodegen generate` repeatedly (this one does, every
+time `Sources/AppModule` gains/loses a file) can leave old hash folders
+behind, each holding a *stale* build of the app. **This matters beyond disk
+space**: if Xcode's own GUI "Run" button happens to be using a different
+(older) hash than whatever `xcodebuild`/`simctl` commands in this session
+were just using, the person testing in Xcode sees stale behavior while
+every verification in this session looks fine — this exact scenario is
+what happened, and looked at first like a real dismiss/navigation bug
+before being correctly diagnosed as stale cache. **If a rebuilt change
+"isn't showing up" and the usual newest-mtime install trick (see the next
+note) doesn't explain it, check for more than one `NeonixEditor-*` folder**
+(`ls ~/Library/Developer/Xcode/DerivedData/ | grep -i neonix`) and delete
+every one except the single fresh one before concluding anything else is
+wrong. Also uninstall `com.neonix.editor` from every simulator the person
+might be testing on, not just whichever one this session's own commands
+target — a stale `.app` bundle can also linger per-simulator independently
+of DerivedData. After a full wipe, the person should also do **Product >
+Clean Build Folder (⇧⌘K) in Xcode itself** (and ideally quit/reopen Xcode)
+before their next GUI Run, since this session can't reach into Xcode's own
+in-memory module/build cache from the command line.
+
+## `PreviewCanvas` never scaled to fit its container — it rendered `composition.width`/`height` as literal screen points
+
+Found and fixed 2026-10-07, a real, previously-invisible bug. `PreviewCanvas`
+used to be `ZStack { ... }.frame(width: composition.width, height:
+composition.height).clipped()` — composition dimensions treated as literal
+SwiftUI points, with zero scaling. Every external caller added
+`.aspectRatio(ratio, contentMode: .fit)`, which looked like it was doing
+the fitting, but **was always a no-op**: the ratio passed in was computed
+from the same `composition.width`/`height` already baked into the fixed
+internal frame, so there was nothing for `.aspectRatio` to adjust —
+`.frame(width:height:)` with literal numbers reports that exact size
+regardless of what any wrapping modifier proposes. This went unnoticed
+because every fixture composition happened to use small values (240-320)
+coincidentally close to a phone's own point width, and every caller sat
+inside a `ScrollView`, where overflow just scrolled instead of visibly
+colliding with anything. **`EditorShellView`'s fixed, non-scrolling 3-section
+layout is what finally surfaced it**, once `ProjectsView`'s 3 sample
+projects were given 3 different, more realistic composition sizes (9:16 =
+360×640, 16:9 = 640×360, 1:1 = 480×480): the 640-wide ones rendered as a
+literal 640pt-wide view, overflowing straight through the top nav bar and
+down into the timeline.
+
+**Fix: `PreviewCanvas.body` is now `GeometryReader { ... }`**, computing
+`scale = min(geo.size.width / composition.width, geo.size.height /
+composition.height)`, rendering the actual layer content at its native
+`composition.width`/`height` frame (so every layer's absolute x/y/width/
+height values stay correct), then `.scaleEffect(scale)` (a pure visual
+transform, preserves relative layout) and a final `.frame(width:
+geo.size.width, height: geo.size.height)` to fill whatever box the caller
+gave it. Every external `.aspectRatio(...)` call site became redundant —
+removed from `EditorShellView` (which now just hands it an explicit
+`.frame(width:height:)` box); left alone in `EditorDemoView`/
+`TextWrapDemoView` (harmless now that the inner content is genuinely
+flexible, and those two still need it to turn a `ScrollView`'s unconstrained
+proposed height into a bounded one).
+
+**`EditorShellView`'s stage is a fixed square, not a rectangle that
+inherits the project's own aspect ratio** — the other half of this fix,
+decided in conversation. Stage's own allotted rectangle (`geo.size.height -
+titlebarHeight - timelineHeight - 1`) is turned into a hard
+`squareSide = min(geo.size.width, stageHeight)`, and the video renders at
+`squareSide * 0.9` within it — so **any** project aspect ratio scales down
+to fit the same square, leaving a consistent ~10% margin, and a project's
+own shape can never again influence how much space Stage/Titlebar/Timeline
+each get. Verified on the simulator across all 3 of `ProjectsView`'s sample
+aspect ratios (9:16/16:9/1:1) — none overflow into the nav bar or timeline
+anymore. `ProjectSample` now carries its own `compositionWidth`/
+`compositionHeight` (9:16/16:9/1:1 across the 3 defaults) specifically to
+keep exercising more than one shape at once, not because these particular
+ratios are meaningful to "Trip to Paris" etc.
+
 ## iOS 26 Liquid Glass button styles are available — confirmed by reading the SDK, not guessed
 
 Added 2026-10-07, `EditorShellView`'s top bar (`Huỷ`/`Xuất`). The simulator

@@ -14,6 +14,7 @@
 		323F5A19675FA3EDC386D2BF /* VideoFrameCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12350CD2CEA7D5E5B7CC7F53 /* VideoFrameCache.swift */; };
 		3955003698782D028155A0EA /* flip-3d.json in Resources */ = {isa = PBXBuildFile; fileRef = 4CE8EB9E43A85B9C7BA3DFB9 /* flip-3d.json */; };
 		3A10F6E97F5F9F3F354CB52E /* V2PathGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C575089D69354EE40A84041C /* V2PathGeometry.swift */; };
+		3B5766DD2EFB94EF86D9C3EB /* EditorNavigationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */; };
 		3E7102B373D4E0D354EE8413 /* TextLayoutCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */; };
 		42986B956D613EBE510990B1 /* V2Render3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139C2ADF4C010CDD5F40CFB5 /* V2Render3D.swift */; };
 		4EC3A3595C9DD3CA010A1CEA /* KeyframeSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A1D9271BEBF5787348D7B99 /* KeyframeSampler.swift */; };
@@ -55,6 +56,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		61076F076F317ED391C6C068 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D557A8450E778D81C8785CB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 389143862166BD5C8C9665BE;
+			remoteInfo = NeonixEditor;
+		};
 		9CAAD204370CF10981B9DBD5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 4D557A8450E778D81C8785CB /* Project object */;
@@ -92,6 +100,7 @@
 		765759A1DF4D1E7A6CA84983 /* MotionPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionPathResolver.swift; sourceTree = "<group>"; };
 		78A4750D484CA022E032F8AC /* EditorDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDemoView.swift; sourceTree = "<group>"; };
 		7B4640ADC5C35705D1D47BBC /* V2Markers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Markers.swift; sourceTree = "<group>"; };
+		7F39E4D6A23812EB175EC4C6 /* NeonixEditorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NeonixEditorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D45E8D8BB1417C878B5A20D /* EditorShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorShellView.swift; sourceTree = "<group>"; };
 		9CA7E58F799D288F23AD5664 /* V2View.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2View.swift; sourceTree = "<group>"; };
 		A10EB5DD2C25BEA220BC35B0 /* TextPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPathResolver.swift; sourceTree = "<group>"; };
@@ -102,6 +111,7 @@
 		B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NeonixEditor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA1A725849D22CE87008891F /* V2TextLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TextLayer.swift; sourceTree = "<group>"; };
 		BE7E50DA11A8887C9B85D7E1 /* V2Filter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Filter.swift; sourceTree = "<group>"; };
+		C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNavigationUITests.swift; sourceTree = "<group>"; };
 		C0A6DD259A85C2E0D5195E18 /* TextWrapDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextWrapDemoView.swift; sourceTree = "<group>"; };
 		C25F5C94FEF5EF01246456C8 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		C575089D69354EE40A84041C /* V2PathGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2PathGeometry.swift; sourceTree = "<group>"; };
@@ -121,6 +131,7 @@
 				C088E46DA67F4449A6BAFBB1 /* AppModule */,
 				CA408B93BDFA3F7A2E4137BB /* AppModuleTests */,
 				E08AE7B5456BB68663EEC871 /* Resources */,
+				E0A5D7D894686EE3B5C3F1BE /* UITests */,
 				A817D77CCF6F656FD33F1678 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -209,6 +220,7 @@
 			children = (
 				B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */,
 				0D842949652A4D073BFDA540 /* NeonixEditorTests.xctest */,
+				7F39E4D6A23812EB175EC4C6 /* NeonixEditorUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -270,6 +282,15 @@
 			path = "apps/ios-editor/Sources/AppModule/Resources";
 			sourceTree = "<group>";
 		};
+		E0A5D7D894686EE3B5C3F1BE /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */,
+			);
+			name = UITests;
+			path = "apps/ios-editor/UITests";
+			sourceTree = "<group>";
+		};
 		F839889FD42ECB08D6B6DA07 /* EditorDocument */ = {
 			isa = PBXGroup;
 			children = (
@@ -322,6 +343,24 @@
 			productReference = B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A689A4C30FA5DC2FCD38126F /* NeonixEditorUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 61A8D8F76A7965FC26CAAC86 /* Build configuration list for PBXNativeTarget "NeonixEditorUITests" */;
+			buildPhases = (
+				114BB4A140EBC2E4D897A1DB /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				81E121B247B104EEFAA7303C /* PBXTargetDependency */,
+			);
+			name = NeonixEditorUITests;
+			packageProductDependencies = (
+			);
+			productName = NeonixEditorUITests;
+			productReference = 7F39E4D6A23812EB175EC4C6 /* NeonixEditorUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -331,6 +370,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					A689A4C30FA5DC2FCD38126F = {
+						TestTargetID = 389143862166BD5C8C9665BE;
+					};
 				};
 			};
 			buildConfigurationList = 3BC4A4AFFF822DD78ADE70CF /* Build configuration list for PBXProject "NeonixEditor" */;
@@ -349,6 +391,7 @@
 			targets = (
 				389143862166BD5C8C9665BE /* NeonixEditor */,
 				316770A0D542391D870BD9AA /* NeonixEditorTests */,
+				A689A4C30FA5DC2FCD38126F /* NeonixEditorUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -370,6 +413,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		114BB4A140EBC2E4D897A1DB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B5766DD2EFB94EF86D9C3EB /* EditorNavigationUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		33E5C92D0C9CF3010D96A764 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -426,6 +477,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		81E121B247B104EEFAA7303C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 389143862166BD5C8C9665BE /* NeonixEditor */;
+			targetProxy = 61076F076F317ED391C6C068 /* PBXContainerItemProxy */;
+		};
 		B9D560FAC3CC113D317241A3 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 389143862166BD5C8C9665BE /* NeonixEditor */;
@@ -631,6 +687,40 @@
 			};
 			name = Release;
 		};
+		F7F8585EC24DDE60DE6F1234 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = NeonixEditor;
+			};
+			name = Release;
+		};
+		FE614EA401302298726C2ED2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = NeonixEditor;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -648,6 +738,15 @@
 			buildConfigurations = (
 				0B77AB1E887C0D2B55A9D960 /* Debug */,
 				785B0FFFBC9716FF1CE21825 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		61A8D8F76A7965FC26CAAC86 /* Build configuration list for PBXNativeTarget "NeonixEditorUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE614EA401302298726C2ED2 /* Debug */,
+				F7F8585EC24DDE60DE6F1234 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

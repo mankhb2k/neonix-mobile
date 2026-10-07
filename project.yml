@@ -40,15 +40,30 @@ targets:
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "YES"
 
+  NeonixEditorUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: apps/ios-editor/UITests
+    dependencies:
+      - target: NeonixEditor
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_TARGET_NAME: NeonixEditor
+
 schemes:
   NeonixEditor:
     build:
       targets:
         NeonixEditor: all
         NeonixEditorTests: [test]
+        NeonixEditorUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - NeonixEditorTests
+        - NeonixEditorUITests

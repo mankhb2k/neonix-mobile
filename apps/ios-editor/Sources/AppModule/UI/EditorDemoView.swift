@@ -397,14 +397,24 @@ struct EditorDemoView: View {
         return string
     }
 
-    static func makeDocument(media: DemoMedia, inOption: PresetOption, outOption: PresetOption, effectOption: EffectOption, easingOption: EasingOption) -> EditorDocument {
+    /// `composition`/`frame` default to the original square (1:1) demo
+    /// canvas `EditorDemoView`'s own fixture picker has always used — pass
+    /// both explicitly for a caller that wants a different canvas shape
+    /// (e.g. `ProjectsView`'s 9:16 placeholder project), without changing
+    /// this fixture picker's own default behavior.
+    static func makeDocument(
+        media: DemoMedia, inOption: PresetOption, outOption: PresetOption,
+        effectOption: EffectOption, easingOption: EasingOption,
+        composition: V2Composition = V2Composition(width: 320, height: 320, fps: 30, background: "#101820"),
+        frame: V2Frame = V2Frame(width: 240, height: 320)
+    ) -> EditorDocument {
         let asset = media.asset
         let layer = EditorLayer(
             id: "demo-layer",
             kind: media.layerKind,
             assetId: asset.id,
             fill: nil,
-            frame: V2Frame(width: 240, height: 320),
+            frame: frame,
             timing: V2Timing(start: 0, duration: 2500),
             inPreset: inOption.kind.map { PresetBinding(kind: $0, durationMs: 500, easing: easingOption.bindingValue) },
             outPreset: outOption.kind.map { PresetBinding(kind: $0, durationMs: 500, easing: easingOption.bindingValue) },
@@ -412,7 +422,7 @@ struct EditorDemoView: View {
         )
         return EditorDocument(
             id: "editor-demo",
-            composition: V2Composition(width: 320, height: 320, fps: 30, background: "#101820"),
+            composition: composition,
             assets: [asset],
             layers: [layer]
         )
