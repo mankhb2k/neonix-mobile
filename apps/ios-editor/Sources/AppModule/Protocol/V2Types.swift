@@ -127,6 +127,24 @@ struct V2FontAsset {
     var integrity: String
 }
 
+/// A 3D color LUT (Look-Up Table) — a precomputed grid of input→output RGB
+/// mappings, not a formula (unlike `feColorMatrix`/`feComponentTransfer`,
+/// which can't express an arbitrary, non-linear, cross-channel color grade).
+/// `uri` points to a standard `.cube` file (Adobe/ACES Cube LUT format) —
+/// chosen over a custom format so a LUT a user imports from anywhere online
+/// just works, no conversion step. `dimension` is the cube's edge length
+/// (`LUT_3D_SIZE` in the `.cube` file header, e.g. 17/33/64) — read from the
+/// file itself, not duplicated/guessable from `uri` alone. See
+/// `ui-design-note.md` for the full design discussion (why a new asset kind
+/// instead of inlining the grid data, why `.cube` over a custom format).
+struct V2LutAsset {
+    var id: String
+    var uri: String
+    var dimension: Int
+    var mimeType: String?
+    var integrity: String?
+}
+
 /// Full port of packages/motion-protocol/src/v2/assets.ts as a true
 /// discriminated union (`z.discriminatedUnion("kind", ...)` in the real
 /// schema) — see the atomicity audit this was built from: the earlier
@@ -137,6 +155,7 @@ enum V2Asset: Codable {
     case video(V2VideoAsset)
     case audio(V2AudioAsset)
     case font(V2FontAsset)
+    case lut(V2LutAsset)
 
     var id: String {
         switch self {
@@ -144,6 +163,7 @@ enum V2Asset: Codable {
         case .video(let a): return a.id
         case .audio(let a): return a.id
         case .font(let a): return a.id
+        case .lut(let a): return a.id
         }
     }
 
@@ -153,6 +173,7 @@ enum V2Asset: Codable {
         case .video(let a): return a.uri
         case .audio(let a): return a.uri
         case .font(let a): return a.uri
+        case .lut(let a): return a.uri
         }
     }
 
@@ -162,6 +183,7 @@ enum V2Asset: Codable {
         case .video(let a): return a.mimeType
         case .audio(let a): return a.mimeType
         case .font(let a): return a.mimeType
+        case .lut(let a): return a.mimeType
         }
     }
 
@@ -171,11 +193,12 @@ enum V2Asset: Codable {
         case .video: return "video"
         case .audio: return "audio"
         case .font: return "font"
+        case .lut: return "lut"
         }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, uri, mimeType, width, height, integrity, duration, fps, audio, sampleRate, channels, weight
+        case id, kind, uri, mimeType, width, height, integrity, duration, fps, audio, sampleRate, channels, weight, dimension
     }
 
     init(from decoder: Decoder) throws {
@@ -210,6 +233,11 @@ enum V2Asset: Codable {
                 id: id, uri: uri, mimeType: mimeType,
                 weight: try c.decode(Int.self, forKey: .weight), integrity: try c.decode(String.self, forKey: .integrity)
             ))
+        case "lut":
+            self = .lut(V2LutAsset(
+                id: id, uri: uri, dimension: try c.decode(Int.self, forKey: .dimension),
+                mimeType: mimeType, integrity: integrity
+            ))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown asset kind: \(other)")
         }
@@ -235,6 +263,8 @@ enum V2Asset: Codable {
             try c.encodeIfPresent(a.integrity, forKey: .integrity)
         case .font(let a):
             try c.encode(a.weight, forKey: .weight); try c.encode(a.integrity, forKey: .integrity)
+        case .lut(let a):
+            try c.encode(a.dimension, forKey: .dimension); try c.encodeIfPresent(a.integrity, forKey: .integrity)
         }
     }
 }

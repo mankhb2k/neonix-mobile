@@ -1,7 +1,10 @@
 import Foundation
 
 // Port of packages/motion-protocol/src/v2/filter.ts. The most complex single
-// file in the schema: 17 SVG filter primitives as one discriminated union.
+// file in the schema: 17 SVG filter primitives as one discriminated union,
+// plus one deliberate non-SVG exception, `feColorLUT` (see its own doc
+// comment below) — same kind of named, documented exception as
+// `rangeSelectors` in the text-layer schema, not an oversight.
 // No validation ported (duplicate id/result checks, feColorMatrix's 20-value
 // requirement, feConvolveMatrix kernel/order match, isotropic blur/shadow
 // lockstep) — see ARCHITECTURE.md's "valid by construction" note.
@@ -127,6 +130,14 @@ struct V2FilterPrimitiveBase: Codable {
 
 indirect enum V2FilterPrimitive: Codable {
     case feBlend(V2FilterPrimitiveBase, in2: String, mode: V2BlendMode?)
+    /// Not a real SVG primitive — SVG has no 3D LUT filter. Applies a
+    /// `V2LutAsset` (referenced by `assetId`, resolved against the project's
+    /// `assets[]`) as a full-strength color grade against `in`. Deliberately
+    /// has no intensity/opacity field: a partial-strength filter is an
+    /// Editor-tier concept that compiles to this primitive followed by a
+    /// `feComposite` (`operator: "arithmetic"`) blending this primitive's
+    /// `result` back against the original — see `ui-design-note.md`.
+    case feColorLUT(V2FilterPrimitiveBase, assetId: String)
     case feColorMatrix(V2FilterPrimitiveBase, kind: String, values: [Double]?)
     case feComponentTransfer(V2FilterPrimitiveBase, functions: V2ComponentTransferFunctions)
     case feComposite(V2FilterPrimitiveBase, in2: String, operator_: String?, k1: Double?, k2: Double?, k3: Double?, k4: Double?)
@@ -146,7 +157,7 @@ indirect enum V2FilterPrimitive: Codable {
 
     var base: V2FilterPrimitiveBase {
         switch self {
-        case .feBlend(let b, _, _), .feColorMatrix(let b, _, _), .feComponentTransfer(let b, _),
+        case .feBlend(let b, _, _), .feColorLUT(let b, _), .feColorMatrix(let b, _, _), .feComponentTransfer(let b, _),
              .feComposite(let b, _, _, _, _, _, _), .feConvolveMatrix(let b, _, _, _, _, _, _, _),
              .feDisplacementMap(let b, _, _, _, _), .feDropShadow(let b, _, _, _, _, _), .feFlood(let b, _, _),
              .feGaussianBlur(let b, _), .feImage(let b, _), .feMerge(let b, _), .feMorphology(let b, _, _),
@@ -158,6 +169,7 @@ indirect enum V2FilterPrimitive: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, type, `in`, result, region, colorInterpolationFilters
+        case assetId
         case in2, mode, kind, values, functions, operator_ = "operator", k1, k2, k3, k4
         case order, kernelMatrix, divisor, bias, target, edgeMode, preserveAlpha
         case scale, xChannelSelector, yChannelSelector
@@ -180,6 +192,8 @@ indirect enum V2FilterPrimitive: Codable {
         switch try c.decode(String.self, forKey: .type) {
         case "feBlend":
             self = .feBlend(base, in2: try c.decode(String.self, forKey: .in2), mode: try c.decodeIfPresent(V2BlendMode.self, forKey: .mode))
+        case "feColorLUT":
+            self = .feColorLUT(base, assetId: try c.decode(String.self, forKey: .assetId))
         case "feColorMatrix":
             self = .feColorMatrix(base, kind: try c.decode(String.self, forKey: .kind), values: try c.decodeIfPresent([Double].self, forKey: .values))
         case "feComponentTransfer":
@@ -262,6 +276,8 @@ indirect enum V2FilterPrimitive: Codable {
         switch self {
         case .feBlend(_, let in2, let mode):
             try c.encode("feBlend", forKey: .type); try c.encode(in2, forKey: .in2); try c.encodeIfPresent(mode, forKey: .mode)
+        case .feColorLUT(_, let assetId):
+            try c.encode("feColorLUT", forKey: .type); try c.encode(assetId, forKey: .assetId)
         case .feColorMatrix(_, let kind, let values):
             try c.encode("feColorMatrix", forKey: .type); try c.encode(kind, forKey: .kind); try c.encodeIfPresent(values, forKey: .values)
         case .feComponentTransfer(_, let functions):

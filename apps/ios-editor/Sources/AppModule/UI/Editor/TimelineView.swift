@@ -99,9 +99,20 @@ struct TimelineView: View {
                     // Only the playhead itself stays fixed — the cover cell
                     // and mute button scroll together with the filmstrip as
                     // ordinary content now (see `FilmstripRowView`), not a
-                    // separate always-on-top overlay.
-                    PlayheadOverlay(centerX: centerX, totalHeight: panelHeight)
+                    // separate always-on-top overlay. Spans the panel's full
+                    // height (not just `panelHeight`), same as the drag
+                    // surface below — see this file's own note on why.
+                    PlayheadOverlay(centerX: centerX, totalHeight: geo.size.height)
                 }
+                // The drag/hit-test area covers the *entire* panel height
+                // handed to this view, not just the ruler+tracks' own
+                // `panelHeight` — previously `.contentShape`/`.gesture` sat
+                // on a ZStack whose implicit size was only as tall as its
+                // content, so dragging anywhere in the (usually much
+                // taller) leftover blank space below the filmstrip did
+                // nothing. Scrubbing should work from a touch landing
+                // anywhere in the timeline, not just exactly on the track.
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 2)
@@ -115,7 +126,7 @@ struct TimelineView: View {
                         .onEnded { _ in dragStartTimeMs = nil }
                 )
             }
-            .frame(height: panelHeight)
+            .frame(maxHeight: .infinity)
         }
         // Pinned to the *top* of whatever height `EditorShellView` hands
         // this panel, matching CapCut (ruler+filmstrip sits flush under the

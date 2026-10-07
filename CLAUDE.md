@@ -3,6 +3,73 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## LUT (3D color grade) is a new asset kind + one new, deliberately non-SVG filter primitive
+
+Added 2026-10-07/08, Swift only so far (TS port not yet done — same
+"prototype in Swift first" approach as every other protocol addition here).
+Closes a gap flagged back when `EditorTool.swift`'s 7-tool v1 scope was
+decided: "Bộ lọc" (LUT-style one-tap filter presets) was deferred because
+neither existing filter primitive can express it — `feColorMatrix` is
+linear-only, `feComponentTransfer` is per-channel independent with no
+cross-channel coupling, and a real 3D LUT is an arbitrary, non-linear,
+cross-channel-coupled color grade (a precomputed grid of input→output RGB
+triples, not a formula — the same distinction as a Lightroom color *preset*
+vs. its individual HSL sliders, confirmed with the user in conversation
+before designing anything).
+
+**Design, confirmed with the user one decision at a time before any code:**
+1. **LUT data lives in a new `V2Asset` case, `.lut(V2LutAsset)`** — not
+   inlined into the filter primitive. A realistic 33³ cube is ~36,000 RGB
+   triples; inlining that into every filter using it would bloat the
+   project JSON by hundreds of KB per LUT, the same reasoning that already
+   keeps images/video/fonts as external `uri` references rather than
+   base64 blobs. `V2LutAsset` (`Protocol/V2Types.swift`): `id`, `uri`,
+   `dimension` (the cube's edge length, e.g. 17/33/64 — read from the
+   file's own header, not duplicated/guessable from `uri`), `mimeType?`,
+   `integrity?`.
+2. **`uri` points to a standard `.cube` file (Adobe/ACES Cube LUT format)**,
+   not a custom JSON array format — this was a real product requirement,
+   not just a format preference: the user wants end users to be able to
+   import their own `.cube` files (downloaded from colorists/online) and
+   have them just work, no conversion step. Any renderer can write a
+   `.cube` parser (plain text, well-specified), keeping Protocol V2's
+   "same pixels from the same JSON everywhere" promise intact.
+3. **New filter primitive `feColorLUT`** (`Protocol/V2Filter.swift`) —
+   `V2FilterPrimitiveBase` + `assetId` (references the `.lut` asset), full
+   stop. Not a real SVG primitive (SVG has no 3D LUT filter) — a
+   deliberate, documented, named exception to "the 17 SVG primitives can
+   build anything," the same kind of exception `rangeSelectors` already is
+   in the text-layer schema. **No intensity/opacity field** — confirmed
+   with the user as the better fit for the existing atomicity rule instead
+   of adding a convenience field: `feColorLUT` always applies at full
+   strength, and a partial-strength "Bộ lọc" is an Editor-tier concept that
+   compiles to this primitive followed by an *already-existing*
+   `feComposite` (`operator: "arithmetic"`, `k2`/`k3`) blending the LUT's
+   `result` back against the original by whatever percentage the user
+   picked — exactly the same "decompose into existing atoms instead of
+   adding a field" move the in/out-preset-as-group-layer design already
+   established.
+4. **End users never see the word "LUT"** — in the Editor UI this is just
+   "Bộ lọc" (the nav tool already scoped in `EditorTool.swift`), a
+   thumbnail-driven one-tap preset. "LUT" is purely a Protocol V2/Editor-tier
+   implementation term, same information-hiding precedent as
+   `EffectPresets.swift`'s named presets hiding `V2FilterPrimitive` chains.
+
+**Verification**: `Tests/AppModuleTests/ProtocolCodableTests.swift` (new
+file — every existing test was `KeyframeSamplerTests`, which exercises
+runtime sampling behavior; this is pure `Codable` wire-shape verification,
+so it got its own file rather than being shoehorned in). Covers: a `.lut`
+asset round-trips through JSON with `dimension` intact; a bare `feColorLUT`
+primitive round-trips; and a realistic 2-primitive chain
+(`feColorLUT` → `feComposite`, the intensity-blend shape an Editor-tier
+preset would actually compile to) decodes both primitives in order with
+the right wiring. No rendering exists yet — like `V2MotionPath` before its
+Runtime resolver was built, this is Protocol-only so far; actually drawing
+a LUT-graded frame (e.g. via Core Image's `CIColorCube`/
+`CIColorCubeWithColorSpace`, the native iOS primitive this format was
+chosen to map onto cleanly) is separate, not-yet-started work, as is the
+"Bộ lọc" tool's own picker UI and the `.cube` import flow.
+
 ## A `simctl terminate` + `simctl launch` cycle can silently reuse a warm process — forcing `@State` defaults needs a full simulator reboot to verify reliably
 
 Found 2026-10-07, while verifying a scrubbing-bar change in `EditorShellView`

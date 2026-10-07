@@ -487,6 +487,59 @@ Timeline and the new toolbar. Verified on the simulator: all 3 sections
 (Stage/Titlebar, Timeline, toolbar) render without clipping or overlap, in
 the new CapCut order, light chrome — confirmed by screenshot.
 
+**`rowHeight`/`toolbarHeight` follow-up tweaks (2026-10-07/08)**, both
+direct requests, no further design discussion needed: `TimelineView`'s
+`rowHeight` 40 → 48pt; `toolbarHeight` 64 → 58pt alongside the toolbar's own
+icon size stepping down one SF text style (`.title3` → `.body`).
+
+**"Bộ lọc" added as an 8th tool, 2026-10-08** — once `feColorLUT`/
+`V2LutAsset` existed (see CLAUDE.md), the original reason "Bộ lọc" was
+excluded ("needs a new Protocol V2 primitive") no longer applied. Explicitly
+scoped to **UI only** by the user ("thêm bộ lọc để đủ chưa cần code tính
+năng, mục tiêu là dựng UI trước") — placed after "Hiệu ứng" (matching
+CapCut's own order), `camera.filters` icon, same tap-to-highlight/no-screen
+placeholder behavior as every other tool. "Tuỳ chỉnh" no longer needs to be
+framed as standing in for "Bộ lọc"'s nav slot (that framing predated this
+addition) — they're simply two separate, correctly-distinct tools now, a
+LUT preset picker vs. manual HSL/tone sliders, same as real CapCut.
+
+## Playhead and drag surface now span the timeline's *full* height, not just the ruler+tracks' own content height
+
+Fixed 2026-10-08, direct user report: "phải click đúng vào track film thì
+mới scroll được" — dragging only scrubbed when the touch landed exactly on
+the ruler/filmstrip block, not anywhere else in the timeline panel (the
+usually-much-taller blank space below it, down to the bottom toolbar, did
+nothing), and the playhead line visibly stopped partway down instead of
+reaching the bottom.
+
+**Root cause**: `TimelineView`'s `GeometryReader` had its own
+`.frame(height: panelHeight)` — `panelHeight` is just the ruler+tracks'
+own content height (`rulerHeight + rowsTopPadding + tracksHeight`), almost
+always smaller than the full `timelineHeight` `EditorShellView` actually
+hands this view. Both the playhead (`PlayheadOverlay`'s `totalHeight`) and
+the drag gesture's hit area (`.contentShape(Rectangle())`, which takes its
+size from the `ZStack` it's attached to) were sized off that same
+`panelHeight` — so neither ever reached past the content's own bottom edge,
+even though the panel visually had much more (blank, unreachable) space
+below it.
+
+**Fix**: removed the `GeometryReader`'s own fixed-height frame
+(`.frame(maxHeight: .infinity)` instead, so it fills whatever height its
+parent actually gives it — the real `timelineHeight`), and gave the `ZStack`
+an explicit `.frame(width: geo.size.width, height: geo.size.height,
+alignment: .topLeading)` so both `.contentShape`/`.gesture` and
+`PlayheadOverlay`'s `totalHeight` now read the GeometryReader's full,
+correct height instead of the content-only `panelHeight`. The ruler+tracks
+content itself is unaffected — it still renders at its own `panelHeight`,
+top-aligned, same as before; only the *interactive/visual extent* of the
+playhead and drag surface grew to match the whole panel. Confirmed by
+screenshot: the playhead line now visibly reaches all the way down to the
+bottom toolbar's divider, not stopping partway. The drag area itself can't
+be screenshot-verified (`simctl` has no touch synthesis — see `CLAUDE.md`),
+but it's driven by the exact same `.frame()` call the now-correctly-full-height
+playhead line is, so confirming the line's extent is a reliable proxy for
+confirming the gesture surface's extent too, not a separate guess.
+
 ## Verification
 
 `apps/ios-editor/UITests/EditorNavigationUITests.swift` — real tap-driven

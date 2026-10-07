@@ -42,6 +42,7 @@
 		B46C9336E6D2B2F41DA4EBFB /* 13792197_1080_1920_30fps.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 1E5A25985F8E7BACD08EA547 /* 13792197_1080_1920_30fps.mp4 */; };
 		B8CB407D32CBC96F0B37520E /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E479FCDDF55D7BFDEBDCBB07 /* AccountView.swift */; };
 		B99F437E015CBE6BD02B1E12 /* V2Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */; };
+		BAA228519B237836FF4813D2 /* ProtocolCodableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4282E3502362639603E1394C /* ProtocolCodableTests.swift */; };
 		BE425A2046BCCE37F54321D5 /* PresetCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5F719E12D1DB789F812AD9 /* PresetCompiler.swift */; };
 		C369F348D30392485B57A9F3 /* EditorToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352718A54CD22545D51E267B /* EditorToolbarView.swift */; };
 		CA80A040837A9D6160842A9E /* PathFlattening.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF7066DF59D45CE88F9100FD /* PathFlattening.swift */; };
@@ -90,6 +91,7 @@
 		363E82B76CC991472752F26D /* EditorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTool.swift; sourceTree = "<group>"; };
 		3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeSamplerTests.swift; sourceTree = "<group>"; };
 		405FBF0FBC81893FC1405640 /* V2MotionPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MotionPath.swift; sourceTree = "<group>"; };
+		4282E3502362639603E1394C /* ProtocolCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodableTests.swift; sourceTree = "<group>"; };
 		4CE8EB9E43A85B9C7BA3DFB9 /* flip-3d.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "flip-3d.json"; sourceTree = "<group>"; };
 		5A1331B331FC108EA6F39EFD /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
 		5C5F719E12D1DB789F812AD9 /* PresetCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetCompiler.swift; sourceTree = "<group>"; };
@@ -262,6 +264,7 @@
 			isa = PBXGroup;
 			children = (
 				3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */,
+				4282E3502362639603E1394C /* ProtocolCodableTests.swift */,
 			);
 			name = AppModuleTests;
 			path = "apps/ios-editor/Tests/AppModuleTests";
@@ -475,6 +478,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9F2A51D3465DE2BED173A791 /* KeyframeSamplerTests.swift in Sources */,
+				BAA228519B237836FF4813D2 /* ProtocolCodableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
