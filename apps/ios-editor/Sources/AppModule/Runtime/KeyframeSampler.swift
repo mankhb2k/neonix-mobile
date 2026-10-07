@@ -1,6 +1,12 @@
 import Foundation
 import UIKit
 
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 /// Resolves a layer-track keyframe time to an absolute layer-local
 /// millisecond offset. `boundMs` is the owning layer's `timing.duration` for
 /// an ordinary track, or `track.animation.durationMs` (the length of one
@@ -39,6 +45,25 @@ func cubicBezierEase(x1: Double, y1: Double, x2: Double, y2: Double, x: Double) 
     return bezier(t, y1, y2)
 }
 
+/// CSS `steps()` timing function — a hard on/off switch, no blending
+/// between keyframe values. `jump-end` (the schema default) holds the
+/// starting value for the whole segment and only flips at the very end
+/// (which the caller's own `localMs >= last.time` boundary check, not this
+/// function, is what actually returns the end value); `jump-start` flips
+/// at the start of each step instead. Used for an "instant" per-character
+/// reveal (no fade) — see `rangeSelectors`' `reveal: "instant"` in
+/// `PresetCompiler.swift`.
+func stepEase(count: Int, position: String, t: Double) -> Double {
+    let steps = max(count, 1)
+    let stepIndex = min(Int(t * Double(steps)), steps - 1)
+    switch position {
+    case "jump-start", "jump-both":
+        return Double(stepIndex + 1) / Double(steps)
+    default: // "jump-end", "jump-none"
+        return Double(stepIndex) / Double(steps)
+    }
+}
+
 /// Interpolates a single track's value at local time `localMs` (already
 /// resolved relative to the layer, i.e. the loop cycle math below has
 /// already been applied by the caller). Keyframe times here are resolved
@@ -62,9 +87,12 @@ private func interpolate(track: V2Track, boundMs: Double, atMs localMs: Double) 
         switch from.easing {
         case .some(.cubicBezier(let x1, let y1, let x2, let y2)):
             eased = cubicBezierEase(x1: x1, y1: y1, x2: x2, y2: y2, x: t)
-        case .none, .some(.linear), .some(.step), .some(.spring):
-            // `step`/`spring` are a known gap — fall back to linear at sample
-            // time (see V2Easing's doc comment).
+        case .some(.step(let count, let position)):
+            eased = stepEase(count: count ?? 1, position: position ?? "jump-end", t: t)
+        case .none, .some(.linear), .some(.spring):
+            // `spring` is a known gap — falls back to linear at sample time
+            // (see V2Easing's doc comment). `.none`/`.linear` are linear by
+            // definition.
             eased = t
         }
         return from.value + (to.value - from.value) * eased
@@ -131,16 +159,46 @@ struct ResolvedLayerFrame {
     var opacity: Double
     var translateX: Double
     var translateY: Double
+    /// Depth — no own 2D position, only feeds the perspective-based
+    /// apparent-scale approximation in `PreviewCanvas.swift` (real z-axis
+    /// depth compositing isn't implemented; this matches how CSS
+    /// `translateZ` reads on a flat element outside a `preserve-3d`
+    /// context).
+    var translateZ: Double
     var scaleX: Double
     var scaleY: Double
+    /// Stored for round-trip fidelity only — a flat 2D layer with no
+    /// `preserve-3d` child depth has no own visual use for its *own*
+    /// z-axis scale (matches real CSS/After Effects semantics: `scale.z`
+    /// only matters for 3D content that itself extends in z). Not a
+    /// renderer gap.
+    var scaleZ: Double
+    /// Degrees.
+    var skewX: Double
+    /// Degrees.
+    var skewY: Double
+    /// Pivot offset from the layer's own center, in local units — see
+    /// CLAUDE.md's "Transform anchor is an offset from center" note.
+    var anchorX: Double
+    var anchorY: Double
+    var anchorZ: Double
     /// Degrees.
     var rotateX: Double
     /// Degrees.
     var rotateY: Double
     /// Degrees.
     var rotateZ: Double
-    /// CSS-style perspective distance for `rotateX`/`rotateY`, if authored.
+    /// CSS-style perspective distance for `rotateX`/`rotateY`/`translateZ`,
+    /// if authored.
     var perspective: Double?
+    /// Additional position/rotation from `layer.motion` (CSS `offset-path`),
+    /// already resolved for this frame by `MotionPathResolver` — `0`/`0`/`0`
+    /// (a no-op) when the layer has no `motion`. Added on top of
+    /// `translateX`/`translateY`/`rotateZ` the same way those are added;
+    /// see CLAUDE.md's motion-path note.
+    var motionDx: Double = 0
+    var motionDy: Double = 0
+    var motionRotation: Double = 0
     /// Layer-local elapsed time, clamped to `[0, timing.duration]`. Video
     /// layers use this to pick which source frame to extract.
     var elapsedMs: Double
@@ -163,31 +221,91 @@ struct ResolvedTextRun {
     var fontFamily: String
     var fontSize: Double
     var color: V2Color
+    /// Always `1` unless a `rangeSelectors` stagger entry applies to this
+    /// run's character — see `resolveTextRuns`.
+    var opacity: Double = 1
+    /// Degrees — from `V2TextChunk.rotate[i]`, always `0` otherwise.
+    var rotation: Double = 0
 }
 
-/// Flattens a text layer's already-shaped chunks/spans into drawable runs.
-/// Text layers in this app are static (no track-driven animation of text
-/// content yet — a known, separate gap from protocol shape parity), so this
-/// only needs the layer's own payload, not `atMs`.
-private func resolveTextRuns(_ payload: V2TextLayerPayload) -> [ResolvedTextRun] {
+/// Which stagger entry (if any) a given absolute source-text character
+/// index falls under, plus its 0-based position within that selector's own
+/// range (already reordered for `direction: "reverse"`) and the range's
+/// total unit count. `nil` when no `unit: "character"` selector covers it —
+/// `unit: "word"` is reserved but not implemented, matching the real
+/// schema's own fail-closed note, so word selectors are simply skipped here.
+private func staggerPosition(forSourceIndex index: Int, in selectors: [V2TextRangeSelector], totalLength: Int) -> (selector: V2TextRangeSelector, position: Int)? {
+    for selector in selectors where selector.unit == "character" {
+        let start: Int
+        let end: Int
+        switch selector.range {
+        case .all: start = 0; end = totalLength
+        case .range(let r): start = r.start; end = r.end
+        }
+        guard index >= start, index < end else { continue }
+        let total = end - start
+        let forward = index - start
+        let position = (selector.stagger.direction == "reverse") ? (total - 1 - forward) : forward
+        return (selector, position)
+    }
+    return nil
+}
+
+/// Flattens a text layer's already-shaped chunks/spans into drawable runs,
+/// splitting a span into one run per character whenever per-character data
+/// actually applies to it — either a `rangeSelectors` stagger entry (see
+/// CLAUDE.md's "`rangeSelectors` stays in Protocol V2" note — the Runtime
+/// interpreting that compact, unexpanded intent directly, in place of a
+/// separate motion-compiler stage) or the chunk's own `dx`/`dy`/`rotate`
+/// arrays (already fully atomic literal numbers — no compiler-side
+/// expansion needed, just reading them). A chunk with none of these stays
+/// one run per span, same as before.
+private func resolveTextRuns(_ payload: V2TextLayerPayload, layer: V2Layer, atMs: Double) -> [ResolvedTextRun] {
     let utf16 = Array(payload.source.text.utf16)
+    let selectors = payload.rangeSelectors ?? []
     var runs: [ResolvedTextRun] = []
+
     for chunk in payload.chunks {
         guard let x = chunk.x?.first?.numericValue, let baselineY = chunk.y?.first?.numericValue else { continue }
+        let chunkStart = chunk.sourceRange.start
+        let chunkEnd = min(chunk.sourceRange.end, utf16.count)
+        guard chunkStart < chunkEnd else { continue }
+        let lineText = String(decoding: utf16[chunkStart..<chunkEnd], as: UTF16.self)
+        let hasPerCharacterOffsets = chunk.dx != nil || chunk.dy != nil || chunk.rotate != nil
+
         for span in chunk.spans {
             let start = span.sourceRange.start
             let end = min(span.sourceRange.end, utf16.count)
             guard start < end, start >= 0 else { continue }
-            let substring = String(decoding: utf16[start..<end], as: UTF16.self)
             let fontFamily = span.font.families.first ?? "Helvetica"
             let fontSize = span.font.size.numericValue
             let font = TextLayoutCompiler.resolveFont(family: fontFamily, size: fontSize)
             let topY = baselineY - Double(font.ascender)
-            runs.append(ResolvedTextRun(
-                text: substring, x: x, y: topY,
-                fontFamily: fontFamily, fontSize: fontSize,
-                color: span.fill?.flatColor ?? "#FFFFFFFF"
-            ))
+            let color = span.fill?.flatColor ?? "#FFFFFFFF"
+
+            let staggered = !selectors.isEmpty && (start..<end).contains { staggerPosition(forSourceIndex: $0, in: selectors, totalLength: utf16.count) != nil }
+            guard staggered || hasPerCharacterOffsets else {
+                let substring = String(decoding: utf16[start..<end], as: UTF16.self)
+                runs.append(ResolvedTextRun(text: substring, x: x, y: topY, fontFamily: fontFamily, fontSize: fontSize, color: color))
+                continue
+            }
+
+            for sourceIndex in start..<end {
+                let localIndex = sourceIndex - chunkStart
+                let character = String(decoding: [utf16[sourceIndex]], as: UTF16.self)
+                let extraDx = chunk.dx?[safe: localIndex]?.numericValue ?? 0
+                let extraDy = chunk.dy?[safe: localIndex]?.numericValue ?? 0
+                let rotation = chunk.rotate?[safe: localIndex] ?? 0
+                let charX = x + TextLayoutCompiler.offsetForCharacter(in: lineText, font: font, localIndex: localIndex) + extraDx
+                var opacity = 1.0
+                if let (selector, position) = staggerPosition(forSourceIndex: sourceIndex, in: selectors, totalLength: utf16.count) {
+                    let elapsedMs = atMs - layer.timing.start
+                    let delayMs = Double(position) * selector.stagger.perUnitDelayMs
+                    let localMs = min(max(elapsedMs - delayMs, 0), layer.timing.duration)
+                    opacity = interpolate(track: selector.track, boundMs: layer.timing.duration, atMs: localMs)
+                }
+                runs.append(ResolvedTextRun(text: character, x: charX, y: topY + extraDy, fontFamily: fontFamily, fontSize: fontSize, color: color, opacity: opacity, rotation: rotation))
+            }
         }
     }
     return runs
@@ -208,37 +326,88 @@ func sampleLayer(_ layer: V2Layer, atMs: Double) -> ResolvedLayerFrame {
         opacity: layer.opacity ?? 1,
         translateX: layer.transform.translate.x,
         translateY: layer.transform.translate.y,
+        translateZ: layer.transform.translate.z,
         scaleX: layer.transform.scale.x,
         scaleY: layer.transform.scale.y,
+        scaleZ: layer.transform.scale.z,
+        skewX: layer.transform.skew.x,
+        skewY: layer.transform.skew.y,
+        anchorX: layer.transform.anchor.x,
+        anchorY: layer.transform.anchor.y,
+        anchorZ: layer.transform.anchor.z,
         rotateX: layer.transform.rotate.x,
         rotateY: layer.transform.rotate.y,
         rotateZ: layer.transform.rotate.z,
         perspective: layer.transform.perspective,
         elapsedMs: min(max(atMs - layer.timing.start, 0), layer.timing.duration),
-        textRuns: layer.textPayload.map(resolveTextRuns)
+        textRuns: layer.textPayload.map { resolveTextRuns($0, layer: layer, atMs: atMs) }
     )
+
+    var motionOffsetDistance = layer.motion?.offsetDistance ?? 0
+    // Not itself animatable — `COMMON_NUMBER_PATHS` only covers
+    // `offsetRotate.angle`, not `.mode` (a string enum, not a number).
+    let motionOffsetRotateMode = layer.motion?.offsetRotate?.mode ?? "auto"
+    var motionOffsetRotateAngle = layer.motion?.offsetRotate?.angle ?? 0
+    var motionOffsetAnchorX = layer.motion?.offsetAnchor?.x ?? 0
+    var motionOffsetAnchorY = layer.motion?.offsetAnchor?.y ?? 0
 
     for track in layer.tracks ?? [] {
         switch track.path {
         case "opacity":
             frame.opacity = sample(track: track, layer: layer, atMs: atMs)
+        case "frame.width":
+            frame.frameWidth = sample(track: track, layer: layer, atMs: atMs)
+        case "frame.height":
+            frame.frameHeight = sample(track: track, layer: layer, atMs: atMs)
         case "transform.translate.x":
             frame.translateX = sample(track: track, layer: layer, atMs: atMs)
         case "transform.translate.y":
             frame.translateY = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.translate.z":
+            frame.translateZ = sample(track: track, layer: layer, atMs: atMs)
         case "transform.scale.x":
             frame.scaleX = sample(track: track, layer: layer, atMs: atMs)
         case "transform.scale.y":
             frame.scaleY = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.scale.z":
+            frame.scaleZ = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.skew.x":
+            frame.skewX = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.skew.y":
+            frame.skewY = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.anchor.x":
+            frame.anchorX = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.anchor.y":
+            frame.anchorY = sample(track: track, layer: layer, atMs: atMs)
+        case "transform.anchor.z":
+            frame.anchorZ = sample(track: track, layer: layer, atMs: atMs)
         case "transform.rotate.x":
             frame.rotateX = sample(track: track, layer: layer, atMs: atMs)
         case "transform.rotate.y":
             frame.rotateY = sample(track: track, layer: layer, atMs: atMs)
         case "transform.rotate.z":
             frame.rotateZ = sample(track: track, layer: layer, atMs: atMs)
+        case "motion.offsetDistance":
+            motionOffsetDistance = sample(track: track, layer: layer, atMs: atMs)
+        case "motion.offsetRotate.angle":
+            motionOffsetRotateAngle = sample(track: track, layer: layer, atMs: atMs)
+        case "motion.offsetAnchor.x":
+            motionOffsetAnchorX = sample(track: track, layer: layer, atMs: atMs)
+        case "motion.offsetAnchor.y":
+            motionOffsetAnchorY = sample(track: track, layer: layer, atMs: atMs)
         default:
             continue
         }
+    }
+
+    if let motion = layer.motion {
+        let resolved = MotionPathResolver.resolve(
+            motion: motion, offsetDistance: motionOffsetDistance, offsetRotateMode: motionOffsetRotateMode,
+            offsetRotateAngle: motionOffsetRotateAngle, offsetAnchorX: motionOffsetAnchorX, offsetAnchorY: motionOffsetAnchorY
+        )
+        frame.motionDx = resolved.dx
+        frame.motionDy = resolved.dy
+        frame.motionRotation = resolved.rotationDegrees
     }
 
     return frame

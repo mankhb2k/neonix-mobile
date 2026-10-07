@@ -1,10 +1,46 @@
 import AVFoundation
 import SwiftUI
 
+/// One node of the parent/child layer tree, built from the flat
+/// `parentLayerId`-linked `layers[]` array — see `LayerTree.build`.
+private struct LayerTreeNode {
+    var layer: V2Layer
+    var children: [LayerTreeNode]
+}
+
+/// Protocol V2 stores layers as a flat array; only `parentLayerId`
+/// expresses the tree (see `README.md`'s "`layers[]` is a flat array
+/// representing a tree" note). This rebuilds the actual tree once per
+/// render so `PreviewCanvas` can render it as real nested SwiftUI views —
+/// see that type's doc comment for why nesting (not manual matrix math)
+/// is how parent→child transform/opacity composition works here.
+private enum LayerTree {
+    static func build(from layers: [V2Layer]) -> [LayerTreeNode] {
+        let byParent = Dictionary(grouping: layers, by: { $0.parentLayerId })
+        func node(for layer: V2Layer) -> LayerTreeNode {
+            let kids = (byParent[layer.id] ?? []).sorted { $0.order < $1.order }.map(node(for:))
+            return LayerTreeNode(layer: layer, children: kids)
+        }
+        return (byParent[nil] ?? []).sorted { $0.order < $1.order }.map(node(for:))
+    }
+}
+
+/// Renders one `V2Project` composition at `atMs`.
+///
+/// Layers nest via `parentLayerId` (`type: "group"` layers have no visual
+/// content of their own — see CLAUDE.md's "Group layers compose
+/// transform/opacity by real view nesting" note). This renders that tree as
+/// genuinely nested SwiftUI views, one recursive `LayerNodeView` per node:
+/// a group's own `.offset`/`.scaleEffect`/`.rotationEffect`/`.opacity`
+/// modifiers are applied to a container that the group's *children* render
+/// inside, so SwiftUI's own layout engine composes parent and child
+/// transforms correctly (matching nested SVG `<g>`/CSS transform
+/// semantics) — no manual matrix multiplication needed here.
 struct PreviewCanvas: View {
     let composition: V2Composition
     let assets: [V2Asset]
-    let frames: [ResolvedLayerFrame]
+    let layers: [V2Layer]
+    let atMs: Double
     /// Set only while a video layer is actively playing (see
     /// `EditorDemoView`): that one layer renders the live `AVPlayer` output
     /// instead of an extracted still frame. Paused/scrubbing, or the static
@@ -12,17 +48,11 @@ struct PreviewCanvas: View {
     var activePlayer: (assetId: String, player: AVPlayer)? = nil
 
     var body: some View {
+        let tree = LayerTree.build(from: layers)
         ZStack {
             Color(hex: composition.background)
-            ForEach(Array(frames.enumerated()), id: \.offset) { _, frame in
-                LayerContentView(frame: frame, asset: assets.first { $0.id == frame.assetId }, activePlayer: activePlayer)
-                    .frame(width: frame.frameWidth * frame.scaleX, height: frame.frameHeight * frame.scaleY)
-                    .clipped()
-                    .rotation3DEffect(.degrees(frame.rotateX), axis: (x: 1, y: 0, z: 0), perspective: frame.perspective ?? 1)
-                    .rotation3DEffect(.degrees(frame.rotateY), axis: (x: 0, y: 1, z: 0), perspective: frame.perspective ?? 1)
-                    .rotationEffect(.degrees(frame.rotateZ))
-                    .opacity(frame.opacity)
-                    .offset(x: frame.translateX, y: frame.translateY)
+            ForEach(tree, id: \.layer.id) { node in
+                LayerNodeView(node: node, atMs: atMs, assets: assets, activePlayer: activePlayer)
             }
         }
         .frame(width: composition.width, height: composition.height)
@@ -30,20 +60,100 @@ struct PreviewCanvas: View {
     }
 }
 
+/// One layer's own transform/opacity modifiers, applied once, wrapping
+/// either its drawable content (leaf layers) or its children (`"group"`
+/// layers only — see `README.md`: "only a group may be a parent").
+private struct LayerNodeView: View {
+    let node: LayerTreeNode
+    let atMs: Double
+    let assets: [V2Asset]
+    let activePlayer: (assetId: String, player: AVPlayer)?
+
+    var body: some View {
+        let frame = sampleLayer(node.layer, atMs: atMs)
+        Group {
+            if node.layer.type == "group" {
+                ZStack {
+                    ForEach(node.children, id: \.layer.id) { child in
+                        LayerNodeView(node: child, atMs: atMs, assets: assets, activePlayer: activePlayer)
+                    }
+                }
+            } else {
+                LayerContentView(frame: frame, asset: assets.first { $0.id == frame.assetId }, activePlayer: activePlayer)
+                    .frame(width: frame.frameWidth, height: frame.frameHeight)
+                    .clipped()
+            }
+        }
+        // `anchor` is an offset from the layer's own center (see CLAUDE.md's
+        // "Transform anchor is an offset from center" note), converted here
+        // to the `UnitPoint` every one of SwiftUI's own anchor parameters
+        // expects (0...1 fraction of the view's native, unscaled bounds).
+        .scaleEffect(x: frame.scaleX * depthScale(frame), y: frame.scaleY * depthScale(frame), anchor: anchorPoint(frame))
+        .transformEffect(skewTransform(frame))
+        .rotation3DEffect(.degrees(frame.rotateX), axis: (x: 1, y: 0, z: 0), anchor: anchorPoint(frame), anchorZ: frame.anchorZ, perspective: frame.perspective ?? 1)
+        .rotation3DEffect(.degrees(frame.rotateY), axis: (x: 0, y: 1, z: 0), anchor: anchorPoint(frame), anchorZ: frame.anchorZ, perspective: frame.perspective ?? 1)
+        .rotationEffect(.degrees(frame.rotateZ), anchor: anchorPoint(frame))
+        // `layer.motion` (CSS `offset-path`) — a no-op (`0`/`0`/`0`) for any
+        // layer without one. Added on top of the ordinary transform, not in
+        // place of it, matching how `ResolvedLayerFrame.motionDx/Dy/Rotation`
+        // are documented to combine (see CLAUDE.md's motion-path note).
+        .rotationEffect(.degrees(frame.motionRotation), anchor: anchorPoint(frame))
+        .opacity(frame.opacity)
+        .offset(x: frame.translateX + frame.motionDx, y: frame.translateY + frame.motionDy)
+    }
+
+    private func anchorPoint(_ frame: ResolvedLayerFrame) -> UnitPoint {
+        guard frame.frameWidth > 0, frame.frameHeight > 0 else { return .center }
+        return UnitPoint(x: 0.5 + frame.anchorX / frame.frameWidth, y: 0.5 + frame.anchorY / frame.frameHeight)
+    }
+
+    /// 2D shear — `CGAffineTransform`'s own native skew representation, via
+    /// `.transformEffect(_:)` (the one SwiftUI modifier that takes a raw
+    /// affine matrix), since there's no dedicated `.skewEffect()`.
+    private func skewTransform(_ frame: ResolvedLayerFrame) -> CGAffineTransform {
+        guard frame.skewX != 0 || frame.skewY != 0 else { return .identity }
+        let skewXRadians = frame.skewX * .pi / 180
+        let skewYRadians = frame.skewY * .pi / 180
+        return CGAffineTransform(a: 1, b: tan(skewYRadians), c: tan(skewXRadians), d: 1, tx: 0, ty: 0)
+    }
+
+    /// Approximates `translate.z` the way a flat (non-`preserve-3d`) CSS
+    /// element reads it: moving "closer"/"further" along z, under a given
+    /// `perspective`, is visually indistinguishable from scaling by
+    /// `perspective / (perspective - z)` — the same relation this app
+    /// already leans on for `rotateX`/`rotateY`. Only applies once
+    /// `perspective` is actually authored, matching that field's own
+    /// "only meaningful once a 3D field is non-zero" rule; otherwise
+    /// `translate.z` has no own visual effect here (same as real CSS
+    /// outside a 3D context).
+    private func depthScale(_ frame: ResolvedLayerFrame) -> Double {
+        guard let perspective = frame.perspective, frame.translateZ != 0 else { return 1 }
+        let denominator = perspective - frame.translateZ
+        guard denominator > 0.0001 else { return 1 }
+        return perspective / denominator
+    }
+}
+
 /// Renders one layer's own content (before the shared transform/opacity
-/// modifiers `PreviewCanvas` applies): a flat color for a shape, or a still
-/// frame for image/video — see `VideoFrameCache` for why video uses a
-/// synchronously-extracted frame rather than `AVPlayer`.
+/// modifiers `LayerNodeView` applies): a flat color for a shape, or a still
+/// frame for image/video — see `VideoFrameCache` for why video uses an
+/// asynchronously-extracted frame rather than `AVPlayer` while paused.
 private struct LayerContentView: View {
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
     let activePlayer: (assetId: String, player: AVPlayer)?
 
+    /// Last successfully decoded scrub frame. Kept on screen (not cleared)
+    /// while a new one is still loading, so scrubbing shows the previous
+    /// frame instead of a flash of gray between every tick — see
+    /// `VideoFrameCache`'s doc comment.
+    @State private var cachedVideoImage: UIImage?
+
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
         switch frame.kind {
         case "image":
-            if let asset, let uiImage = bundledImage(filename: asset.uri) {
+            if let asset, let uiImage = BundledImageCache.image(filename: asset.uri) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
@@ -53,11 +163,20 @@ private struct LayerContentView: View {
         case "video":
             if let asset, let activePlayer, activePlayer.assetId == asset.id {
                 VideoPlayerLayerView(player: activePlayer.player, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
-            } else if let asset, let url = bundledURL(filename: asset.uri),
-               let uiImage = VideoFrameCache.shared.frame(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
+            } else if let asset, let url = bundledURL(filename: asset.uri) {
+                Group {
+                    if let cachedVideoImage {
+                        Image(uiImage: cachedVideoImage)
+                            .resizable()
+                            .aspectRatio(contentMode: contentMode)
+                    } else {
+                        Color.gray
+                    }
+                }
+                .task(id: VideoFrameCache.scrubBucket(forMs: frame.elapsedMs)) {
+                    guard let image = await VideoFrameCache.shared.frame(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000) else { return }
+                    cachedVideoImage = image
+                }
             } else {
                 Color.gray
             }
@@ -65,7 +184,7 @@ private struct LayerContentView: View {
             // `.fixedSize()` lets each line report its true (possibly
             // overflowing, e.g. `wrap: "none"`) width upward — without an
             // explicit `alignment: .topLeading` frame right here, the next
-            // fixed-size `.frame(width:height:)` up in `PreviewCanvas`
+            // fixed-size `.frame(width:height:)` up in `LayerNodeView`
             // would silently *center* that oversized content instead of
             // anchoring it at the resolved `x`/`y` this view already
             // computed, which would make every `x`/`y` below meaningless.
@@ -74,7 +193,9 @@ private struct LayerContentView: View {
                     Text(run.text)
                         .font(.custom(run.fontFamily, size: run.fontSize))
                         .foregroundColor(Color(hex: run.color))
+                        .opacity(run.opacity)
                         .fixedSize()
+                        .rotationEffect(.degrees(run.rotation))
                         .offset(x: run.x, y: run.y)
                 }
             }
@@ -86,18 +207,31 @@ private struct LayerContentView: View {
     }
 }
 
-/// Resources bundled via SwiftPM's `.process()` rule are flattened to the
-/// bundle root (see `loadFixture` in `ContentView.swift`), so lookup is by
-/// filename alone, split into base name + extension.
+/// Resources (`project.yml`'s `buildPhase: resources` on
+/// `Sources/AppModule/Resources`) land flattened in the app's main bundle
+/// root, so lookup is by filename alone, split into base name + extension.
 func bundledURL(filename: String) -> URL? {
     let parts = filename.split(separator: ".", maxSplits: 1)
     guard parts.count == 2 else { return nil }
-    return Bundle.module.url(forResource: String(parts[0]), withExtension: String(parts[1]))
+    return Bundle.main.url(forResource: String(parts[0]), withExtension: String(parts[1]))
 }
 
-private func bundledImage(filename: String) -> UIImage? {
-    guard let url = bundledURL(filename: filename), let image = UIImage(contentsOfFile: url.path) else { return nil }
-    return image
+/// Decodes each bundled image exactly once and reuses it. Unlike a video
+/// frame, a static image layer's content never depends on the scrub
+/// position — the old code called `UIImage(contentsOfFile:)` (disk read +
+/// decode) directly from `body`, meaning every single slider tick re-read
+/// and re-decoded the same file from scratch, which is what made scrubbing
+/// a photo layer feel janky too, same symptom as the video case but a
+/// different cause (needless repeated work, not a slow one-off operation).
+private enum BundledImageCache {
+    private static var cache: [String: UIImage] = [:]
+
+    static func image(filename: String) -> UIImage? {
+        if let cached = cache[filename] { return cached }
+        guard let url = bundledURL(filename: filename), let image = UIImage(contentsOfFile: url.path) else { return nil }
+        cache[filename] = image
+        return image
+    }
 }
 
 extension Color {

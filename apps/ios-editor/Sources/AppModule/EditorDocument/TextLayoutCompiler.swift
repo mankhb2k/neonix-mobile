@@ -82,4 +82,18 @@ enum TextLayoutCompiler {
     static func resolveFont(family: String, size: Double) -> UIFont {
         UIFont(name: family, size: CGFloat(size)) ?? UIFont.systemFont(ofSize: CGFloat(size))
     }
+
+    /// The x offset (from the start of `lineText`) of the character at
+    /// `localIndex` (UTF-16, relative to `lineText`'s own start) once shaped
+    /// with `font` — used by the Runtime to place individually staggered
+    /// characters when a `rangeSelectors` entry applies (see
+    /// `KeyframeSampler.swift`). Real Core Text per-glyph measurement, same
+    /// as the line-breaking above — not an approximation (e.g. not a flat
+    /// `index * averageCharWidth`), so staggered characters land exactly
+    /// where the unstaggered line would have drawn them, including kerning.
+    static func offsetForCharacter(in lineText: String, font: UIFont, localIndex: Int) -> Double {
+        let attributed = NSAttributedString(string: lineText, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attributed)
+        return Double(CTLineGetOffsetForStringIndex(line, localIndex, nil))
+    }
 }

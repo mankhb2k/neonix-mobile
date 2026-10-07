@@ -150,9 +150,11 @@ struct V2TextLayout: Codable {
     var contentOffsetY: Double?
 }
 
-/// Authoring shorthand for a typewriter/stagger effect, expanded at compile
-/// time by `motion-compiler` into real per-character spans and tracks (not
-/// ported — this app doesn't implement that expansion yet).
+/// Authoring shorthand for a typewriter/stagger effect. Kept compact and
+/// unexpanded in Protocol V2 on purpose (see CLAUDE.md's "`rangeSelectors`
+/// stays in Protocol V2" note) — this app's Runtime (`KeyframeSampler.swift`)
+/// interprets it directly at sample time rather than expanding it into real
+/// per-character spans/tracks ahead of time.
 struct V2TextRangeSelectorStagger: Codable {
     var perUnitDelayMs: Double
     /// Mirrors a Zod `.default("forward")` field — optional here, caller

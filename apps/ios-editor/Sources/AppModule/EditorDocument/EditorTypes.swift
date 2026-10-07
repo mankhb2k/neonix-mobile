@@ -14,9 +14,18 @@ enum PresetDirection: String, Codable {
     case out
 }
 
+/// "linear" | "easeIn" | "easeOut" | "easeInOut" — a named shorthand for a
+/// specific `V2Easing.cubicBezier(x1:y1:x2:y2:)` curve (matching the
+/// standard CSS `ease-in`/`ease-out`/`ease-in-out` constants), resolved by
+/// `PresetCompiler` before anything becomes Protocol V2 JSON — see
+/// CLAUDE.md's "Protocol V2 must stay atomic" rule: the name is an
+/// Editor-tier convenience, Protocol V2 only ever sees the literal
+/// cubic-bezier numbers (already atomic there, nothing to change in the
+/// schema for this).
 struct PresetBinding: Codable {
     var kind: PresetKind
     var durationMs: Double
+    var easing: String?
 }
 
 struct EditorLayer: Codable {
