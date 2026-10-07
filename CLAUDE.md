@@ -3,6 +3,45 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## A `simctl terminate` + `simctl launch` cycle can silently reuse a warm process — forcing `@State` defaults needs a full simulator reboot to verify reliably
+
+Found 2026-10-07, while verifying a scrubbing-bar change in `EditorShellView`
+by the established pattern in this file (temporarily force a `@State`
+default, rebuild, install, launch, screenshot, revert). This time the
+screenshot kept showing stale UI — wrong tab selected, old bar width — even
+after confirming via `strings` on the compiled object file that the new
+source was genuinely compiled, and even after a full `rm -rf` of
+`DerivedData` and clean rebuild.
+
+**Root cause, in two parts:**
+1. This project's Debug build (for the iOS Simulator destination this
+   session always uses) produces a `NeonixEditor.debug.dylib` alongside a
+   thin `NeonixEditor` stub executable — Xcode's "debug executable as
+   library" mechanism (built to support Previews' dynamic code injection).
+   The stub's own entry point is literally `___debug_blank_executor_main`;
+   it loads the real app code from the dylib at runtime. **`strings`/`grep`
+   on the main `NeonixEditor` binary proves nothing** — the real Swift
+   string literals/view code live in `NeonixEditor.debug.dylib`, a
+   separate file in the same `.app` bundle. (Earlier verification passes
+   in this session happened not to hit this, by coincidence of what was
+   being checked.)
+2. Separately, and more importantly: a plain `xcrun simctl terminate
+   <bundle-id>` followed by `xcrun simctl launch <bundle-id>`, run in quick
+   succession while iterating, does **not** reliably produce a true cold
+   process start on this simulator/Xcode combination — a forced `@State`
+   default (e.g. a tab `selection` or `isFullscreen` initial value) kept
+   reading as its *old* value across several such cycles, even once the
+   dylib itself was confirmed (via `strings`) to contain the new code.
+
+**Fix: `xcrun simctl shutdown <udid>` then `xcrun simctl boot <udid>`** (a
+full simulator reboot, not just an app terminate/relaunch) before trusting
+any screenshot taken to verify a forced `@State` default. This reliably
+produced a genuinely fresh process every time it was tried this session,
+immediately resolving stale-looking screenshots with no further source
+changes. Add this reboot step to the existing "temporarily force a
+`@State` default to verify" workflow documented elsewhere in this file —
+don't assume `terminate`+`launch` alone is equivalent to a cold start.
+
 ## `simctl` cannot synthesize real taps — a real `XCUITest` target caught a bug that build/screenshot verification never could
 
 Added 2026-10-07, `apps/ios-editor/UITests/` (`NeonixEditorUITests` target in

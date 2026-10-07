@@ -1,106 +1,8 @@
 import SwiftUI
 
-/// The real Editor screen's **shell only** — a nav bar (`Huỷ`/`Xuất`), then
-/// 3 vertically-stacked sections: **Stage** (preview canvas), **Titlebar**
-/// (`controlsRow` — fullscreen left, play/pause center, undo/redo right),
-/// **Timeline** (`TimelineView.swift`). The titlebar's structural role is to
-/// sit *between*, separating stage from timeline — not a top-of-screen nav
-/// bar (that's the separate `Huỷ`/`Xuất` bar above all 3).
-///
-/// **Height split, decided in conversation 2026-10-07**: the titlebar is a
-/// **fixed height**, not a fraction of screen height — matching how every
-/// real iOS toolbar/tab bar works (constant ~56-64pt regardless of device
-/// size; it holds icons, not content that benefits from more room on a
-/// bigger screen). Its actual height is *measured*, not hardcoded
-/// (`TitlebarHeightKey`, a `PreferenceKey` read off `controlsRow`'s real
-/// rendered size), so this stays correct if the row's padding/font ever
-/// changes.
-///
-/// **Stage is a fixed square sized purely from screen width — `squareSide =
-/// geo.size.width`, height derived by squaring that, not by fitting into
-/// whatever height happens to be left over.** **Timeline is no longer a
-/// fixed 33%** — redesigned 2026-10-07, replacing the original version
-/// where `timelineHeight` was computed first (33% of post-titlebar space)
-/// and Stage got whatever remained. Now Stage is computed *first*, driven
-/// only by width, and **Timeline gets whatever's left** after Titlebar +
-/// Stage + the divider's ~1pt are subtracted from the total — the reverse
-/// dependency order from before. The video renders at `squareSide * 0.96`
-/// within the square, so any project aspect ratio scales down to fit,
-/// leaving a consistent small margin around it — the project's own aspect
-/// ratio still has no way to influence Stage's own size, only what's left
-/// for Timeline afterward. No floor on Timeline's height in this version —
-/// on a device/orientation where `squareSide` (full width) genuinely
-/// exceeds the available height, Timeline can shrink to `0` (clamped via
-/// `max(...)`, never negative); that trade-off was an explicit choice here,
-/// not an oversight.
-///
-/// **An aspect-ratio-*adaptive* Stage (no forced square; Stage reshaped
-/// itself per project, Timeline got whatever height was left) was tried
-/// and fully working — all 10 unit tests and all 3 real-tap `XCUITest`s
-/// passed — right before this, in the same conversation.** The user asked
-/// to revert to the fixed square above and raise the video's share from
-/// 90% to 96%, rather than keep the adaptive reshaping. If an adaptive
-/// Stage is wanted again later, the full working version is recoverable
-/// from this file's own git history around that timestamp — it is not
-/// preserved inline here since the user explicitly chose the square.
-/// 96% (not 90%) is **purely this count's own value** — a 9:16 video's
-/// *height* hits 96% of the square's side exactly; its *width* is still
-/// naturally narrower (pillarboxed), proportional to the composition's own
-/// ratio — same mathematical shape as the 90% version had, just a smaller
-/// margin.
-///
-/// **A second, more surprising bug surfaced right after the overflow fix
-/// above, caught only because a real `XCUITest` was added (`EditorNavigationUITests`)
-/// — `simctl` itself cannot synthesize a real tap, and this bug was
-/// invisible to every build/screenshot-based check used until then.**
-/// Real taps on `Huỷ` silently failed to dismiss for 2 of the 3 sample
-/// projects (16:9 and 1:1 — the ones that actually needed shrinking to fit
-/// the square box; the 9:16 one happened to need almost no shrinking and
-/// never showed the bug), 100% reproducibly, with the button's own action
-/// closure never executing. Root-caused by elimination, swapping one
-/// variable at a time under the real UI test: not the Liquid Glass button
-/// style (reproduced with it removed), not an async/video-decode race
-/// (reproduced with a 5s settle delay first), not `titlebarHeight`
-/// oscillation (reproduced after that was independently fixed), not the
-/// test code itself (reproduced with the exact passing test's own code,
-/// just pointed at a different project) — narrowed to `PreviewCanvas`
-/// itself by replacing it with a plain `Color` (passed) vs the real view
-/// (failed). `PreviewCanvas`'s `GeometryReader` + `.scaleEffect` combo (see
-/// that file's own doc comment) still absorbed touches meant for `Huỷ`
-/// sitting above it in z-order, even with `.clipped()` already applied —
-/// `.clipped()` constrains drawing and most hit-testing, but evidently not
-/// all of it for this specific transform combination. **Fix: the stage
-/// preview was never interactive to begin with (no gesture of its own), so
-/// `.allowsHitTesting(false)` on `PreviewCanvas` removes it from hit-testing
-/// entirely** — a narrower, more certain fix than trying to further
-/// chase exactly which part of `.scaleEffect`'s hit-test footprint
-/// `.clipped()` wasn't reaching.
-///
-/// Redesigned 2026-10-07, replacing an earlier version that also had a
-/// scrubber bar, an "add content" row, and a 7-tool bottom toolbar — the
-/// user asked for those removed entirely, keeping only the stage and this
-/// one minimal control row (see the reference screenshot this was rebuilt
-/// from). `EditorTool` (`EditorTool.swift`) still documents the 7-tool v1
-/// scope decided earlier, but nothing in this view references it anymore —
-/// where those tools resurface in the UI is a separate, not-yet-decided
-/// question, not dropped work.
-///
-/// **Nav and chrome are the native iOS Photos editor's own light style**
-/// (`Huỷ`/`Xuất` text buttons), using **system dynamic colors** throughout
-/// (`Color(.systemBackground)`, `.secondarySystemBackground`, `.primary`)
-/// instead of hardcoded black/white — this already renders light or dark
-/// automatically based on the user's own iOS appearance setting, which is
-/// the "stays light unless the user has chosen dark mode" behavior asked
-/// for. Don't reintroduce hardcoded black/white here.
-///
-/// Fullscreen and undo/redo are disabled placeholders — there is no
-/// fullscreen presentation mode and no command/undo stack yet (see
-/// CLAUDE.md's "Command pattern, not JSON Patch or CRDT" note: that's the
-/// intended mechanism, just not built). `project` here is a freshly
-/// compiled sample (`EditorDemoView.makeDocument`), **not** loaded from
-/// `ProjectsView`'s own `ProjectSample` — that type has no real
-/// project-document backing yet (see its own doc comment), so every
-/// project row opens the same placeholder composition for now.
+/// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
+/// Titlebar / Timeline. See `ui-design-note.md` (repo root) for the full
+/// layout rationale and bug history.
 struct EditorShellView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -108,10 +10,15 @@ struct EditorShellView: View {
     @State private var currentTimeMs: Double = 0
     @State private var isPlaying = false
     @State private var lastTick: Date = .init()
-    /// The titlebar's real measured height (see `TitlebarHeightKey`) — a
-    /// reasonable guess until the first layout pass reports the actual
-    /// value, never used as a hardcoded final answer.
+    /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
     @State private var titlebarHeight: CGFloat = 60
+    /// Toggled by the titlebar's "Enter Full Screen" button — swaps the
+    /// whole Stage/Titlebar/Timeline shell for `fullscreenStage` below.
+    @State private var isFullscreen = false
+    /// Lifted out of `FullscreenScrubber` so `fullscreenControlBarContent`
+    /// can react to it too (hide play/exit, show the time readout) — see
+    /// ui-design-note.md.
+    @State private var isScrubbing = false
 
     init(project: V2Project) {
         _project = State(initialValue: project)
@@ -122,52 +29,47 @@ struct EditorShellView: View {
     }
 
     var body: some View {
+        Group {
+            if isFullscreen {
+                fullscreenStage
+            } else {
+                windowedShell
+            }
+        }
+        // Ignore `0` — a transient artifact during the cover's presentation
+        // animation, not a real measurement (see ui-design-note.md).
+        .onPreferenceChange(TitlebarHeightKey.self) { newValue in
+            guard newValue > 0 else { return }
+            titlebarHeight = newValue
+        }
+        .onReceive(playbackTimer) { now in
+            guard isPlaying else { return }
+            let deltaMs = now.timeIntervalSince(lastTick) * 1000
+            lastTick = now
+            let next = currentTimeMs + deltaMs
+            if next >= maxDurationMs {
+                currentTimeMs = 0
+                isPlaying = false
+            } else {
+                currentTimeMs = next
+            }
+        }
+    }
+
+    private var windowedShell: some View {
         VStack(spacing: 0) {
             topBar
 
-            // Stage / Titlebar / Timeline — Stage is computed first (from
-            // width alone, see this file's top doc comment), Timeline gets
-            // whatever's left. One `GeometryReader` for the whole section,
-            // not one per child, so every height comes from a single source
-            // of truth.
             GeometryReader { geo in
-                // Stage is a square sized *only* from the available width —
-                // no longer clamped against a separate height budget (that
-                // was the old 67%-of-remainder rule). Height is derived by
-                // squaring the width, not fit into whatever space happens to
-                // be left.
+                // Stage: a square sized from width alone (see ui-design-note.md).
                 let squareSide = geo.size.width
                 let videoBoxSide = squareSide * 0.96
                 let stageHeight = squareSide
-
-                // Timeline gets whatever's left after Titlebar + Stage + the
-                // divider's ~1pt — the reverse of the old order (Timeline
-                // used to be computed first, as a fixed 33%, and Stage got
-                // the remainder). `max(..., 0)` only guards against a
-                // negative frame value; there is deliberately no minimum
-                // floor here — see top doc comment.
+                // Timeline: whatever's left, no floor (see ui-design-note.md).
                 let timelineHeight = max(geo.size.height - titlebarHeight - stageHeight - 1, 0)
 
                 VStack(spacing: 0) {
-                    // The "stage" — plain white around the preview, matching
-                    // the native Photos editor's own stage background
-                    // (confirmed by sampling pixels from a reference
-                    // screenshot: the area around the photo reads
-                    // (255,255,255), not a gray letterbox). Any letterboxing
-                    // a non-matching aspect ratio needs is drawn *inside*
-                    // `PreviewCanvas` itself (`composition.background`), not
-                    // by this surrounding panel.
-                    // No external `.aspectRatio(...)` needed — `PreviewCanvas`
-                    // now scales its own native composition coordinate space
-                    // to fit whatever frame it's given (see its doc comment),
-                    // so handing it the 96%-of-square box directly is enough.
-                    // `.allowsHitTesting(false)` is load-bearing, not
-                    // cosmetic — see this file's top doc comment for the real
-                    // bug this closed (`GeometryReader` + `.scaleEffect`
-                    // inside `PreviewCanvas` could still absorb taps meant for
-                    // `Huỷ`/`Xuất` above it, `.clipped()` alone wasn't
-                    // enough). The stage has never had its own gesture here
-                    // anyway, so removing it from hit-testing costs nothing.
+                    // `.allowsHitTesting(false)` is load-bearing — see ui-design-note.md.
                     PreviewCanvas(
                         composition: project.composition,
                         assets: project.assets,
@@ -196,54 +98,158 @@ struct EditorShellView: View {
             }
         }
         .background(Color(.systemBackground))
-        // Ignore a reported `0` — the titlebar's real content always has a
-        // positive height; `0` only ever shows up as a transient artifact
-        // during the fullScreenCover's own presentation animation (the whole
-        // view briefly renders at a near-zero size while sliding in). Found
-        // 2026-10-07 chasing a real, reproducible XCUITest failure: without
-        // this guard, a stray `0` mid-animation fed back into `stageHeight`'s
-        // computation, growing Stage/shrinking nothing-in-particular for one
-        // more frame, which could still be mid-flight exactly when a UI test
-        // (or a fast real tap right as the screen appears) dispatched its
-        // touch — the accessibility snapshot and the actual on-screen layout
-        // had briefly diverged. Dropping the `0` keeps `titlebarHeight`
-        // monotonically settling to its one real measured value instead of
-        // oscillating.
-        .onPreferenceChange(TitlebarHeightKey.self) { newValue in
-            guard newValue > 0 else { return }
-            titlebarHeight = newValue
-        }
-        .onReceive(playbackTimer) { now in
-            guard isPlaying else { return }
-            let deltaMs = now.timeIntervalSince(lastTick) * 1000
-            lastTick = now
-            let next = currentTimeMs + deltaMs
-            if next >= maxDurationMs {
-                currentTimeMs = 0
-                isPlaying = false
-            } else {
-                currentTimeMs = next
+    }
+
+    /// Full-screen takeover triggered by the titlebar's "Enter Full Screen"
+    /// button — video fills the entire screen (black letterbox, matching
+    /// every standard video player's fullscreen convention, distinct from
+    /// Stage's own light background), Huỷ/Xuất/Titlebar/Timeline are all
+    /// hidden. `fullscreenControlBar` (bottom) is the only way back.
+    /// Playback state (`currentTimeMs`/`isPlaying`) is shared with the
+    /// windowed shell, so entering/exiting never interrupts it.
+    private var fullscreenStage: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                Color.black.ignoresSafeArea()
+
+                PreviewCanvas(
+                    composition: project.composition,
+                    assets: project.assets,
+                    layers: project.layers,
+                    atMs: currentTimeMs
+                )
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                fullscreenControlBar(screenWidth: geo.size.width)
+                    .padding(.bottom, 60)
             }
         }
     }
 
-    /// `Huỷ`/`Xuất` text buttons, not icon buttons — matching the native
-    /// Photos editor's own nav shape, but labeled for export (CapCut's own
-    /// wording) rather than "Done". Neither actually diverges yet (no
-    /// edit state exists to discard, and no export pipeline exists to run —
-    /// both just dismiss for now; that split is real future work, not an
-    /// oversight.
+    /// Photos-style player bar: play/pause, a scrubber, exit — one pill, not
+    /// 3 separate bubbles (see `ui-design-note.md`). `GlassEffectContainer`
+    /// wrapping a single `.glassEffect` is Apple's own recommended pattern
+    /// even for one glass shape (correct sampling/merging), not just for
+    /// multiple morphing shapes.
     ///
-    /// **iOS 26's Liquid Glass button styles** (`.glass`/`.glassProminent`,
-    /// `SwiftUI.GlassButtonStyle`/`GlassProminentButtonStyle` — confirmed by
-    /// reading the actual SDK's `.swiftinterface`, not guessed) — the same
-    /// chrome `ProjectsView`'s toolbar `+` button already gets "for free"
-    /// from being inside a real `ToolbarItem` (iOS 26 auto-styles toolbar
-    /// buttons this way). This view's top bar isn't a real toolbar, so it
-    /// needs the style applied explicitly. Both styles need iOS 26 — gated
-    /// with `if #available` so this still deploys to the 17.0 target in
-    /// `project.yml`, falling back to the plain-text/`.borderedProminent`
-    /// look on older OS versions instead of failing to build.
+    /// Width stays fixed across both states — only the *content*'s height
+    /// changes when scrubbing starts/ends (see
+    /// `fullscreenControlBarContent`'s doc comment and `ui-design-note.md`).
+    /// The shape itself (`barShape`) is now the same
+    /// `RoundedRectangle` in both states, not a `Capsule` ↔
+    /// `RoundedRectangle` swap — matching the real Photos app's own bar,
+    /// which doesn't visibly change roundness when scrubbing starts either.
+    private var barShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+    }
+
+    @ViewBuilder
+    private func fullscreenControlBar(screenWidth: CGFloat) -> some View {
+        let barWidth = screenWidth - 40
+
+        Group {
+            if #available(iOS 26.0, *) {
+                GlassEffectContainer {
+                    fullscreenControlBarContent
+                        .glassEffect(.regular.interactive(), in: barShape)
+                }
+            } else {
+                fullscreenControlBarContent
+                    .background(.ultraThinMaterial, in: barShape)
+            }
+        }
+        .frame(width: barWidth)
+        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: isScrubbing)
+    }
+
+    /// While scrubbing, play/exit are removed from the layout (not just
+    /// faded) — matching the real Photos app, where the track visibly
+    /// reclaims their space and grows to fill it, rather than leaving it
+    /// reserved. `fraction`-based fill (see `FullscreenScrubber`) already
+    /// recomputes against whatever width `GeometryReader` reports each
+    /// render, so the filled portion always represents the correct % of
+    /// `currentTimeMs`/`maxDurationMs` regardless of the track's current
+    /// width — the pixel position is allowed to shift between states (it
+    /// represents a %, not a frozen coordinate); only the underlying time
+    /// value must stay unaffected by the resize, which it already is.
+    /// `.transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))`
+    /// on each button gives the "slides up while fading away" exit (and the
+    /// mirrored "drops down while fading in" entrance) — move and opacity
+    /// run *together*, same curve, same duration, not one finishing before
+    /// the other. The `.animation(_:)` wrapping the whole combined
+    /// transition (not just one half of it) is what keeps both in sync
+    /// while still making the *entire* exit quicker than the ambient
+    /// `.spring(response: 0.25, ...)` driving the rest of the bar — short
+    /// enough that both motion and fade are fully done before the icon
+    /// would reach the bar's own clipped edge near the time-label row,
+    /// instead of still being visible (and then abruptly clipped, not
+    /// faded) right as it gets there.
+    private var fullscreenControlBarContent: some View {
+        VStack(spacing: 6) {
+            if isScrubbing {
+                HStack {
+                    Text(formattedTime(currentTimeMs, includeFraction: true))
+                    Spacer()
+                    Text(formattedTime(maxDurationMs, includeFraction: false))
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.white)
+                .transition(.opacity)
+            }
+
+            HStack(spacing: 12) {
+                if !isScrubbing {
+                    Button {
+                        isPlaying.toggle()
+                        lastTick = .init()
+                    } label: {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))
+                }
+
+                FullscreenScrubber(
+                    currentTimeMs: $currentTimeMs,
+                    maxDurationMs: maxDurationMs,
+                    isDragging: $isScrubbing,
+                    onScrubStart: { isPlaying = false }
+                )
+
+                if !isScrubbing {
+                    Button {
+                        isFullscreen = false
+                    } label: {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+    }
+
+    private func formattedTime(_ ms: Double, includeFraction: Bool) -> String {
+        let totalSeconds = max(ms, 0) / 1000
+        let minutes = Int(totalSeconds) / 60
+        let seconds = Int(totalSeconds) % 60
+        guard includeFraction else {
+            return String(format: "%02d:%02d", minutes, seconds)
+        }
+        let hundredths = Int((totalSeconds - totalSeconds.rounded(.down)) * 100)
+        return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
+    }
+
+    /// `Huỷ`/`Xuất` — native Photos editor style; see ui-design-note.md.
     private var topBar: some View {
         HStack {
             cancelButton
@@ -276,24 +282,8 @@ struct EditorShellView: View {
         }
     }
 
-    /// The **titlebar** — exactly 3 controls (fullscreen left, play/pause
-    /// center, undo/redo right), structurally the divider between Stage and
-    /// Timeline (see this file's top doc comment for the height-split
-    /// rule). Its height is read via `TitlebarHeightKey`, not assumed.
-    ///
-    /// **Play/pause is centered via a separate, overlaid `HStack` with its
-    /// own two `Spacer()`s — not the single shared `HStack { left; Spacer();
-    /// play; Spacer(); right }` this used to be.** Found 2026-10-07: a
-    /// single `HStack` with two `Spacer()`s only centers its middle child
-    /// when the two *side* groups are equal width. Here they never are — the
-    /// right side holds 2 buttons (undo+redo), the left side holds 1
-    /// (fullscreen) — so each `Spacer()` claimed a different share of the
-    /// remaining space and play/pause sat visibly off-center, always pulled
-    /// toward the lighter (left) side. Layering the center button in its own
-    /// `HStack(spacer, button, spacer)`, with the left/right buttons in a
-    /// *second*, independent `HStack` underneath, makes play/pause's
-    /// position depend only on the row's own total width — never on how
-    /// wide either side group happens to be.
+    /// Play/pause is centered via its own overlaid `HStack`, not shared
+    /// `Spacer()`s with the side buttons — see ui-design-note.md.
     private var controlsRow: some View {
         ZStack {
             HStack {
@@ -303,33 +293,34 @@ struct EditorShellView: View {
                     lastTick = .init()
                 } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
+                        .font(.headline)
+                        .fontWeight(.regular)
                 }
                 Spacer()
             }
 
             HStack {
-                // No fullscreen presentation mode exists yet — disabled,
-                // not a dead button someone might mistake for a bug.
-                Button {} label: {
+                Button {
+                    isFullscreen = true
+                } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.title3)
+                        .font(.headline)
+                        .fontWeight(.regular)
                 }
-                .disabled(true)
 
                 Spacer()
 
                 HStack(spacing: 22) {
-                    // No command/undo stack exists yet (see CLAUDE.md) —
-                    // disabled for the same reason fullscreen is.
                     Button {} label: {
                         Image(systemName: "arrow.uturn.backward")
-                            .font(.title3)
+                            .font(.headline)
+                            .fontWeight(.regular)
                     }
                     .disabled(true)
                     Button {} label: {
                         Image(systemName: "arrow.uturn.forward")
-                            .font(.title3)
+                            .font(.headline)
+                            .fontWeight(.regular)
                     }
                     .disabled(true)
                 }
@@ -337,14 +328,77 @@ struct EditorShellView: View {
         }
         .foregroundColor(.primary)
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(Color(.systemBackground))
     }
 }
 
-/// Carries the titlebar's real rendered height up to `EditorShellView.body`
-/// so the timeline height computation (`(total - titlebar) / 3`) uses the
-/// actual value instead of a guessed constant.
+/// The fullscreen player bar's progress track — grows taller while the
+/// thumb is actively dragged, matching Photos' own scrubber feel, then
+/// springs back on release. `isDragging` is a binding (not local `@State`)
+/// so `fullscreenControlBarContent` can react to it too (hide play/exit,
+/// show the time readout).
+///
+/// Entering scrub mode requires a genuine **hold**, not just touching the
+/// track — `LongPressGesture(minimumDuration:).sequenced(before:
+/// DragGesture(minimumDistance: 0))`, not a plain `DragGesture`. A bare
+/// `DragGesture(minimumDistance: 0)` starts scrubbing on the very first
+/// touch-down, which is too eager (an incidental tap/brush would yank
+/// playback position); requiring a short hold first matches how the real
+/// Photos app behaves and avoids that.
+private struct FullscreenScrubber: View {
+    @Binding var currentTimeMs: Double
+    let maxDurationMs: Double
+    @Binding var isDragging: Bool
+    let onScrubStart: () -> Void
+
+    private var fraction: Double {
+        guard maxDurationMs > 0 else { return 0 }
+        return min(max(currentTimeMs / maxDurationMs, 0), 1)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.3))
+                Capsule().fill(Color.white)
+                    .frame(width: geo.size.width * fraction)
+            }
+            .frame(height: isDragging ? 18 : 6)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                LongPressGesture(minimumDuration: 0.2)
+                    .sequenced(before: DragGesture(minimumDistance: 0))
+                    .onChanged { value in
+                        switch value {
+                        case .first(true), .second(true, nil):
+                            beginScrubbingIfNeeded()
+                        case .second(true, let drag?):
+                            beginScrubbingIfNeeded()
+                            seek(to: drag.location.x, trackWidth: geo.size.width)
+                        default:
+                            break
+                        }
+                    }
+                    .onEnded { _ in isDragging = false }
+            )
+        }
+        .frame(height: 24)
+    }
+
+    private func beginScrubbingIfNeeded() {
+        guard !isDragging else { return }
+        isDragging = true
+        onScrubStart()
+    }
+
+    private func seek(to x: CGFloat, trackWidth: CGFloat) {
+        let fraction = min(max(x / trackWidth, 0), 1)
+        currentTimeMs = fraction * maxDurationMs
+    }
+}
+
 private struct TitlebarHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -352,10 +406,7 @@ private struct TitlebarHeightKey: PreferenceKey {
     }
 }
 
-// 9:16 (360x640), matching `ProjectsView`'s "Trip to Paris" sample exactly —
-// not the default square composition `EditorDemoView.makeDocument` falls
-// back to without these two arguments — so Canvas previews the same shape
-// the real Folder → Editor flow opens.
+// 9:16 (360x640), matching `ProjectsView`'s "Trip to Paris" sample.
 #Preview {
     EditorShellView(project: compile(EditorDemoView.makeDocument(
         media: .videoPortrait, inOption: .none, outOption: .none,

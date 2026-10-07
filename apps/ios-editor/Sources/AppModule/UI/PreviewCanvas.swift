@@ -47,54 +47,12 @@ struct PreviewCanvas: View {
     /// fixtures, never set this.
     var activePlayer: (assetId: String, player: AVPlayer)? = nil
 
-    /// Scales the fixed `composition.width`/`height` coordinate space (every
-    /// layer's `frame`/`transform` is authored in those absolute units) down
-    /// or up to fit whatever box the caller actually gives this view —
-    /// fixed 2026-10-07 after a real bug: this used to be a bare
-    /// `.frame(width: composition.width, height: composition.height)` with
-    /// no scaling at all, meaning a composition authored at realistic sizes
-    /// (e.g. 640 or 1920) rendered that many literal *points* wide,
-    /// overflowing any reasonably-sized container. It went unnoticed for a
-    /// while because every demo fixture happened to use small
-    /// composition values (240-320) that were coincidentally close to a
-    /// phone's own point width, and callers sat inside a `ScrollView` where
-    /// overflow just scrolled instead of visibly colliding with fixed UI —
-    /// `EditorShellView`'s fixed 3-section layout (no scrolling) is what
-    /// finally made the bug impossible to miss, once a 16:9/640pt-wide
-    /// composition was tested. The external `.aspectRatio(...)` calls every
-    /// caller used to add were never actually doing anything: the ratio
-    /// passed in was always identical to the ratio already baked into the
-    /// (unscaled) fixed frame, so there was nothing for it to adjust.
-    /// `GeometryReader` + `.scaleEffect` is the standard SwiftUI idiom for
-    /// "render fixed-coordinate-space content, scaled to fit a flexible
-    /// container" — the content keeps its native `composition.width`/
-    /// `height` frame (so every layer's absolute x/y/width/height values
-    /// stay correct), and `scaleEffect` is a pure visual transform that
-    /// preserves relative layout while fitting it to `geo.size`.
-    ///
-    /// **`.clipped()` keeps the drawn/hit-tested region matching the visible
-    /// box in the common case** — `.scaleEffect` only changes how a view is
-    /// *drawn*; it does **not** shrink the view's actual layout footprint,
-    /// which stays at the pre-scale `composition.width`/`height` size (a
-    /// well-known SwiftUI gotcha), so without `.clipped()` here the oversized
-    /// footprint can draw/hit-test past `geo.size`'s bounds. Keep this even
-    /// though it turned out **not to be sufficient on its own** — see the
-    /// next note.
-    ///
-    /// **This view is also marked `.allowsHitTesting(false)` by its caller,
-    /// `EditorShellView`, not here** — found 2026-10-07 by elimination under
-    /// a real `XCUITest` (`EditorNavigationUITests`; `simctl` itself cannot
-    /// synthesize a real tap, so this was invisible to every build/screenshot
-    /// check used before that). Real taps on `EditorShellView`'s `Huỷ` button
-    /// silently failed for 2 of 3 sample compositions (any that needed real
-    /// shrinking to fit their box) — swapping this view for a plain `Color`
-    /// (same frame chain) made the tap work every time; the real view,
-    /// `.clipped()` and all, still intermittently absorbed it. Exactly which
-    /// part of `GeometryReader`+`.scaleEffect`'s hit-test footprint
-    /// `.clipped()` wasn't reaching is still an open question — this view
-    /// has no interactive content of its own, so making it non-interactive
-    /// wherever it's embedded is the correct fix regardless of the exact
-    /// mechanism, not a workaround to revisit once that's found.
+    /// Scales the fixed `composition.width`/`height` coordinate space to fit
+    /// whatever box the caller gives this view. `.clipped()` keeps drawing
+    /// (and most hit-testing) bounded to that box — callers must also set
+    /// `.allowsHitTesting(false)` themselves, since `.clipped()` alone isn't
+    /// fully sufficient (see `ui-design-note.md`, repo root, for the real
+    /// bug this was built to fix and the one `.clipped()` didn't).
     var body: some View {
         GeometryReader { geo in
             let scale = min(geo.size.width / composition.width, geo.size.height / composition.height)

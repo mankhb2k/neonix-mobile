@@ -1,12 +1,8 @@
 import SwiftUI
 
-/// Placeholder sample data only — no persisted-project store exists yet
-/// (Editor Document save/load isn't wired to a project library).
-/// `compositionWidth`/`Height` give each sample its own canvas aspect
-/// ratio (9:16/16:9/1:1 across the 3 defaults below) — deliberately
-/// different per project, to exercise `EditorShellView`'s fixed-square
-/// stage against more than one shape at once (see that file's "Stage is a
-/// fixed square" doc comment for the bug this caught).
+/// Placeholder sample data — no persisted-project store exists yet. Each
+/// sample's own aspect ratio exercises a different Stage shape; see
+/// `ui-design-note.md` (repo root).
 struct ProjectSample: Identifiable {
     let id = UUID()
     let name: String
@@ -43,21 +39,13 @@ struct ProjectsView: View {
         ProjectSample(name: "Product Launch", lastEdited: "Yesterday", gradient: [.pink, .purple], compositionWidth: 640, compositionHeight: 360), // 16:9
         ProjectSample(name: "Birthday Recap", lastEdited: "3 days ago", gradient: [.orange, .yellow], compositionWidth: 480, compositionHeight: 480), // 1:1
     ]
-    // `fullScreenCover`, not a `NavigationLink` push — the Editor is a full
-    // immersive takeover (its own X button dismisses it), matching CapCut's
-    // own UX, and a `NavigationLink` push would leave this tab's own tab bar
-    // showing underneath it (confirmed on the simulator), which a pushed
-    // page inside a `TabView` does by default unless told otherwise.
+    // `fullScreenCover`, not `NavigationLink` — a pushed page inside a
+    // `TabView` leaves this tab's own tab bar showing underneath it.
     @State private var openedProject: ProjectSample?
 
     var body: some View {
         List {
             ForEach(projects) { project in
-                // `ProjectSample` has no real document backing yet (see its
-                // own doc comment), so every row opens the same placeholder
-                // composition — `EditorShellView`'s own doc comment explains
-                // why. This still proves Folder → Editor navigation end to
-                // end.
                 Button {
                     openedProject = project
                 } label: {
@@ -77,9 +65,6 @@ struct ProjectsView: View {
             }
         }
         .fullScreenCover(item: $openedProject) { project in
-            // Each sample's own aspect ratio (see `ProjectSample`'s doc
-            // comment) — media/presets are still the shared placeholder,
-            // only the canvas shape differs per project.
             EditorShellView(project: compile(EditorDemoView.makeDocument(
                 media: .videoPortrait, inOption: .none, outOption: .none,
                 effectOption: .none, easingOption: .linear,

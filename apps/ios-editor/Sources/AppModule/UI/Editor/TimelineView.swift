@@ -1,19 +1,8 @@
 import SwiftUI
 
-/// The timeline below the stage/controls row — one horizontal track per
-/// `project.layers[]` entry (excluding `"group"` wrapper layers, which have
-/// no content of their own, only children — see CLAUDE.md's "Group layers
-/// compose transform/opacity by real view nesting" note), positioned and
-/// sized by each layer's own `timing.start`/`timing.duration`, plus a
-/// draggable playhead synced to `currentTimeMs`.
-///
-/// **No thumbnail extraction yet** — each clip renders as a flat color
-/// block (color/icon keyed by `layer.type`), not a real filmstrip. That's a
-/// known, separate gap (see `VideoFrameCache`'s own doc comment for the
-/// still-frame extraction this would reuse), not an oversight here.
-///
-/// `pxPerMs` is a fixed scale, not a pinch-to-zoom control — zooming the
-/// timeline is real future work, not in scope for this first pass.
+/// One horizontal track per non-`"group"` layer, positioned/sized by its
+/// own `timing`, plus a draggable playhead. No thumbnail extraction yet
+/// (flat color blocks) and no pinch-to-zoom — both real future work.
 struct TimelineView: View {
     let layers: [V2Layer]
     @Binding var currentTimeMs: Double
