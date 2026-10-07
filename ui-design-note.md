@@ -435,6 +435,58 @@ filmstrip shift together by the same amount while the cover cell/mute
 button/playhead stay fixed at center — the user should still judge the
 actual drag feel live.
 
+4. **Ruler+filmstrip pin to the top of the timeline panel, not centered in
+   it.** `TimelineView`'s `timelineHeight` (whatever's left over after
+   Stage+Titlebar, see this file's own Layout section above) is almost
+   always taller than the ruler+track content actually needs — a plain
+   `VStack` with one fixed-height child centers that child by default once
+   given more height than it needs, which left a visible gap *above* the
+   ruler too (not just below), unlike CapCut's own layout where the
+   ruler+filmstrip sits flush under the titlebar divider. Fixed with
+   `.frame(maxHeight: .infinity, alignment: .top)` on the outer `VStack`
+   (plus trimming the padding to `.top` only) — confirmed by screenshot
+   that the ruler now starts right under the `Divider()`, with all the
+   leftover blank space pushed below instead of split above/below.
+
+## Bottom tool nav: CapCut layout, app's own light chrome
+
+Re-added 2026-10-07 — this row existed once, got removed entirely in an
+earlier redesign pass (see "The real Editor screen is being built as a
+shell first" in `CLAUDE.md`), and the user explicitly asked to bring it
+back "giống CapCut." Before writing any code, 3 questions were raised and
+confirmed with the user (not assumed):
+
+1. **Color theme: the app's own light/system-dynamic chrome, not CapCut's
+   dark theme.** `CLAUDE.md` already has a standing rule locking this
+   screen's nav/chrome to system dynamic colors (matching the real iOS
+   Photos editor) — the CapCut reference screenshot is dark, which would
+   have directly contradicted that rule if copied verbatim. Confirmed:
+   borrow CapCut's *layout* (icon above label, horizontal scroll) only, not
+   its palette. `EditorToolbarView.swift` uses `.primary`/`.accentColor`/
+   `Color(.systemBackground)` throughout, no hardcoded black/white.
+2. **Tool order matches CapCut's own order**, not the order `EditorTool.swift`
+   happened to declare cases in before. New order: Chỉnh sửa, Âm thanh, Văn
+   bản, Hiệu ứng, Tỷ lệ khung hình, Phông nền, Tuỳ chỉnh — `adjust` sits
+   last since it's standing in for "Bộ lọc"'s slot (see `EditorTool.swift`'s
+   own doc comment on why "Tuỳ chỉnh" replaces "Bộ lọc"), which in CapCut's
+   real nav comes later than the other 6 kept tools.
+3. **Tapping only highlights the tool, nothing else opens.** No per-tool
+   screen exists for any of the 7 (that's real, separate, not-yet-started
+   work — see `EditorTool.swift`). Building 7 placeholder sheets was
+   explicitly out of scope for this pass; `selectedTool` just drives which
+   icon/label turns `.accentColor`, and tapping the already-selected tool
+   clears it back to `nil` — "nothing selected" needed to stay a reachable,
+   honest resting state given there's genuinely nothing to show either way.
+
+**Layout integration**: `EditorShellView.windowedShell` now reserves a
+fixed `toolbarHeight: CGFloat = 64` (no `PreferenceKey` measurement needed,
+unlike `controlsRow`'s `titlebarHeight` — this row's content is fixed-height
+by construction, nothing to measure) and subtracts it from `timelineHeight`
+alongside `titlebarHeight`/`stageHeight`, with a second `Divider()` between
+Timeline and the new toolbar. Verified on the simulator: all 3 sections
+(Stage/Titlebar, Timeline, toolbar) render without clipping or overlap, in
+the new CapCut order, light chrome — confirmed by screenshot.
+
 ## Verification
 
 `apps/ios-editor/UITests/EditorNavigationUITests.swift` — real tap-driven

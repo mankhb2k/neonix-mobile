@@ -19,6 +19,11 @@ struct EditorShellView: View {
     /// can react to it too (hide play/exit, show the time readout) — see
     /// ui-design-note.md.
     @State private var isScrubbing = false
+    /// Bottom tool row's own highlighted tool — no per-tool screen exists
+    /// yet (see `EditorTool.swift`), so this only drives which icon is
+    /// highlighted, nothing else.
+    @State private var selectedTool: EditorTool?
+    private let toolbarHeight: CGFloat = 58
 
     init(project: V2Project) {
         _project = State(initialValue: project)
@@ -65,8 +70,8 @@ struct EditorShellView: View {
                 let squareSide = geo.size.width
                 let videoBoxSide = squareSide * 0.96
                 let stageHeight = squareSide
-                // Timeline: whatever's left, no floor (see ui-design-note.md).
-                let timelineHeight = max(geo.size.height - titlebarHeight - stageHeight - 1, 0)
+                // Timeline: whatever's left after Stage/Titlebar/toolbar, no floor (see ui-design-note.md).
+                let timelineHeight = max(geo.size.height - titlebarHeight - stageHeight - toolbarHeight - 2, 0)
 
                 VStack(spacing: 0) {
                     // `.allowsHitTesting(false)` is load-bearing — see ui-design-note.md.
@@ -95,6 +100,9 @@ struct EditorShellView: View {
                     )
                     .frame(height: timelineHeight)
                     .clipped()
+                    Divider()
+                    EditorToolbarView(selectedTool: $selectedTool)
+                        .frame(height: toolbarHeight)
                 }
             }
         }

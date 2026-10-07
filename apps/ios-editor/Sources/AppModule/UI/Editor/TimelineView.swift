@@ -20,7 +20,7 @@ struct TimelineView: View {
     let onScrub: () -> Void
 
     private let pxPerMs: Double = 0.2
-    private let rowHeight: CGFloat = 40
+    private let rowHeight: CGFloat = 48
     private let rowSpacing: CGFloat = 6
     private let rulerHeight: CGFloat = 20
     private let rowsTopPadding: CGFloat = 6
@@ -117,7 +117,13 @@ struct TimelineView: View {
             }
             .frame(height: panelHeight)
         }
-        .padding(.vertical, 10)
+        // Pinned to the *top* of whatever height `EditorShellView` hands
+        // this panel, matching CapCut (ruler+filmstrip sits flush under the
+        // titlebar divider, not vertically centered in the leftover space)
+        // — a plain `VStack` with one fixed-height child centers it by
+        // default once the parent gives it more height than it needs.
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, 10)
         .background(Color(.systemBackground))
         .task(id: coverAssetKey) {
             await loadCoverImage()

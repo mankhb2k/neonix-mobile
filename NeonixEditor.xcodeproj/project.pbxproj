@@ -43,6 +43,7 @@
 		B8CB407D32CBC96F0B37520E /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E479FCDDF55D7BFDEBDCBB07 /* AccountView.swift */; };
 		B99F437E015CBE6BD02B1E12 /* V2Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */; };
 		BE425A2046BCCE37F54321D5 /* PresetCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C5F719E12D1DB789F812AD9 /* PresetCompiler.swift */; };
+		C369F348D30392485B57A9F3 /* EditorToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 352718A54CD22545D51E267B /* EditorToolbarView.swift */; };
 		CA80A040837A9D6160842A9E /* PathFlattening.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF7066DF59D45CE88F9100FD /* PathFlattening.swift */; };
 		CB23669CCFE3E2715C22282F /* V2Types.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D3B62B5B58444CE13B0427 /* V2Types.swift */; };
 		D032430AEBD346BCD0A79C16 /* V2Markers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4640ADC5C35705D1D47BBC /* V2Markers.swift */; };
@@ -85,6 +86,7 @@
 		223BB801CC3914BE159ED419 /* V2Common.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Common.swift; sourceTree = "<group>"; };
 		245DF60CF30C94FC90C83BC4 /* VideoPlayerLayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerLayerView.swift; sourceTree = "<group>"; };
 		32D3ACF9C23F4987B1B4BB03 /* V2Clip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Clip.swift; sourceTree = "<group>"; };
+		352718A54CD22545D51E267B /* EditorToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorToolbarView.swift; sourceTree = "<group>"; };
 		363E82B76CC991472752F26D /* EditorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTool.swift; sourceTree = "<group>"; };
 		3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeSamplerTests.swift; sourceTree = "<group>"; };
 		405FBF0FBC81893FC1405640 /* V2MotionPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MotionPath.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 			children = (
 				8D45E8D8BB1417C878B5A20D /* EditorShellView.swift */,
 				363E82B76CC991472752F26D /* EditorTool.swift */,
+				352718A54CD22545D51E267B /* EditorToolbarView.swift */,
 				5A1331B331FC108EA6F39EFD /* TimelineView.swift */,
 			);
 			path = Editor;
@@ -432,6 +435,7 @@
 				221F060F4DF4CB362AF66031 /* EditorShellView.swift in Sources */,
 				7872440707053F0692018063 /* EditorTextLayer.swift in Sources */,
 				7C5FE9D8227DA1347B4A3A2E /* EditorTool.swift in Sources */,
+				C369F348D30392485B57A9F3 /* EditorToolbarView.swift in Sources */,
 				57126C2DA267D6F53A4760B2 /* EditorTypes.swift in Sources */,
 				82206A6EE387758A9DCB11D4 /* EffectPresets.swift in Sources */,
 				AB091433F5DECD1AF443FCAB /* HomeView.swift in Sources */,
