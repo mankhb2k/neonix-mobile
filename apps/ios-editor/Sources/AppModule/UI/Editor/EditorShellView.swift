@@ -280,41 +280,59 @@ struct EditorShellView: View {
     /// center, undo/redo right), structurally the divider between Stage and
     /// Timeline (see this file's top doc comment for the height-split
     /// rule). Its height is read via `TitlebarHeightKey`, not assumed.
+    ///
+    /// **Play/pause is centered via a separate, overlaid `HStack` with its
+    /// own two `Spacer()`s — not the single shared `HStack { left; Spacer();
+    /// play; Spacer(); right }` this used to be.** Found 2026-10-07: a
+    /// single `HStack` with two `Spacer()`s only centers its middle child
+    /// when the two *side* groups are equal width. Here they never are — the
+    /// right side holds 2 buttons (undo+redo), the left side holds 1
+    /// (fullscreen) — so each `Spacer()` claimed a different share of the
+    /// remaining space and play/pause sat visibly off-center, always pulled
+    /// toward the lighter (left) side. Layering the center button in its own
+    /// `HStack(spacer, button, spacer)`, with the left/right buttons in a
+    /// *second*, independent `HStack` underneath, makes play/pause's
+    /// position depend only on the row's own total width — never on how
+    /// wide either side group happens to be.
     private var controlsRow: some View {
-        HStack {
-            // No fullscreen presentation mode exists yet — disabled, not a
-            // dead button someone might mistake for a bug.
-            Button {} label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.title3)
-            }
-            .disabled(true)
-
-            Spacer()
-
-            Button {
-                isPlaying.toggle()
-                lastTick = .init()
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title2)
+        ZStack {
+            HStack {
+                Spacer()
+                Button {
+                    isPlaying.toggle()
+                    lastTick = .init()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title2)
+                }
+                Spacer()
             }
 
-            Spacer()
-
-            HStack(spacing: 22) {
-                // No command/undo stack exists yet (see CLAUDE.md) —
-                // disabled for the same reason fullscreen is.
+            HStack {
+                // No fullscreen presentation mode exists yet — disabled,
+                // not a dead button someone might mistake for a bug.
                 Button {} label: {
-                    Image(systemName: "arrow.uturn.backward")
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.title3)
                 }
                 .disabled(true)
-                Button {} label: {
-                    Image(systemName: "arrow.uturn.forward")
-                        .font(.title3)
+
+                Spacer()
+
+                HStack(spacing: 22) {
+                    // No command/undo stack exists yet (see CLAUDE.md) —
+                    // disabled for the same reason fullscreen is.
+                    Button {} label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.title3)
+                    }
+                    .disabled(true)
+                    Button {} label: {
+                        Image(systemName: "arrow.uturn.forward")
+                            .font(.title3)
+                    }
+                    .disabled(true)
                 }
-                .disabled(true)
             }
         }
         .foregroundColor(.primary)
