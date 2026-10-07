@@ -352,6 +352,89 @@ app terminate/relaunch) before trusting a `@State`-forced visual
 verification — this reliably produced a true cold app process in every
 case it was tried. See `CLAUDE.md`'s matching entry for the general rule.
 
+## Timeline: CapCut-style filmstrip, fixed center playhead
+
+`TimelineView.swift` redesigned 2026-10-07 after jointly analyzing a CapCut
+screenshot with the user before writing any code. Three confirmed changes
+from the original flat-color-block version:
+
+1. **Video rows render as a real filmstrip, not a flat color block.**
+   `FilmstripClipView` slices the clip into `rowHeight`-wide square tiles
+   and decodes the actual frame at each tile's time via
+   `VideoFrameCache.shared.frame(assetId:url:atSeconds:)` — the exact same
+   cache `PreviewCanvas` already uses for scrub frames, no new decode path.
+   Non-video rows (text/audio/shape) keep the original flat-color
+   `TimelineClipView` — there's no thumbnail concept for those.
+2. **Tiles outside the visible scroll window never decode.** Each tile
+   computes its own content-local x-range and checks it against a
+   `visibleRange` passed down from `TimelineView`; off-screen tiles render
+   a plain gray placeholder and skip the `VideoFrameCache` call entirely
+   (`FilmstripTileView`'s `.task(id: isVisible)`). This was a confirmed
+   design choice over pre-generating the whole filmstrip up front — cheap,
+   reuses the existing cache, and never decodes a long clip's frames that
+   aren't even on screen. A freshly-cold-booted device may show a handful
+   of still-gray tiles for a second or two right after opening the editor
+   (several concurrent `AVAssetImageGenerator` decodes racing) — transient,
+   not a bug; confirmed by re-screenshotting a couple seconds later.
+3. **The playhead is fixed at the horizontal center of the panel — the
+   content scrolls under it, not the other way around.** This is a
+   deliberate reversal from the original "static track, moving playhead
+   line" model, confirmed with the user against a second CapCut screenshot.
+   `TimelineView`'s `DragGesture` no longer computes an absolute
+   tap/drag-to-fraction position; it snapshots `currentTimeMs` at drag
+   start (`dragStartTimeMs`) and derives a new absolute time from the
+   gesture's total translation (`start - translation.width / pxPerMs`),
+   clamped to `[0, maxDurationMs]`. Ruler and tracks share one
+   `contentOffsetX = centerX - currentTimeMs * pxPerMs`, applied once to
+   their common parent `VStack`, so they can never drift out of sync with
+   each other.
+   - **Reversed again the same day: the cover-image cell and the mute
+     button scroll together with the filmstrip as ordinary content — they
+     are not a fixed overlay.** The first version of this pass drew them in
+     `PlayheadOverlay`, pinned at screen center regardless of scroll
+     position. The user corrected this after a second look at the
+     reference: in real CapCut, the mute button, the cover cell, and the
+     filmstrip all sit in the *same* scrolling row, at the *same* z-index —
+     only the playhead line itself is a fixed overlay. `FilmstripRowView`
+     is the result: one `HStack` of `[MuteButtonCell, CoverCell,
+     FilmstripClipView]` (mute+cover only on the primary video row,
+     `showsCoverAndMute`), positioned with a *single* outer offset
+     (`layer.timing.start * pxPerMs - prefixWidth`) so the filmstrip's own
+     first tile still lands exactly where every other track's timing
+     positions it — the mute/cover cells just occupy the extra space
+     immediately before that point, and now scroll out of view (clipped by
+     the same `.clipped()` as every other track) once `currentTimeMs` moves
+     far enough past 0. `PlayheadOverlay` shrank down to just the fixed
+     center line. Verified both at rest (`currentTimeMs: 0` — mute+cover
+     sit left of the playhead, same as before) and forced to a non-zero
+     `currentTimeMs` (1200ms) — confirmed by screenshot that mute+cover
+     have scrolled off the left edge along with the earlier ruler ticks, at
+     the same rate as everything else.
+   - The debug `"<currentTimeMs> / <maxDurationMs> ms"` text row above the
+     ruler is gone too — removed at the user's request once the ruler
+     itself made it redundant.
+   - Both the cover-cell tap and the mute toggle are **placeholders** —
+     this editor has no "set cover" screen and (per `VideoFrameCache`'s own
+     doc comment) no real audio playback at all yet, so there is nothing
+     for either to actually do. `V2VideoPayload.audio.enabled` is the real
+     protocol field a future mute toggle should write to once an audio
+     engine exists — not wired yet, intentionally.
+   - A plain white 2pt playhead line is nearly invisible against this
+     panel's own white (`Color(.systemBackground)`) background wherever it
+     isn't crossing colored track content — confirmed by screenshot, not
+     guessed. Fixed with a wider, semi-transparent black line directly
+     behind it (a cheap halo), not by changing the line's own color, so it
+     still reads correctly over the filmstrip too.
+
+Gesture live-feel (does a drag actually feel smooth, does the clamp at
+0/max feel right) is explicitly **not** verifiable by `simctl` — this
+sandbox has no touch injection (see `CLAUDE.md`'s own note on this); the
+offset math was instead verified by forcing `currentTimeMs` to a non-zero
+`@State` default and screenshotting, confirming the ruler ticks and the
+filmstrip shift together by the same amount while the cover cell/mute
+button/playhead stay fixed at center — the user should still judge the
+actual drag feel live.
+
 ## Verification
 
 `apps/ios-editor/UITests/EditorNavigationUITests.swift` — real tap-driven

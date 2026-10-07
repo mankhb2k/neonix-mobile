@@ -88,6 +88,7 @@ struct EditorShellView: View {
                     Divider()
                     TimelineView(
                         layers: project.layers,
+                        assets: project.assets,
                         currentTimeMs: $currentTimeMs,
                         maxDurationMs: maxDurationMs,
                         onScrub: { isPlaying = false }
