@@ -41,10 +41,9 @@ struct PreviewCanvas: View {
     let assets: [V2Asset]
     let layers: [V2Layer]
     let atMs: Double
-    /// Set only while a video layer is actively playing (see
-    /// `EditorDemoView`): that one layer renders the live `AVPlayer` output
-    /// instead of an extracted still frame. Paused/scrubbing, or the static
-    /// fixtures, never set this.
+    /// Set only while a video layer is actively playing: that one layer
+    /// renders the live `AVPlayer` output instead of an extracted still
+    /// frame. Paused/scrubbing never sets this.
     var activePlayer: (assetId: String, player: AVPlayer)? = nil
 
     /// Scales the fixed `composition.width`/`height` coordinate space to fit

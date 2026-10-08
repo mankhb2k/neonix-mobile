@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		04DF60F0F81E162FEA26F191 /* EditorHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026E3874AD152FB522B477F8 /* EditorHistory.swift */; };
 		114ADC128A49A0F39C058EE2 /* EditorCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFA25B1EA2496F8CF6C52C4 /* EditorCommandTests.swift */; };
-		1F5925A893849D31BBD88E65 /* EditorDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A4750D484CA022E032F8AC /* EditorDemoView.swift */; };
 		221F060F4DF4CB362AF66031 /* EditorShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D45E8D8BB1417C878B5A20D /* EditorShellView.swift */; };
 		24E63F73AC7010D0F1086A67 /* V2Common.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223BB801CC3914BE159ED419 /* V2Common.swift */; };
 		2E7EC9992F05007C1E41EB05 /* ToolOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB1BA55BBF87816404A36A6 /* ToolOptionsPanel.swift */; };
@@ -18,6 +17,7 @@
 		3955003698782D028155A0EA /* flip-3d.json in Resources */ = {isa = PBXBuildFile; fileRef = 4CE8EB9E43A85B9C7BA3DFB9 /* flip-3d.json */; };
 		3A10F6E97F5F9F3F354CB52E /* V2PathGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C575089D69354EE40A84041C /* V2PathGeometry.swift */; };
 		3B5766DD2EFB94EF86D9C3EB /* EditorNavigationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */; };
+		3DA97954097DED0EDF5DAC53 /* SampleProjectBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFA06E739731D91BEE43A5C2 /* SampleProjectBuilder.swift */; };
 		3E7102B373D4E0D354EE8413 /* TextLayoutCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */; };
 		41D16ADCF310990008560997 /* AssetDurationCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70AA1E57A8B728F5FA4A6562 /* AssetDurationCache.swift */; };
 		42986B956D613EBE510990B1 /* V2Render3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139C2ADF4C010CDD5F40CFB5 /* V2Render3D.swift */; };
@@ -47,7 +47,6 @@
 		AB1296E0F747FF45D0689A11 /* EditorCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFD6B96CB563ECDC08F52672 /* EditorCommand.swift */; };
 		AFBAE3D124AD6D6084B4FF06 /* V2Filter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE7E50DA11A8887C9B85D7E1 /* V2Filter.swift */; };
 		B05FBA818773C67C2E515114 /* MotionPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 765759A1DF4D1E7A6CA84983 /* MotionPathResolver.swift */; };
-		B10AE3DEE650D65AA35733AD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC93DE69B655A04A15D8EDCE /* ContentView.swift */; };
 		B46C9336E6D2B2F41DA4EBFB /* 13792197_1080_1920_30fps.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 1E5A25985F8E7BACD08EA547 /* 13792197_1080_1920_30fps.mp4 */; };
 		B8CB407D32CBC96F0B37520E /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E479FCDDF55D7BFDEBDCBB07 /* AccountView.swift */; };
 		B99F437E015CBE6BD02B1E12 /* V2Audio.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */; };
@@ -59,7 +58,6 @@
 		D032430AEBD346BCD0A79C16 /* V2Markers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4640ADC5C35705D1D47BBC /* V2Markers.swift */; };
 		D248B79459CCAAB13D69E8BC /* VideoPlayerLayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 245DF60CF30C94FC90C83BC4 /* VideoPlayerLayerView.swift */; };
 		E63B52EE8409A73A9A0E8D01 /* fade-out-end-anchor.json in Resources */ = {isa = PBXBuildFile; fileRef = E3064C32E6E6307A75AF9323 /* fade-out-end-anchor.json */; };
-		ED3950E281C3F7219CE13ED9 /* TextWrapDemoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A6DD259A85C2E0D5195E18 /* TextWrapDemoView.swift */; };
 		F095F094D750E141AAAECA27 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1331B331FC108EA6F39EFD /* TimelineView.swift */; };
 		F579D3AD292BF31B144329DE /* 12253998_1920_1080_30fps.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */; };
 		F9C38F9B5666DB37CE25805C /* V2View.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA7E58F799D288F23AD5664 /* V2View.swift */; };
@@ -115,7 +113,6 @@
 		70AA1E57A8B728F5FA4A6562 /* AssetDurationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetDurationCache.swift; sourceTree = "<group>"; };
 		70F04ADA701054AB417519B7 /* V2Layers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Layers.swift; sourceTree = "<group>"; };
 		765759A1DF4D1E7A6CA84983 /* MotionPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionPathResolver.swift; sourceTree = "<group>"; };
-		78A4750D484CA022E032F8AC /* EditorDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorDemoView.swift; sourceTree = "<group>"; };
 		7B4640ADC5C35705D1D47BBC /* V2Markers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Markers.swift; sourceTree = "<group>"; };
 		7F39E4D6A23812EB175EC4C6 /* NeonixEditorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NeonixEditorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D45E8D8BB1417C878B5A20D /* EditorShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorShellView.swift; sourceTree = "<group>"; };
@@ -125,13 +122,12 @@
 		A10EB5DD2C25BEA220BC35B0 /* TextPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPathResolver.swift; sourceTree = "<group>"; };
 		A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLayoutCompiler.swift; sourceTree = "<group>"; };
 		AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Audio.swift; sourceTree = "<group>"; };
-		AC93DE69B655A04A15D8EDCE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */ = {isa = PBXFileReference; path = 12253998_1920_1080_30fps.mp4; sourceTree = "<group>"; };
 		B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NeonixEditor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA1A725849D22CE87008891F /* V2TextLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TextLayer.swift; sourceTree = "<group>"; };
 		BE7E50DA11A8887C9B85D7E1 /* V2Filter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Filter.swift; sourceTree = "<group>"; };
+		BFA06E739731D91BEE43A5C2 /* SampleProjectBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleProjectBuilder.swift; sourceTree = "<group>"; };
 		C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorNavigationUITests.swift; sourceTree = "<group>"; };
-		C0A6DD259A85C2E0D5195E18 /* TextWrapDemoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextWrapDemoView.swift; sourceTree = "<group>"; };
 		C25F5C94FEF5EF01246456C8 /* ProjectsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsView.swift; sourceTree = "<group>"; };
 		C575089D69354EE40A84041C /* V2PathGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2PathGeometry.swift; sourceTree = "<group>"; };
 		C77E8607EE41B8E641EED053 /* V2Blend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Blend.swift; sourceTree = "<group>"; };
@@ -271,11 +267,8 @@
 		C43708708F363602634A35FC /* UI */ = {
 			isa = PBXGroup;
 			children = (
-				AC93DE69B655A04A15D8EDCE /* ContentView.swift */,
-				78A4750D484CA022E032F8AC /* EditorDemoView.swift */,
 				64853D52C06499EEA78D0B6B /* PreviewCanvas.swift */,
 				0793E05A7F83E1D11B68EE4D /* RootTabView.swift */,
-				C0A6DD259A85C2E0D5195E18 /* TextWrapDemoView.swift */,
 				245DF60CF30C94FC90C83BC4 /* VideoPlayerLayerView.swift */,
 				5F68CCBB2BCF853D681C8113 /* Account */,
 				5AC83BB27838C84586F2ACBC /* Editor */,
@@ -331,6 +324,7 @@
 				5F7B494A7EA4C12799E664F7 /* EditorTypes.swift */,
 				C80134EE632F50834BA7E76B /* EffectPresets.swift */,
 				5C5F719E12D1DB789F812AD9 /* PresetCompiler.swift */,
+				BFA06E739731D91BEE43A5C2 /* SampleProjectBuilder.swift */,
 				A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */,
 				A10EB5DD2C25BEA220BC35B0 /* TextPathResolver.swift */,
 			);
@@ -455,9 +449,7 @@
 				B8CB407D32CBC96F0B37520E /* AccountView.swift in Sources */,
 				963E35E4D8BAA9F63C8B864A /* App.swift in Sources */,
 				41D16ADCF310990008560997 /* AssetDurationCache.swift in Sources */,
-				B10AE3DEE650D65AA35733AD /* ContentView.swift in Sources */,
 				AB1296E0F747FF45D0689A11 /* EditorCommand.swift in Sources */,
-				1F5925A893849D31BBD88E65 /* EditorDemoView.swift in Sources */,
 				04DF60F0F81E162FEA26F191 /* EditorHistory.swift in Sources */,
 				221F060F4DF4CB362AF66031 /* EditorShellView.swift in Sources */,
 				7872440707053F0692018063 /* EditorTextLayer.swift in Sources */,
@@ -473,9 +465,9 @@
 				8BC77D7ED899409B74C0BCE8 /* PreviewCanvas.swift in Sources */,
 				999E3B356E32340487C94192 /* ProjectsView.swift in Sources */,
 				55E1AEE1C82B248095101E59 /* RootTabView.swift in Sources */,
+				3DA97954097DED0EDF5DAC53 /* SampleProjectBuilder.swift in Sources */,
 				3E7102B373D4E0D354EE8413 /* TextLayoutCompiler.swift in Sources */,
 				6B299B9E2D3618F4BD539ADA /* TextPathResolver.swift in Sources */,
-				ED3950E281C3F7219CE13ED9 /* TextWrapDemoView.swift in Sources */,
 				F095F094D750E141AAAECA27 /* TimelineView.swift in Sources */,
 				2E7EC9992F05007C1E41EB05 /* ToolOptionsPanel.swift in Sources */,
 				B99F437E015CBE6BD02B1E12 /* V2Audio.swift in Sources */,

@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Fires roughly at display refresh rate; while playing, `isPlaying`
+/// advances `currentTimeMs` by the elapsed wall-clock delta between ticks.
+/// Moved here 2026-10-08 from the old `ContentView` fixture picker when
+/// that screen was deleted — this is the Editor's own real playback clock,
+/// not demo-only code, so it stays even though the fixture UI around it
+/// went away.
+private let playbackTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
+
 /// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
 /// Titlebar / Timeline. See `ui-design-note.md` (repo root) for the full
 /// layout rationale and bug history.
@@ -507,7 +515,7 @@ private struct TitlebarHeightKey: PreferenceKey {
 
 // 9:16 (360x640), matching `ProjectsView`'s "Trip to Paris" sample.
 #Preview {
-    EditorShellView(project: compile(EditorDemoView.makeDocument(
+    EditorShellView(project: compile(SampleProjectBuilder.makeDocument(
         media: .videoPortrait, inOption: .none, outOption: .none,
         effectOption: .none, easingOption: .linear,
         composition: V2Composition(width: 360, height: 640, fps: 30, background: "#101820"),

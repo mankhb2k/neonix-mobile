@@ -2,9 +2,10 @@ import SwiftUI
 
 /// The app's real root UI — three tabs (browse templates, saved/created
 /// projects, account). Each tab's content is placeholder/sample data for
-/// now (see each view's own doc comment); the actual Editor screen is
-/// separate, not-yet-built work — `ContentView`'s fixture picker stays
-/// reachable only via Account > Developer for now.
+/// now (see each view's own doc comment); opening a project from Folder
+/// presents the real `EditorShellView`. The old `ContentView` dev-fixture
+/// picker (reachable via Account > Developer) was deleted 2026-10-08 once
+/// the real Editor screen made it redundant.
 struct RootTabView: View {
     @State private var selection = 0
 

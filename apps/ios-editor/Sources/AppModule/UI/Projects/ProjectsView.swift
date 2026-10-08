@@ -77,7 +77,7 @@ struct ProjectsView: View {
     /// audio design note and "Timeline lanes" note for the model this
     /// follows.
     private static func openEditorProject(for project: ProjectSample) -> V2Project {
-        let videoProject = compile(EditorDemoView.makeDocument(
+        let videoProject = compile(SampleProjectBuilder.makeDocument(
             media: .videoPortrait, inOption: .none, outOption: .none,
             effectOption: .none, easingOption: .linear,
             composition: V2Composition(width: project.compositionWidth, height: project.compositionHeight, fps: 30, background: "#101820"),

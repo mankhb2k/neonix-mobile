@@ -35,14 +35,6 @@ struct AccountView: View {
                 Label("Help Center", systemImage: "questionmark.circle")
                 Label("Send feedback", systemImage: "envelope")
             }
-
-            Section("Developer") {
-                NavigationLink {
-                    ContentView()
-                } label: {
-                    Label("Test fixtures (editor demo)", systemImage: "hammer")
-                }
-            }
         }
     }
 }
