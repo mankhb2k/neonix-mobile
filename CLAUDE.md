@@ -3,6 +3,28 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## `project.yml` now pins `DEVELOPMENT_TEAM` — regenerating used to silently wipe the user's manually-picked signing team
+
+Found 2026-10-08, right after the user got real-device signing working
+(Team "Manh Trieu", Team ID `5BZL4WMZ53`, confirmed paid Apple Developer
+Program) by picking it manually in Xcode's Signing & Capabilities pane.
+The very next `xcodegen generate --spec project.yml` this session ran (for
+an unrelated reason) **reset it back to no team at all** — Xcode's next
+build failed with *"Signing for 'NeonixEditor' requires a development
+team"*. Root cause: `project.yml` never declared `DEVELOPMENT_TEAM`/
+`CODE_SIGN_STYLE` at all, so every regenerated `project.pbxproj` has no
+memory of whatever team was picked by hand in the GUI last — xcodegen is
+the source of truth per this repo's own rule ("never hand-edit the
+`.xcodeproj`"), so a setting that only lives in Xcode's UI state doesn't
+survive the next `generate`.
+
+Fixed by adding `CODE_SIGN_STYLE: Automatic` and `DEVELOPMENT_TEAM:
+5BZL4WMZ53` directly to the `NeonixEditor` target's `settings.base` in
+`project.yml` — now every regeneration keeps the real team wired up, no
+manual re-picking needed. If this Team ID ever needs to change (different
+Apple Developer account), update it here, not just in Xcode's GUI, or it
+will be lost on the next `xcodegen generate` again.
+
 ## Real device showed letterboxed black bars (simulator didn't) — `GENERATE_INFOPLIST_FILE` was missing on the main target
 
 Found 2026-10-08, running on a real iPhone for the first time this
