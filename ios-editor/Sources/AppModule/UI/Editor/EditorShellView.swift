@@ -17,7 +17,13 @@ struct EditorShellView: View {
 
     @State private var project: V2Project
     @State private var currentTimeMs: Double = 0
-    @State private var isPlaying = false
+    /// Defaults to `true` (2026-10-08, at the user's own request) purely so
+    /// opening the Editor starts playback immediately for manual real-
+    /// device testing of the AVPlayer-driven Play path above, without
+    /// having to tap Play every launch. Revert to `false` once that
+    /// round of testing is done — this isn't meant to be the shipped
+    /// default.
+    @State private var isPlaying = true
     @State private var lastTick: Date = .init()
     /// Real decoded playback, added 2026-10-08 per the user's own request
     /// after testing on a real iPhone: Play used to just re-seek a frame
@@ -37,6 +43,17 @@ struct EditorShellView: View {
     @State private var playbackPlayer: AVPlayer?
     @State private var playbackAssetId: String?
     @State private var playbackTimeObserver: Any?
+    /// One `AVPlayer` created up front per video asset (2026-10-08, at the
+    /// user's own request — "nạp sẵn video vào RAM"), not lazily the first
+    /// time `ensureRealPlayerPlaying` needs one. `AVPlayer(url:)`/
+    /// `AVURLAsset` construction plus the asset's own `duration`/`tracks`
+    /// metadata load takes real, measurable time on a cold start; doing
+    /// that once for every asset as soon as the project opens means the
+    /// very first Play press has nothing left to wait on — it reuses an
+    /// already-warm player instead of constructing one from scratch.
+    /// `ensureRealPlayerPlaying` reads from this dictionary instead of
+    /// calling `AVPlayer(url:)` itself now.
+    @State private var preloadedPlayers: [String: AVPlayer] = [:]
     /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
     @State private var titlebarHeight: CGFloat = 60
     /// Toggled by the titlebar's "Enter Full Screen" button — swaps the
@@ -138,6 +155,7 @@ struct EditorShellView: View {
             guard newValue > 0 else { return }
             titlebarHeight = newValue
         }
+        .task { preloadVideoPlayers() }
         .onReceive(playbackTimer) { now in
             guard isPlaying else { return }
             defer { lastTick = now }
@@ -162,6 +180,31 @@ struct EditorShellView: View {
         .onChange(of: isPlaying) { _, playing in
             guard !playing else { return }
             releaseRealPlayer()
+        }
+    }
+
+    /// Creates (and starts warming up) one `AVPlayer` per distinct video
+    /// asset in the project, up front — called once from `.task` when the
+    /// Editor first appears. Guarded by `preloadedPlayers[id] == nil` so
+    /// calling this more than once (harmless) never recreates an already-
+    /// warm player. `loadValuesAsynchronously` kicks off `AVURLAsset`'s own
+    /// metadata load (duration/tracks/playable) in the background rather
+    /// than leaving it to happen lazily on first seek/play.
+    private func preloadVideoPlayers() {
+        for layer in project.layers where layer.type == "video" {
+            guard case .video(let payload) = layer.payload,
+                  preloadedPlayers[payload.assetId] == nil,
+                  let asset = project.assets.first(where: { $0.id == payload.assetId }),
+                  case .video(let videoAsset) = asset,
+                  let url = bundledURL(filename: videoAsset.uri)
+            else { continue }
+            let avAsset = AVURLAsset(url: url)
+            let player = AVPlayer(playerItem: AVPlayerItem(asset: avAsset))
+            player.automaticallyWaitsToMinimizeStalling = false
+            preloadedPlayers[payload.assetId] = player
+            Task {
+                _ = try? await avAsset.load(.duration, .tracks, .isPlayable)
+            }
         }
     }
 
@@ -190,7 +233,7 @@ struct EditorShellView: View {
             return
         }
         releaseRealPlayer()
-        let player = AVPlayer(url: active.url)
+        let player = preloadedPlayers[active.assetId] ?? AVPlayer(url: active.url)
         player.automaticallyWaitsToMinimizeStalling = false
         playbackPlayer = player
         playbackAssetId = active.assetId
