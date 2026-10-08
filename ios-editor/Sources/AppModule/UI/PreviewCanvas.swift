@@ -151,8 +151,8 @@ private struct LayerNodeView: View {
 
 /// Renders one layer's own content (before the shared transform/opacity
 /// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
-/// still frame for an image, or a tolerant-seeked `AVPlayer` for video (see
-/// `ScrubPlayerView`).
+/// still frame for an image, and for video either the live playback
+/// `AVPlayer` (while playing) or a cached decoded frame (`ScrubFrameView`).
 private struct LayerContentView: View {
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
@@ -173,7 +173,7 @@ private struct LayerContentView: View {
             if let asset, let activePlayer, activePlayer.assetId == asset.id {
                 VideoPlayerLayerView(player: activePlayer.player, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
             } else if let asset, let url = bundledURL(filename: asset.uri) {
-                ScrubPlayerView(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
+                ScrubFrameView(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000, contentMode: contentMode)
             } else {
                 Color.gray
             }
@@ -204,130 +204,47 @@ private struct LayerContentView: View {
     }
 }
 
-/// A paused `AVPlayer`, kept seeked to `atSeconds` via a *tolerant* seek on
-/// every change (cheap — reuses whatever frame AVFoundation already has
-/// buffered nearby) so the Stage visually tracks a fast scrub drag in real
-/// time, matching how CapCut/Photos feel (see CLAUDE.md's scrubbing-lag
-/// investigation, 2026-10-08) — replacing the earlier
-/// `VideoFrameCache`-extracted-still-image approach for this one spot,
-/// which only showed the *previous* scrub bucket's frame while a fresh
-/// single-frame decode was still in flight, visually catching up only once
-/// the drag stopped and bucket requests stopped racing ahead of their own
-/// decodes. `VideoFrameCache` itself is untouched and still backs the
-/// filmstrip (`FilmstripClipView`) and `AssetDurationCache`.
-///
-/// Once `atSeconds` stops changing for `settleDelayNanoseconds`, one final
-/// zero-tolerance seek snaps to the exact frame — a tolerant seek can land
-/// a bucket-width or so off, which is fine mid-drag (nothing holds still
-/// long enough to notice) but not once the user has actually stopped.
-private struct ScrubPlayerView: View {
+/// Paused/scrubbing video frame: read synchronously from `ScrubFrameCache`
+/// (decoded ahead with `AVAssetReader`), so the picture follows
+/// `currentTimeMs` in the same render pass as every other layer instead of
+/// waiting on an `AVPlayer` seek. Once the playhead has held still for
+/// `settleNanoseconds`, an exact full-quality frame replaces the cached one.
+private struct ScrubFrameView: View {
     let assetId: String
     let url: URL
     let atSeconds: Double
-    let gravity: AVLayerVideoGravity
+    let contentMode: ContentMode
 
-    @State private var player: AVPlayer?
-    @State private var settleTask: Task<Void, Never>?
-    /// Tracks `atSeconds`'s own rate of change (content-seconds per
-    /// wall-clock second), not the drag gesture's pixel velocity — this
-    /// view has no idea a drag gesture even exists, it only ever sees the
-    /// resulting `atSeconds` stream, so velocity has to be derived here
-    /// from consecutive values.
-    @State private var lastAtSeconds: Double?
-    @State private var lastChangeTime: Date?
-    /// Serializes seeks per Apple's own Technical Q&A QA1820: calling
-    /// `AVPlayer.seek(to:)` again while a previous seek is still in flight
-    /// cancels it, producing "a lot of seeking and not a lot of displaying
-    /// of the target frames" — exactly the residual stutter a user flagged
-    /// testing momentum scrubbing on a real device, even after tolerant
-    /// seeking and velocity-aware tolerance were already in place. Only
-    /// the *latest* requested (seconds, tolerance) survives while a seek
-    /// is running; the next seek fires from the completion handler, never
-    /// from `onChange` directly.
-    @State private var isSeeking = false
-    @State private var pendingSeek: (seconds: Double, toleranceSeconds: Double)?
+    @State private var sharpFrame: (seconds: Double, image: CGImage)?
 
-    private static let settleDelayNanoseconds: UInt64 = 120_000_000
-    private static let baseToleranceSeconds = VideoFrameCache.scrubBucketMs / 1000
-    /// Widening the tolerance further than this stops buying anything —
-    /// AVFoundation would just be returning whatever's nearest regardless,
-    /// and a too-wide tolerance risks a visibly wrong-looking frame even
-    /// mid-fling.
-    private static let maxToleranceSeconds = 0.3
+    private static let settleNanoseconds: UInt64 = 150_000_000
 
     var body: some View {
+        let image = sharpFrame.flatMap { $0.seconds == atSeconds ? $0.image : nil }
+            ?? ScrubFrameCache.shared.image(assetId: assetId, atSeconds: atSeconds)
         Group {
-            if let player {
-                VideoPlayerLayerView(player: player, gravity: gravity)
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
             } else {
                 Color.gray
             }
         }
-        // Keyed on `assetId`, not on every `atSeconds` tick — this creates
-        // the player exactly once per asset (a fresh `AVPlayer` per scrub
-        // tick would defeat the whole point, re-paying asset load cost on
-        // every drag movement); `atSeconds` changes are handled below by
-        // seeking the *same* player instead of recreating it.
-        .task(id: assetId) {
-            let newPlayer = AVPlayer(url: url)
-            newPlayer.automaticallyWaitsToMinimizeStalling = false
-            player = newPlayer
-            requestSeek(newPlayer, to: atSeconds, toleranceSeconds: Self.baseToleranceSeconds)
+        .onAppear {
+            ScrubFrameCache.shared.prefetch(assetId: assetId, url: url, around: atSeconds)
         }
         .onChange(of: atSeconds) { _, newValue in
-            guard let player else { return }
-            requestSeek(player, to: newValue, toleranceSeconds: currentTolerance(for: newValue))
-            settleTask?.cancel()
-            settleTask = Task {
-                try? await Task.sleep(nanoseconds: Self.settleDelayNanoseconds)
-                guard !Task.isCancelled else { return }
-                requestSeek(player, to: newValue, toleranceSeconds: 0)
-            }
+            ScrubFrameCache.shared.prefetch(assetId: assetId, url: url, around: newValue)
         }
-    }
-
-    /// Widens the seek tolerance the faster `atSeconds` is currently
-    /// moving — during a fast momentum coast (see `TimelineView`'s own
-    /// momentum note) this lets `AVPlayer` reuse whatever frame it already
-    /// has nearby instead of chasing a fresh precise seek on every single
-    /// tick, the same "don't bother being exact while still moving fast"
-    /// idea real editors use. Settles back down to the base tolerance (and
-    /// eventually to an exact `.zero` seek, via `settleTask`) the moment
-    /// movement slows or stops.
-    private func currentTolerance(for newValue: Double) -> Double {
-        defer {
-            lastAtSeconds = newValue
-            lastChangeTime = .init()
-        }
-        guard let lastAtSeconds, let lastChangeTime else { return Self.baseToleranceSeconds }
-        let dt = Date().timeIntervalSince(lastChangeTime)
-        guard dt > 0 else { return Self.baseToleranceSeconds }
-        let contentVelocity = abs(newValue - lastAtSeconds) / dt
-        return min(Self.maxToleranceSeconds, max(Self.baseToleranceSeconds, contentVelocity * 0.5))
-    }
-
-    /// Entry point every seek request goes through — never calls
-    /// `player.seek` directly itself. While a seek is already running, this
-    /// just overwrites `pendingSeek` with the newest request and returns;
-    /// `performSeek`'s own completion handler is what actually issues the
-    /// next one once the player is free.
-    private func requestSeek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
-        guard !isSeeking else {
-            pendingSeek = (seconds, toleranceSeconds)
-            return
-        }
-        performSeek(player, to: seconds, toleranceSeconds: toleranceSeconds)
-    }
-
-    private func performSeek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
-        isSeeking = true
-        let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
-        let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
-        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
-            isSeeking = false
-            guard let pending = pendingSeek else { return }
-            pendingSeek = nil
-            performSeek(player, to: pending.seconds, toleranceSeconds: pending.toleranceSeconds)
+        .task(id: atSeconds) {
+            try? await Task.sleep(nanoseconds: Self.settleNanoseconds)
+            guard !Task.isCancelled else { return }
+            let target = atSeconds
+            guard let image = await SharpFrameLoader.shared.image(assetId: assetId, url: url, atSeconds: target),
+                  !Task.isCancelled
+            else { return }
+            sharpFrame = (target, image)
         }
     }
 }

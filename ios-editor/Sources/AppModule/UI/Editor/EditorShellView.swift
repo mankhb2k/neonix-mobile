@@ -25,21 +25,16 @@ struct EditorShellView: View {
     /// default.
     @State private var isPlaying = true
     @State private var lastTick: Date = .init()
-    /// Real decoded playback, added 2026-10-08 per the user's own request
-    /// after testing on a real iPhone: Play used to just re-seek a frame
-    /// 60 times/sec via `ScrubPlayerView` (the same tolerant-seek path
-    /// scrubbing uses) — fine for scrubbing, but nothing like genuinely
-    /// smooth decoded video. Deliberately scoped narrow ("gỡ từng nút
-    /// thắt" — untangle one knot at a time, not everything at once): while
-    /// `isPlaying` and the playhead sits over a video layer, a real
-    /// `AVPlayer` actually plays (`.play()`, not repeated seeks) and
-    /// *drives* `currentTimeMs` from its own periodic time observer
-    /// instead of the software `playbackTimer` tick. The instant no video
-    /// covers the current moment (a text-only stretch, or no video layer
-    /// at all), playback falls back to the pre-existing software clock —
-    /// same `onReceive(playbackTimer)` as before, untouched. Scrub/paused
-    /// frame rendering (`ScrubPlayerView`) is explicitly out of scope here
-    /// and left exactly as it was.
+    /// Real decoded playback: while `isPlaying` and the playhead sits over a
+    /// video layer, a real `AVPlayer` actually plays (`.play()`, not
+    /// repeated seeks) and *drives* `currentTimeMs` from its own periodic
+    /// time observer — the media clock is the master during playback, same
+    /// as any player. The instant no video covers the current moment (a
+    /// text-only stretch, or no video layer at all), playback falls back to
+    /// the software `playbackTimer` clock. Paused/scrubbing never touches
+    /// this player: the Stage reads cached decoded frames instead
+    /// (`ScrubFrameView`/`ScrubFrameCache`), so during a scrub
+    /// `currentTimeMs` is the only source of truth.
     @State private var playbackPlayer: AVPlayer?
     @State private var playbackAssetId: String?
     @State private var playbackTimeObserver: Any?
@@ -270,8 +265,8 @@ struct EditorShellView: View {
 
     /// Handed to `PreviewCanvas` so its matching video layer renders the
     /// real player's live output (`VideoPlayerLayerView`) instead of
-    /// `ScrubPlayerView`'s tolerant-seeked still frames — `nil` whenever
-    /// nothing is actually playing right now.
+    /// `ScrubFrameView`'s cached frames — `nil` whenever nothing is
+    /// actually playing right now.
     private var activePlayerInfo: (assetId: String, player: AVPlayer)? {
         guard let playbackPlayer, let playbackAssetId else { return nil }
         return (playbackAssetId, playbackPlayer)

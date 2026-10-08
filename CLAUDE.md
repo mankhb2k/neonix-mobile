@@ -3,6 +3,51 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Scrubbing renders from a decoded frame cache, not an `AVPlayer` seek
+
+Changed 2026-10-08, superseding `ScrubPlayerView` (deleted) and the two
+notes below about tolerant/serialized seeks. The user tested on a real
+iPhone: scrubbing forward felt fine, scrubbing backward stuttered. Root
+cause measured, not guessed: both sample videos have a keyframe only every
+**250 frames (~8.3 s)** (`AVAssetReader` + `kCMSampleAttachmentKey_NotSync`
+probe). Every backward `seek` lands mid-GOP and forces a decode walk from
+the previous keyframe; forward motion can mostly keep decoding onward.
+No seek tolerance or seek serialization can remove that cost.
+
+**Architecture now** (`currentTimeMs` is the only source of truth while
+paused/scrubbing — no `AVPlayer` on that path at all):
+- `Runtime/ScrubFrameCache.swift` — `ScrubFrameDecoder` decodes a whole
+  time *window* sequentially with `AVAssetReaderVideoCompositionOutput`
+  (rotated + downscaled to 640 px long edge on the GPU, 15 fps), so the
+  keyframe walk is paid once per window instead of once per seek.
+  `ScrubFrameCache` (`@Observable`, main actor) stores the frames, picks
+  windows biased toward the direction of motion (2 s behind / 6 s ahead),
+  starts the next window 1 s before the edge, and evicts frames more than
+  6 s from the playhead. Tunables live in `ScrubFrameTuning` (memory is
+  roughly 165 MB worst case per asset at current values).
+- `PreviewCanvas.swift`'s `ScrubFrameView` reads the nearest cached frame
+  **synchronously in `body`** — the same render pass as every other layer
+  — and calls `prefetch` on each `atSeconds` change. After 150 ms of no
+  movement it swaps in an exact full-quality frame (`SharpFrameLoader`,
+  zero-tolerance `AVAssetImageGenerator`), because cached frames are
+  downscaled and quantized to 15 fps.
+- Play is unchanged: a real `AVPlayer` plays and drives `currentTimeMs`
+  (media clock as master during playback is standard and intentional).
+
+**Deliberately not done**: an MTKView/Metal compositor. `PreviewCanvas`
+already evaluates every layer at the same `atMs`; the bottleneck was
+decode, not compositing. Revisit only if compositing many layers becomes
+the bottleneck. The real long-term fix for long-GOP footage is an
+all-intra/short-GOP proxy made at import, which is also what pro NLEs do.
+
+**Known gap found while doing this, not fixed**: `ResolvedLayerFrame.
+elapsedMs` (and `EditorShellView`'s play seek) ignore `V2VideoPayload.
+trimStart`, so after a left trim both scrub and play show source frames
+offset by the trim amount.
+
+Build clean, unit tests green; no simulator pass this round per the user's
+request (they test on their device).
+
 ## Scrub seeks are now serialized — fixes a real anti-pattern Apple's own docs warn against
 
 Added 2026-10-08, after researching how CapCut-style apps achieve

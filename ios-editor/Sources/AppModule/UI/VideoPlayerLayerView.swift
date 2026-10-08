@@ -2,11 +2,8 @@ import AVFoundation
 import SwiftUI
 
 /// A bare `AVPlayerLayer` host, no native playback controls overlay — this
-/// app owns its own Play/Pause/scrub UI. Used both while actually playing a
-/// video and, since 2026-10-08, by `ScrubPlayerView` for the
-/// paused/scrubbing preview too (a tolerant-seeked `AVPlayer`, not a
-/// `VideoFrameCache`-extracted still image — see that type's doc comment
-/// for why).
+/// app owns its own Play/Pause/scrub UI. Used only while actually playing;
+/// paused/scrubbing renders cached decoded frames instead (`ScrubFrameView`).
 struct VideoPlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
     let gravity: AVLayerVideoGravity
