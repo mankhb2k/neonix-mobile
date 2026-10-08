@@ -1,6 +1,6 @@
 # Editor screen — UI design notes
 
-Design rationale for `apps/ios-editor/Sources/AppModule/UI/Editor/` and
+Design rationale for `ios-editor/Sources/AppModule/UI/Editor/` and
 `UI/PreviewCanvas.swift`. Source files keep short pointer comments; the
 "why" lives here so source stays readable.
 
@@ -1048,7 +1048,7 @@ and confirmed green afterward.
 
 ## Verification
 
-`apps/ios-editor/UITests/EditorNavigationUITests.swift` — real tap-driven
+`ios-editor/UITests/EditorNavigationUITests.swift` — real tap-driven
 tests (`XCUIApplication`) covering all 3 sample aspect ratios. This is the
 only verification method in this project that synthesizes an actual touch;
 everything else (`xcodebuild build`, unit tests, `simctl io screenshot`)

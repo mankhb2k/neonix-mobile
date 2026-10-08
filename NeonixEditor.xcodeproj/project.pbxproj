@@ -261,7 +261,7 @@
 				C43708708F363602634A35FC /* UI */,
 			);
 			name = AppModule;
-			path = "apps/ios-editor/Sources/AppModule";
+			path = "ios-editor/Sources/AppModule";
 			sourceTree = "<group>";
 		};
 		C43708708F363602634A35FC /* UI */ = {
@@ -287,7 +287,7 @@
 				4282E3502362639603E1394C /* ProtocolCodableTests.swift */,
 			);
 			name = AppModuleTests;
-			path = "apps/ios-editor/Tests/AppModuleTests";
+			path = "ios-editor/Tests/AppModuleTests";
 			sourceTree = "<group>";
 		};
 		D2A3C16A96563D64EE861441 /* Projects */ = {
@@ -305,7 +305,7 @@
 				44FECB0F61D131A077EDBECD /* Media */,
 			);
 			name = Resources;
-			path = "apps/ios-editor/Sources/AppModule/Resources";
+			path = "ios-editor/Sources/AppModule/Resources";
 			sourceTree = "<group>";
 		};
 		E0A5D7D894686EE3B5C3F1BE /* UITests */ = {
@@ -314,7 +314,7 @@
 				C06368F577DFEE4AACF0740A /* EditorNavigationUITests.swift */,
 			);
 			name = UITests;
-			path = "apps/ios-editor/UITests";
+			path = "ios-editor/UITests";
 			sourceTree = "<group>";
 		};
 		F839889FD42ECB08D6B6DA07 /* EditorDocument */ = {

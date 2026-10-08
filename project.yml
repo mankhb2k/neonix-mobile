@@ -9,10 +9,10 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: apps/ios-editor/Sources/AppModule
+      - path: ios-editor/Sources/AppModule
         excludes:
           - Resources
-      - path: apps/ios-editor/Sources/AppModule/Resources
+      - path: ios-editor/Sources/AppModule/Resources
         buildPhase: resources
     settings:
       base:
@@ -32,7 +32,7 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: apps/ios-editor/Tests/AppModuleTests
+      - path: ios-editor/Tests/AppModuleTests
     dependencies:
       - target: NeonixEditor
     settings:
@@ -44,7 +44,7 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - path: apps/ios-editor/UITests
+      - path: ios-editor/UITests
     dependencies:
       - target: NeonixEditor
     settings:
