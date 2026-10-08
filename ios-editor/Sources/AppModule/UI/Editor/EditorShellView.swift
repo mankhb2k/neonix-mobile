@@ -39,6 +39,12 @@ struct EditorShellView: View {
     @State private var playbackAssetId: String?
     /// Source↔timeline mapping of the clip `playbackPlayer` was seeked for.
     @State private var playbackMapping: VideoTimeMapping?
+    /// `false` from the moment a new playback session starts until its
+    /// initial seek has actually completed. Until then the player isn't
+    /// handed to the Stage (it would show its old frame or black) and its
+    /// time observer is ignored (it can still report the *old* position,
+    /// which used to yank `currentTimeMs` backward for a moment on Play).
+    @State private var playbackSeekCompleted = false
     @State private var playbackTimeObserver: Any?
     /// One `AVPlayer` created up front per video asset (2026-10-08, at the
     /// user's own request — "nạp sẵn video vào RAM"), not lazily the first
@@ -239,9 +245,15 @@ struct EditorShellView: View {
         playbackAssetId = active.assetId
         playbackMapping = mapping
         let sourceSeconds = mapping.sourceMs(atTimelineMs: currentTimeMs) / 1000
-        player.seek(to: CMTime(seconds: sourceSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        playbackSeekCompleted = false
+        player.seek(to: CMTime(seconds: sourceSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [self] finished in
+            DispatchQueue.main.async {
+                if finished, playbackPlayer === player { playbackSeekCompleted = true }
+            }
+        }
         let interval = CMTime(seconds: 1.0 / 60, preferredTimescale: 600)
         playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [self] time in
+            guard playbackSeekCompleted else { return }
             let timelineMs = mapping.timelineMs(atSourceMs: time.seconds * 1000)
             if timelineMs >= maxDurationMs {
                 currentTimeMs = 0
@@ -267,14 +279,15 @@ struct EditorShellView: View {
         playbackPlayer = nil
         playbackAssetId = nil
         playbackMapping = nil
+        playbackSeekCompleted = false
     }
 
-    /// Handed to `PreviewCanvas` so its matching video layer renders the
-    /// real player's live output (`VideoPlayerLayerView`) instead of
-    /// `ScrubFrameView`'s cached frames — `nil` whenever nothing is
-    /// actually playing right now.
+    /// Handed to `PreviewCanvas` so its matching video layer shows the real
+    /// player's live output on top of the cached still — `nil` whenever
+    /// nothing is playing, and also until the session's initial seek has
+    /// completed (see `playbackSeekCompleted`).
     private var activePlayerInfo: (assetId: String, player: AVPlayer)? {
-        guard let playbackPlayer, let playbackAssetId else { return nil }
+        guard let playbackPlayer, let playbackAssetId, playbackSeekCompleted else { return nil }
         return (playbackAssetId, playbackPlayer)
     }
 

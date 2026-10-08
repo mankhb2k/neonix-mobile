@@ -40,6 +40,19 @@ decode, not compositing. Revisit only if compositing many layers becomes
 the bottleneck. The real long-term fix for long-GOP footage is an
 all-intra/short-GOP proxy made at import, which is also what pro NLEs do.
 
+**Black flash on Play, fixed the same day**: the video branch used to *swap*
+`ScrubFrameView` out for a fresh `AVPlayerLayer`, which draws black until
+its player has decoded a frame. Now `VideoContentView` (`PreviewCanvas.swift`)
+always keeps the still underneath and layers the player on top;
+`VideoPlayerLayerView` stays `alpha = 0` until `isReadyForDisplay`.
+`EditorShellView` only hands the player to the Stage after the session's
+initial seek completes (`playbackSeekCompleted`), and ignores the player's
+time observer until then — it was reporting the old position and yanking
+`currentTimeMs` backward on Play. While playing, `ScrubFrameView` is
+suspended (no background decode competing with the player). On pause the
+paused player keeps showing (`lingeringPlayer`) until an exact still for the
+same moment arrives, or the playhead moves.
+
 **Source-time mapping fixed the same day**: every place that picked a frame
 from the file used timeline-relative time and ignored
 `V2VideoPayload.trimStart` — after a left trim (or for any clip not
