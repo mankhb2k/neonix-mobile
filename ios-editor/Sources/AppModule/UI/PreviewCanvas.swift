@@ -228,8 +228,21 @@ private struct ScrubPlayerView: View {
 
     @State private var player: AVPlayer?
     @State private var settleTask: Task<Void, Never>?
+    /// Tracks `atSeconds`'s own rate of change (content-seconds per
+    /// wall-clock second), not the drag gesture's pixel velocity — this
+    /// view has no idea a drag gesture even exists, it only ever sees the
+    /// resulting `atSeconds` stream, so velocity has to be derived here
+    /// from consecutive values.
+    @State private var lastAtSeconds: Double?
+    @State private var lastChangeTime: Date?
 
     private static let settleDelayNanoseconds: UInt64 = 120_000_000
+    private static let baseToleranceSeconds = VideoFrameCache.scrubBucketMs / 1000
+    /// Widening the tolerance further than this stops buying anything —
+    /// AVFoundation would just be returning whatever's nearest regardless,
+    /// and a too-wide tolerance risks a visibly wrong-looking frame even
+    /// mid-fling.
+    private static let maxToleranceSeconds = 0.3
 
     var body: some View {
         Group {
@@ -247,24 +260,44 @@ private struct ScrubPlayerView: View {
         .task(id: assetId) {
             let newPlayer = AVPlayer(url: url)
             newPlayer.automaticallyWaitsToMinimizeStalling = false
-            seek(newPlayer, to: atSeconds, precise: false)
+            seek(newPlayer, to: atSeconds, toleranceSeconds: Self.baseToleranceSeconds)
             player = newPlayer
         }
         .onChange(of: atSeconds) { _, newValue in
             guard let player else { return }
-            seek(player, to: newValue, precise: false)
+            seek(player, to: newValue, toleranceSeconds: currentTolerance(for: newValue))
             settleTask?.cancel()
             settleTask = Task {
                 try? await Task.sleep(nanoseconds: Self.settleDelayNanoseconds)
                 guard !Task.isCancelled else { return }
-                seek(player, to: newValue, precise: true)
+                seek(player, to: newValue, toleranceSeconds: 0)
             }
         }
     }
 
-    private func seek(_ player: AVPlayer, to seconds: Double, precise: Bool) {
+    /// Widens the seek tolerance the faster `atSeconds` is currently
+    /// moving — during a fast momentum coast (see `TimelineView`'s own
+    /// momentum note) this lets `AVPlayer` reuse whatever frame it already
+    /// has nearby instead of chasing a fresh precise seek on every single
+    /// tick, the same "don't bother being exact while still moving fast"
+    /// idea real editors use. Settles back down to the base tolerance (and
+    /// eventually to an exact `.zero` seek, via `settleTask`) the moment
+    /// movement slows or stops.
+    private func currentTolerance(for newValue: Double) -> Double {
+        defer {
+            lastAtSeconds = newValue
+            lastChangeTime = .init()
+        }
+        guard let lastAtSeconds, let lastChangeTime else { return Self.baseToleranceSeconds }
+        let dt = Date().timeIntervalSince(lastChangeTime)
+        guard dt > 0 else { return Self.baseToleranceSeconds }
+        let contentVelocity = abs(newValue - lastAtSeconds) / dt
+        return min(Self.maxToleranceSeconds, max(Self.baseToleranceSeconds, contentVelocity * 0.5))
+    }
+
+    private func seek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
         let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
-        let tolerance = precise ? CMTime.zero : CMTime(seconds: VideoFrameCache.scrubBucketMs / 1000, preferredTimescale: 600)
+        let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 }

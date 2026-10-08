@@ -81,6 +81,17 @@ struct TimelineView: View {
     /// translation (not an incremental delta, which would drift if SwiftUI
     /// ever redelivers a `DragGesture` from a fresh zero translation).
     @State private var dragStartTimeMs: Double?
+    /// Momentum/inertia after a fast flick — added 2026-10-08 per the
+    /// user's own observation testing on a real iPhone ("thiếu tính năng
+    /// scroll động theo lực tay kéo vuốt"): releasing a fast drag used to
+    /// just stop dead, unlike CapCut's/`UIScrollView`'s own deceleration
+    /// feel. A real per-frame decay loop (not a single `withAnimation` to
+    /// a computed end point) — `currentTimeMs` must hold the actual,
+    /// true-at-this-instant value every frame, not an interpolated-only
+    /// rendering value, so a fresh touch mid-flight (`onChanged` reading
+    /// `currentTimeMs` as its new drag's start) picks up exactly where the
+    /// coast visually was, with no jump.
+    @State private var momentumTask: Task<Void, Never>?
     /// Placeholder toggle — this editor doesn't play real audio at all yet
     /// (see `VideoFrameCache`'s doc comment: preview is driven by a custom
     /// clock, not `AVPlayer` playback), so there's nothing to actually mute.
@@ -206,12 +217,30 @@ struct TimelineView: View {
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
                             onScrub()
+                            if dragStartTimeMs == nil {
+                                // A fresh touch always wins over whatever
+                                // momentum coast was still playing out —
+                                // cancelling here (not just in `onEnded`)
+                                // is what makes `currentTimeMs` the true
+                                // live position a new drag can safely
+                                // start from.
+                                momentumTask?.cancel()
+                                dragStartTimeMs = currentTimeMs
+                            }
                             let start = dragStartTimeMs ?? currentTimeMs
-                            if dragStartTimeMs == nil { dragStartTimeMs = currentTimeMs }
                             let proposed = start - Double(value.translation.width) / pxPerMs
                             currentTimeMs = min(max(proposed, 0), maxDurationMs)
                         }
-                        .onEnded { _ in dragStartTimeMs = nil }
+                        .onEnded { value in
+                            dragStartTimeMs = nil
+                            // `.velocity` (points/sec, iOS 17+) — negated
+                            // and unit-converted the same way `onChanged`
+                            // converts translation to ms, so a release
+                            // continues exactly the direction/speed the
+                            // finger was already moving.
+                            let msPerSecond = -Double(value.velocity.width) / pxPerMs
+                            startMomentum(initialMsPerSecond: msPerSecond)
+                        }
                 )
             }
             .frame(maxHeight: .infinity)
@@ -226,6 +255,39 @@ struct TimelineView: View {
         .background(Color(.systemBackground))
         .task(id: coverAssetKey) {
             await loadCoverImage()
+        }
+    }
+
+    /// Starts (or replaces) the post-release coast: a real per-frame loop,
+    /// not a single `withAnimation`, applying exponential friction to the
+    /// release velocity every tick until it's imperceptibly slow or the
+    /// playhead runs into either end of the timeline. `frictionPerSecond`
+    /// is the fraction of velocity *remaining* after a full second — 0.04
+    /// means a fast flick coasts for roughly half a second before settling,
+    /// matching `UIScrollView`'s own felt deceleration without copying its
+    /// exact (private) curve.
+    private func startMomentum(initialMsPerSecond: Double) {
+        momentumTask?.cancel()
+        guard abs(initialMsPerSecond) > 40 else { return }
+        let frictionPerSecond = 0.04
+        let stopThresholdMsPerSecond = 15.0
+        var velocity = initialMsPerSecond
+        var lastTick = Date()
+        momentumTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 16_000_000)
+                guard !Task.isCancelled else { return }
+                let now = Date()
+                let dt = now.timeIntervalSince(lastTick)
+                lastTick = now
+                velocity *= pow(frictionPerSecond, dt)
+                let next = currentTimeMs + velocity * dt
+                let clamped = min(max(next, 0), maxDurationMs)
+                currentTimeMs = clamped
+                if clamped != next || abs(velocity) < stopThresholdMsPerSecond {
+                    return
+                }
+            }
         }
     }
 

@@ -3,6 +3,43 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Timeline momentum scrolling + velocity-aware scrub tolerance
+
+Added 2026-10-08, after the user tested the scrub-lag fix above on a real
+iPhone and flagged two more things: (1) releasing a fast drag on the
+timeline just stopped dead — no inertia/coast, unlike CapCut's or any
+native `UIScrollView`'s feel; (2) a theory that CapCut's smoothness comes
+from direct Photos-library data access. (2) doesn't hold up — this app's
+video files are already local bundled assets, exactly as "close" as a
+Photos-library asset would be; the real technique (confirmed, not a
+Photos internal) is widening seek tolerance while moving fast and
+narrowing it once settled, which `ScrubPlayerView` already did in a fixed
+(non-velocity-aware) way.
+
+- **Momentum** (`TimelineView.swift`'s main scrub `DragGesture`): a real
+  per-frame exponential-friction decay loop (`startMomentum`), not a
+  single `withAnimation` to a computed end point — `currentTimeMs` must
+  hold the true, instant-accurate value every frame (not just an
+  interpolated rendering value) so a fresh touch mid-coast can read it as
+  its own drag's correct starting point with no visible jump. Seeded from
+  `DragGesture.Value.velocity` (iOS 17+), friction tuned so a fast flick
+  coasts roughly half a second. A new touch (`onChanged`'s first tick)
+  cancels any in-flight momentum task immediately.
+- **Velocity-aware scrub tolerance** (`PreviewCanvas.swift`'s
+  `ScrubPlayerView`): derives `atSeconds`'s own rate of change (content-
+  seconds per wall-clock second — this view has no idea a drag gesture
+  exists, only the resulting value stream) and widens the `AVPlayer` seek
+  tolerance proportionally (capped at 0.3s) while moving fast, instead of
+  always using the fixed `VideoFrameCache.scrubBucketMs` tolerance — lets
+  `AVPlayer` reuse a nearby already-decoded frame during a fast coast
+  rather than chasing a fresh precise seek every tick. The existing
+  120ms-settle → zero-tolerance precise seek is unchanged.
+
+Build + full unit/UI test suite green. Same caveat as the scrub-lag fix
+above: `simctl` cannot synthesize a real drag/flick gesture, so the actual
+felt smoothness of momentum + tolerance scaling needs a real device/
+simulator touch test, not just a screenshot.
+
 ## `project.yml` now pins `DEVELOPMENT_TEAM` — regenerating used to silently wipe the user's manually-picked signing team
 
 Found 2026-10-08, right after the user got real-device signing working
