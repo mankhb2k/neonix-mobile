@@ -3,6 +3,50 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Scrub seeks are now serialized — fixes a real anti-pattern Apple's own docs warn against
+
+Added 2026-10-08, after researching how CapCut-style apps achieve
+real-time scrubbing (web research, not guessed — see this session's
+sources: Apple's Technical Q&A QA1820 and the AVFoundation transport-
+behavior docs). QA1820 states plainly: calling `AVPlayer.seek(to:)`
+repeatedly in rapid succession **cancels each seek already in flight**,
+producing "a lot of seeking and not a lot of displaying of the target
+frames" — Apple's own fix is to use the completion-handler variant and
+never issue a new seek until the previous one has actually finished,
+keeping only the latest requested time pending in the meantime.
+
+`ScrubPlayerView`'s `.onChange(of: atSeconds)` was doing exactly the
+anti-pattern QA1820 warns against: calling `player.seek(to:...)` (no
+completion handler) on every single tick during momentum/fast scrubbing,
+with no regard for whether the previous seek had finished — very likely
+the real remaining source of stutter even after velocity-aware tolerance
+was already in place.
+
+**Fixed**: every seek now goes through `requestSeek(_:to:toleranceSeconds:)`
+instead of calling `player.seek` directly. If a seek is already running
+(`isSeeking`), the request is just recorded as `pendingSeek` (overwriting
+any earlier pending one) and returns immediately — no new seek fires.
+`performSeek`'s own completion handler is the only place that ever starts
+the *next* seek, using whatever the latest `pendingSeek` is by then. This
+naturally collapses any burst of rapid-fire requests down to "the most
+recent target, applied the instant the player is free" — never queuing or
+replaying every intermediate position, matching the "only render the
+newest frame" principle from the same research pass.
+
+Deliberately not pursued (flagged as a separate, much larger undertaking
+if simple serialization turns out insufficient): dropping `AVPlayerLayer`
+entirely for scrubbing in favor of a dedicated Metal/`MTKView` frame-
+decode pipeline, the way professional NLEs (Premiere/Final Cut/DaVinci)
+actually do it. That's real, sound architecture for a mature editor, but
+a multi-day rewrite affecting every layer type's render path, not a
+targeted fix — only worth it if the cheap, documented QA1820 fix above
+turns out not to be enough.
+
+Build + unit test suite (`NeonixEditorTests`) green. Per the user's own
+request this round, UI tests and a simulator screenshot pass were
+deliberately skipped — they're testing the actual feel on their own real
+device and will ask for verification when they want it.
+
 ## Play now uses a real `AVPlayer` clock — scrubbing's tolerant-seek path is explicitly untouched
 
 Added 2026-10-08, after the user tested momentum scrolling on a real

@@ -235,6 +235,17 @@ private struct ScrubPlayerView: View {
     /// from consecutive values.
     @State private var lastAtSeconds: Double?
     @State private var lastChangeTime: Date?
+    /// Serializes seeks per Apple's own Technical Q&A QA1820: calling
+    /// `AVPlayer.seek(to:)` again while a previous seek is still in flight
+    /// cancels it, producing "a lot of seeking and not a lot of displaying
+    /// of the target frames" — exactly the residual stutter a user flagged
+    /// testing momentum scrubbing on a real device, even after tolerant
+    /// seeking and velocity-aware tolerance were already in place. Only
+    /// the *latest* requested (seconds, tolerance) survives while a seek
+    /// is running; the next seek fires from the completion handler, never
+    /// from `onChange` directly.
+    @State private var isSeeking = false
+    @State private var pendingSeek: (seconds: Double, toleranceSeconds: Double)?
 
     private static let settleDelayNanoseconds: UInt64 = 120_000_000
     private static let baseToleranceSeconds = VideoFrameCache.scrubBucketMs / 1000
@@ -260,17 +271,17 @@ private struct ScrubPlayerView: View {
         .task(id: assetId) {
             let newPlayer = AVPlayer(url: url)
             newPlayer.automaticallyWaitsToMinimizeStalling = false
-            seek(newPlayer, to: atSeconds, toleranceSeconds: Self.baseToleranceSeconds)
             player = newPlayer
+            requestSeek(newPlayer, to: atSeconds, toleranceSeconds: Self.baseToleranceSeconds)
         }
         .onChange(of: atSeconds) { _, newValue in
             guard let player else { return }
-            seek(player, to: newValue, toleranceSeconds: currentTolerance(for: newValue))
+            requestSeek(player, to: newValue, toleranceSeconds: currentTolerance(for: newValue))
             settleTask?.cancel()
             settleTask = Task {
                 try? await Task.sleep(nanoseconds: Self.settleDelayNanoseconds)
                 guard !Task.isCancelled else { return }
-                seek(player, to: newValue, toleranceSeconds: 0)
+                requestSeek(player, to: newValue, toleranceSeconds: 0)
             }
         }
     }
@@ -295,10 +306,29 @@ private struct ScrubPlayerView: View {
         return min(Self.maxToleranceSeconds, max(Self.baseToleranceSeconds, contentVelocity * 0.5))
     }
 
-    private func seek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
+    /// Entry point every seek request goes through — never calls
+    /// `player.seek` directly itself. While a seek is already running, this
+    /// just overwrites `pendingSeek` with the newest request and returns;
+    /// `performSeek`'s own completion handler is what actually issues the
+    /// next one once the player is free.
+    private func requestSeek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
+        guard !isSeeking else {
+            pendingSeek = (seconds, toleranceSeconds)
+            return
+        }
+        performSeek(player, to: seconds, toleranceSeconds: toleranceSeconds)
+    }
+
+    private func performSeek(_ player: AVPlayer, to seconds: Double, toleranceSeconds: Double) {
+        isSeeking = true
         let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
         let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
-        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+            isSeeking = false
+            guard let pending = pendingSeek else { return }
+            pendingSeek = nil
+            performSeek(player, to: pending.seconds, toleranceSeconds: pending.toleranceSeconds)
+        }
     }
 }
 
