@@ -142,8 +142,6 @@ struct TimelineView: View {
             GeometryReader { geo in
                 let centerX = geo.size.width / 2
                 let contentOffsetX = centerX - CGFloat(currentTimeMs) * pxPerMs
-                let visibleLower = CGFloat(currentTimeMs) * pxPerMs - Double(centerX)
-                let visibleRange: ClosedRange<Double> = visibleLower...(visibleLower + Double(geo.size.width))
 
                 ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: rowsTopPadding) {
@@ -157,7 +155,6 @@ struct TimelineView: View {
                                     clips: lane(for: order),
                                     pxPerMs: pxPerMs,
                                     rowHeight: isMainLane ? rowHeight : otherRowHeight,
-                                    visibleRange: visibleRange,
                                     centerX: centerX,
                                     showsCoverAndMute: isMainLane,
                                     coverImage: coverImage,
@@ -319,7 +316,6 @@ private struct LaneRowView: View {
     let clips: [V2Layer]
     let pxPerMs: Double
     let rowHeight: CGFloat
-    let visibleRange: ClosedRange<Double>
     /// Half the viewport's own width — a per-geometry layout constant (from
     /// `GeometryReader`'s `geo.size.width / 2`, recomputed only when the
     /// panel itself resizes), not a scroll-position value like
@@ -394,7 +390,6 @@ private struct LaneRowView: View {
                         audioURL: resolveAudioURL(layer),
                         pxPerMs: pxPerMs,
                         rowHeight: rowHeight,
-                        visibleRange: visibleRange,
                         isSelected: isSelected,
                         onTrimBegin: onTrimBegin,
                         onTrimUpdate: onTrimUpdate,
@@ -582,11 +577,14 @@ private struct TimeRulerView: View {
 
 /// A video track's clip, rendered as a real filmstrip — one square tile per
 /// `rowHeight`-wide slice of the clip, each showing the actual decoded
-/// frame at that point (reusing `VideoFrameCache`, the same cache
-/// `PreviewCanvas` uses for scrub frames — no new decode path). Tiles
-/// outside `visibleRange` stay a plain gray placeholder and never trigger a
-/// decode, so the filmstrip can be arbitrarily long without decoding frames
-/// that are off-screen.
+/// frame at that point. Every tile's thumbnail is fetched in **one batch**
+/// (`VideoFrameCache.filmstripImages`, AVFoundation's own
+/// `generateCGImagesAsynchronously` API) when the clip appears or its width
+/// changes, rather than each tile firing its own independent decode —
+/// real editors build filmstrips this way (see CLAUDE.md's scrubbing-lag
+/// investigation, 2026-10-08). Not yet windowed to only on-screen tiles —
+/// fine for this app's short sample clips; a very long clip would want
+/// that back (see `VideoFrameCache.filmstripImages`'s own doc comment).
 ///
 /// When `audioURL` is present (the video asset has an embedded-audio
 /// derivative — see `TimelineView.audioDerivativeURL(for:)`), a thin
@@ -605,7 +603,6 @@ private struct FilmstripClipView: View {
     let audioURL: URL?
     let pxPerMs: Double
     let rowHeight: CGFloat
-    let visibleRange: ClosedRange<Double>
     let isSelected: Bool
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
@@ -625,6 +622,10 @@ private struct FilmstripClipView: View {
     /// means the drag does nothing past the known-safe range until the
     /// duration arrives, which is normally near-instant).
     @State private var assetDurationMs: Double?
+    /// Every tile's decoded thumbnail, fetched in one batch (see
+    /// `VideoFrameCache.filmstripImages`) rather than per-tile — keyed by
+    /// tile index, matching the order `tileSeconds(_:)` produces.
+    @State private var tileImages: [Int: UIImage] = [:]
     private let minDurationMs: Double = 200
 
     private var clipWidth: CGFloat {
@@ -639,14 +640,9 @@ private struct FilmstripClipView: View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 ForEach(0..<tileCount, id: \.self) { index in
-                    FilmstripTileView(
-                        assetId: assetId,
-                        assetURL: assetURL,
-                        atSeconds: tileSeconds(index),
-                        isVisible: isTileVisible(index)
-                    )
-                    .frame(width: tileWidth(index), height: rowHeight)
-                    .clipped()
+                    FilmstripTileView(image: tileImages[index])
+                        .frame(width: tileWidth(index), height: rowHeight)
+                        .clipped()
                 }
             }
 
@@ -682,6 +678,21 @@ private struct FilmstripClipView: View {
         .task(id: isSelected) {
             guard isSelected, let assetURL else { return }
             assetDurationMs = await AssetDurationCache.shared.durationMs(url: assetURL)
+        }
+        // Batches every tile's thumbnail in one `generateCGImagesAsynchronously`
+        // call (see `VideoFrameCache.filmstripImages`) instead of each tile
+        // firing its own request — keyed on `assetId`/`tileCount` so a trim
+        // that changes the clip's own width re-fetches the (now different)
+        // tile times, but ordinary re-renders (e.g. selection toggling)
+        // don't re-trigger it. Consumes the stream tile-by-tile (not one
+        // final collected dictionary) so tiles fill in as each decode
+        // actually finishes, not all at once after the whole batch settles.
+        .task(id: FilmstripBatchKey(assetId: assetId, tileCount: tileCount)) {
+            guard let assetId, let assetURL else { return }
+            let times = (0..<tileCount).map(tileSeconds)
+            for await (index, image) in VideoFrameCache.shared.filmstripImages(assetId: assetId, url: assetURL, times: times) {
+                if let image { tileImages[index] = image }
+            }
         }
     }
 
@@ -796,11 +807,6 @@ private struct FilmstripClipView: View {
         return (layer.timing.start + min(localMs, layer.timing.duration)) / 1000
     }
 
-    private func isTileVisible(_ index: Int) -> Bool {
-        let tileStartX = layer.timing.start * pxPerMs + Double(index) * Double(rowHeight)
-        let tileRange = tileStartX...(tileStartX + Double(rowHeight))
-        return tileRange.overlaps(visibleRange)
-    }
 }
 
 /// Drag-to-trim handle — restyled 2026-10-08 to match the iOS Photos app's
@@ -952,29 +958,30 @@ func nextClipStart(in laneClips: [V2Layer], after layerId: String, originalStart
         .min()
 }
 
+/// Pure display — the image it shows is fetched upstream by
+/// `FilmstripClipView`'s own batch request (`VideoFrameCache.filmstripImages`),
+/// not by this view itself; a `nil` image (not yet arrived, or the batch
+/// request failed) just shows the gray placeholder.
 private struct FilmstripTileView: View {
-    let assetId: String?
-    let assetURL: URL?
-    let atSeconds: Double
-    let isVisible: Bool
-
-    @State private var image: UIImage?
+    let image: UIImage?
 
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                Color.gray.opacity(0.3)
-            }
-        }
-        .task(id: isVisible) {
-            guard isVisible, image == nil, let assetId, let assetURL else { return }
-            image = await VideoFrameCache.shared.frame(assetId: assetId, url: assetURL, atSeconds: atSeconds)
+        if let image {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            Color.gray.opacity(0.3)
         }
     }
+}
+
+/// `.task(id:)` key for `FilmstripClipView`'s batch thumbnail fetch —
+/// re-fetches only when the asset or the tile count itself changes (e.g. a
+/// trim that widens/narrows the clip), not on every unrelated re-render.
+private struct FilmstripBatchKey: Equatable {
+    let assetId: String?
+    let tileCount: Int
 }
 
 /// Loads a file's full-waveform envelope (`WaveformCache`, decoded once per

@@ -150,19 +150,13 @@ private struct LayerNodeView: View {
 }
 
 /// Renders one layer's own content (before the shared transform/opacity
-/// modifiers `LayerNodeView` applies): a flat color for a shape, or a still
-/// frame for image/video — see `VideoFrameCache` for why video uses an
-/// asynchronously-extracted frame rather than `AVPlayer` while paused.
+/// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
+/// still frame for an image, or a tolerant-seeked `AVPlayer` for video (see
+/// `ScrubPlayerView`).
 private struct LayerContentView: View {
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
     let activePlayer: (assetId: String, player: AVPlayer)?
-
-    /// Last successfully decoded scrub frame. Kept on screen (not cleared)
-    /// while a new one is still loading, so scrubbing shows the previous
-    /// frame instead of a flash of gray between every tick — see
-    /// `VideoFrameCache`'s doc comment.
-    @State private var cachedVideoImage: UIImage?
 
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
@@ -179,19 +173,7 @@ private struct LayerContentView: View {
             if let asset, let activePlayer, activePlayer.assetId == asset.id {
                 VideoPlayerLayerView(player: activePlayer.player, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
             } else if let asset, let url = bundledURL(filename: asset.uri) {
-                Group {
-                    if let cachedVideoImage {
-                        Image(uiImage: cachedVideoImage)
-                            .resizable()
-                            .aspectRatio(contentMode: contentMode)
-                    } else {
-                        Color.gray
-                    }
-                }
-                .task(id: VideoFrameCache.scrubBucket(forMs: frame.elapsedMs)) {
-                    guard let image = await VideoFrameCache.shared.frame(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000) else { return }
-                    cachedVideoImage = image
-                }
+                ScrubPlayerView(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
             } else {
                 Color.gray
             }
@@ -219,6 +201,71 @@ private struct LayerContentView: View {
         default:
             Rectangle().fill(Color(hex: frame.fill ?? "#000000"))
         }
+    }
+}
+
+/// A paused `AVPlayer`, kept seeked to `atSeconds` via a *tolerant* seek on
+/// every change (cheap — reuses whatever frame AVFoundation already has
+/// buffered nearby) so the Stage visually tracks a fast scrub drag in real
+/// time, matching how CapCut/Photos feel (see CLAUDE.md's scrubbing-lag
+/// investigation, 2026-10-08) — replacing the earlier
+/// `VideoFrameCache`-extracted-still-image approach for this one spot,
+/// which only showed the *previous* scrub bucket's frame while a fresh
+/// single-frame decode was still in flight, visually catching up only once
+/// the drag stopped and bucket requests stopped racing ahead of their own
+/// decodes. `VideoFrameCache` itself is untouched and still backs the
+/// filmstrip (`FilmstripClipView`) and `AssetDurationCache`.
+///
+/// Once `atSeconds` stops changing for `settleDelayNanoseconds`, one final
+/// zero-tolerance seek snaps to the exact frame — a tolerant seek can land
+/// a bucket-width or so off, which is fine mid-drag (nothing holds still
+/// long enough to notice) but not once the user has actually stopped.
+private struct ScrubPlayerView: View {
+    let assetId: String
+    let url: URL
+    let atSeconds: Double
+    let gravity: AVLayerVideoGravity
+
+    @State private var player: AVPlayer?
+    @State private var settleTask: Task<Void, Never>?
+
+    private static let settleDelayNanoseconds: UInt64 = 120_000_000
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayerLayerView(player: player, gravity: gravity)
+            } else {
+                Color.gray
+            }
+        }
+        // Keyed on `assetId`, not on every `atSeconds` tick — this creates
+        // the player exactly once per asset (a fresh `AVPlayer` per scrub
+        // tick would defeat the whole point, re-paying asset load cost on
+        // every drag movement); `atSeconds` changes are handled below by
+        // seeking the *same* player instead of recreating it.
+        .task(id: assetId) {
+            let newPlayer = AVPlayer(url: url)
+            newPlayer.automaticallyWaitsToMinimizeStalling = false
+            seek(newPlayer, to: atSeconds, precise: false)
+            player = newPlayer
+        }
+        .onChange(of: atSeconds) { _, newValue in
+            guard let player else { return }
+            seek(player, to: newValue, precise: false)
+            settleTask?.cancel()
+            settleTask = Task {
+                try? await Task.sleep(nanoseconds: Self.settleDelayNanoseconds)
+                guard !Task.isCancelled else { return }
+                seek(player, to: newValue, precise: true)
+            }
+        }
+    }
+
+    private func seek(_ player: AVPlayer, to seconds: Double, precise: Bool) {
+        let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
+        let tolerance = precise ? CMTime.zero : CMTime(seconds: VideoFrameCache.scrubBucketMs / 1000, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 }
 

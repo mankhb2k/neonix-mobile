@@ -52,6 +52,70 @@ final class VideoFrameCache {
         return image
     }
 
+    /// Batch filmstrip generation — one `generateCGImagesAsynchronously`
+    /// call for every tile a clip needs, instead of `FilmstripTileView`
+    /// firing its own independent `image(at:)` request per tile. This is
+    /// AVFoundation's own documented API for exactly this use case (a real
+    /// editor builds its filmstrip this way, not N separate single-frame
+    /// requests) — it lets the generator batch/order the underlying
+    /// decodes itself.
+    ///
+    /// Returns an `AsyncStream`, not a single collected result — a first
+    /// version awaited the *whole* batch before updating anything, which
+    /// for a ~30-tile clip meant the entire filmstrip sat blank for several
+    /// seconds and then populated all at once (caught on the simulator,
+    /// 2026-10-08: logs showed all 34/34 tiles decoding successfully, just
+    /// over ~3.7s, while the UI showed nothing the whole time). Streaming
+    /// each `(index, image)` the moment its own completion fires lets
+    /// `FilmstripClipView` fill tiles in as they individually finish,
+    /// matching the old per-tile behavior's progressive feel while still
+    /// using one batched underlying request.
+    ///
+    /// Keyed by the caller's own array index (not the requested second,
+    /// which would need float-equality dictionary keys) — AVFoundation
+    /// echoes back the exact `CMTime` requested, so a `"value:timescale"`
+    /// string key maps each completion back to its index. Each image is
+    /// also written into the same per-bucket `cache`
+    /// `frame(assetId:url:atSeconds:)` reads, so a later single-frame
+    /// request for a time this batch already covered returns instantly.
+    ///
+    /// Not yet windowed to only currently-visible tiles — a clip's full
+    /// tile set is requested in one call regardless of scroll position,
+    /// a deliberate simplification that's fine for this app's current
+    /// (short, few-second) sample clips. A very long clip would want this
+    /// batched per visible window instead; not implemented yet.
+    func filmstripImages(assetId: String, url: URL, times: [Double]) -> AsyncStream<(index: Int, image: UIImage?)> {
+        AsyncStream { continuation in
+            guard !times.isEmpty else {
+                continuation.finish()
+                return
+            }
+            let generator = self.generator(for: assetId, url: url)
+            let requestTimes = times.map { CMTime(seconds: max($0, 0), preferredTimescale: 600) }
+            var indexByKey: [String: Int] = [:]
+            for (index, time) in requestTimes.enumerated() {
+                indexByKey["\(time.value):\(time.timescale)"] = index
+            }
+            let remaining = FilmstripRemainingCount(times.count)
+            generator.generateCGImagesAsynchronously(forTimes: requestTimes.map { NSValue(time: $0) }) { requestedTime, cgImage, _, result, _ in
+                guard let index = indexByKey["\(requestedTime.value):\(requestedTime.timescale)"] else { return }
+                let image = result == .succeeded ? cgImage.map(UIImage.init(cgImage:)) : nil
+                continuation.yield((index, image))
+                if let image {
+                    // `self` here is `VideoFrameCache.shared`, a singleton —
+                    // no retain-cycle risk from capturing it strongly.
+                    Task { @MainActor in
+                        let bucket = Self.scrubBucket(forMs: times[index] * 1000)
+                        self.cache["\(assetId):\(bucket)"] = image
+                    }
+                }
+                if remaining.decrementAndIsDone() {
+                    continuation.finish()
+                }
+            }
+        }
+    }
+
     private func generator(for assetId: String, url: URL) -> AVAssetImageGenerator {
         if let cached = generators[assetId] { return cached }
         let asset = AVURLAsset(url: url)
@@ -67,5 +131,30 @@ final class VideoFrameCache {
         created.requestedTimeToleranceAfter = tolerance
         generators[assetId] = created
         return created
+    }
+}
+
+/// `generateCGImagesAsynchronously`'s completion handler fires on an
+/// AVFoundation-owned queue, not necessarily serially and not on the
+/// `@MainActor` — so knowing when the batch is fully done needs its own
+/// lock rather than relying on `VideoFrameCache`'s own actor isolation
+/// (that isolation only covers code that actually hops through one of its
+/// `@MainActor` methods, not a raw escaping closure AVFoundation calls
+/// directly). `@unchecked Sendable` is deliberate here: `NSLock` is what
+/// actually makes decrementing `remaining` from arbitrary threads safe,
+/// the compiler just can't see that through a plain class.
+private final class FilmstripRemainingCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: Int
+
+    init(_ count: Int) {
+        remaining = count
+    }
+
+    func decrementAndIsDone() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        remaining -= 1
+        return remaining <= 0
     }
 }

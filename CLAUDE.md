@@ -3,6 +3,65 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Scrubbing lag, fixed two different ways for two different parts of the Timeline
+
+Reported 2026-10-08 as "kéo timeline, video chạy không real-time — kéo xong
+mới chạy" (dragging the timeline, the video doesn't track in real time —
+only starts moving once you stop dragging). Root-caused by actually
+reading the code (`TimelineView`'s `DragGesture`, `PreviewCanvas`,
+`VideoFrameCache`), not guessed: the gesture→`currentTimeMs` path itself
+has zero throttling — the lag was entirely in how the **Stage preview**
+and the **filmstrip thumbnails** each independently fetched video frames.
+Researched how real editors (CapCut/Photos) solve this — not from
+published internals (Photos is closed-source), but from the same public
+AVFoundation APIs any of them would build on — and applied both:
+
+- **Stage preview** (`PreviewCanvas.swift`'s `LayerContentView`) used to
+  extract one still image per scrub bucket via `VideoFrameCache`'s
+  `AVAssetImageGenerator.image(at:)` — async, but still a real decode per
+  bucket, and buckets can advance faster than decodes complete while
+  dragging fast, so the Stage kept showing a stale frame until the drag
+  stopped and the last in-flight decode finally resolved. Replaced with
+  `ScrubPlayerView` (new, same file): a persistent, paused `AVPlayer` per
+  asset, re-seeked with a **tolerant** seek (`toleranceBefore/After`
+  matching `VideoFrameCache.scrubBucketMs`) on every `atMs` change —
+  cheap, reuses whatever's already buffered nearby, tracks the drag in
+  real time. Once `atSeconds` stops changing for 120ms, one final
+  zero-tolerance seek snaps to the exact frame. `VideoFrameCache` itself
+  is untouched and still backs the filmstrip and `AssetDurationCache`.
+- **Filmstrip thumbnails** (`FilmstripClipView`/`FilmstripTileView` in
+  `TimelineView.swift`) used to have each tile fire its own independent
+  `VideoFrameCache.frame(...)` request when it scrolled into view.
+  Replaced with `VideoFrameCache.filmstripImages(assetId:url:times:)`, one
+  `AVAssetImageGenerator.generateCGImagesAsynchronously(forTimes:)` batch
+  call per clip for every tile it needs — the documented AVFoundation API
+  for building a filmstrip, instead of N separate single-frame requests.
+  **A real regression caught on the simulator before shipping this**: the
+  first version awaited the *whole* batch before updating anything: logs
+  showed all 34/34 tiles of a sample clip decoding successfully, correctly,
+  in ~3.7s — but the UI showed nothing for that whole 3.7s, then populated
+  all at once, instead of filling in progressively like the old per-tile
+  version did. Fixed by changing `filmstripImages` to return an
+  `AsyncStream<(index: Int, image: UIImage?)>` instead of a single
+  collected dictionary, so `FilmstripClipView` fills `tileImages[index]`
+  as each tile's own completion actually fires, keeping one batched
+  request but the old progressive-fill feel.
+  `isTileVisible`/`visibleRange` (the old per-tile visibility gate) were
+  removed along with this — the whole clip's tile set is requested in one
+  call regardless of scroll position now, a simplification that's fine for
+  this app's current short sample clips; a very long clip would want this
+  windowed to the visible range instead, not implemented yet (see
+  `VideoFrameCache.filmstripImages`'s own doc comment).
+
+Both changes verified on the simulator (screenshots showing the Stage
+still renders correctly and the filmstrip fills in with real decoded
+frames, not placeholders) and the full unit + UI test suite re-run green.
+Real-time drag tracking itself (does the Stage visually keep up with a
+fast finger drag) could not be verified this way — `simctl` cannot
+synthesize a drag gesture (see this file's own UI-testing note below), so
+confirming the actual scrub-smoothness improvement needs a real device/
+simulator touch test, not just a static screenshot.
+
 ## Bottom nav tools: a phased roadmap exists, Phase 1 is now implemented
 
 Planned 2026-10-08 (via Plan Mode, approved by the user), Phase 1 built the
