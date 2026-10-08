@@ -10,6 +10,7 @@
 		04DF60F0F81E162FEA26F191 /* EditorHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026E3874AD152FB522B477F8 /* EditorHistory.swift */; };
 		114ADC128A49A0F39C058EE2 /* EditorCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFA25B1EA2496F8CF6C52C4 /* EditorCommandTests.swift */; };
 		221F060F4DF4CB362AF66031 /* EditorShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D45E8D8BB1417C878B5A20D /* EditorShellView.swift */; };
+		2274CDACE4770E0D463A8E38 /* EditorPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40B1601F643CD88AB9CB3AF1 /* EditorPlaybackEngine.swift */; };
 		24E63F73AC7010D0F1086A67 /* V2Common.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223BB801CC3914BE159ED419 /* V2Common.swift */; };
 		2DA58207A2A8482C0B64D400 /* VideoTimeMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1022079063DC28326625623 /* VideoTimeMappingTests.swift */; };
 		2E7EC9992F05007C1E41EB05 /* ToolOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB1BA55BBF87816404A36A6 /* ToolOptionsPanel.swift */; };
@@ -60,6 +61,7 @@
 		D032430AEBD346BCD0A79C16 /* V2Markers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B4640ADC5C35705D1D47BBC /* V2Markers.swift */; };
 		D08A0E8B171BBF5F2B462AB2 /* VideoTimeMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AE97809EBEE40F4C77D6B3 /* VideoTimeMapping.swift */; };
 		D248B79459CCAAB13D69E8BC /* VideoPlayerLayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 245DF60CF30C94FC90C83BC4 /* VideoPlayerLayerView.swift */; };
+		E398A01B8EC9A8F5259AA3D5 /* EditorPlaybackEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C96D1B3B579EF0A78EE1A8 /* EditorPlaybackEngineTests.swift */; };
 		E63B52EE8409A73A9A0E8D01 /* fade-out-end-anchor.json in Resources */ = {isa = PBXBuildFile; fileRef = E3064C32E6E6307A75AF9323 /* fade-out-end-anchor.json */; };
 		F095F094D750E141AAAECA27 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1331B331FC108EA6F39EFD /* TimelineView.swift */; };
 		F579D3AD292BF31B144329DE /* 12253998_1920_1080_30fps.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */; };
@@ -105,6 +107,7 @@
 		363E82B76CC991472752F26D /* EditorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTool.swift; sourceTree = "<group>"; };
 		3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeSamplerTests.swift; sourceTree = "<group>"; };
 		405FBF0FBC81893FC1405640 /* V2MotionPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2MotionPath.swift; sourceTree = "<group>"; };
+		40B1601F643CD88AB9CB3AF1 /* EditorPlaybackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorPlaybackEngine.swift; sourceTree = "<group>"; };
 		4282E3502362639603E1394C /* ProtocolCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodableTests.swift; sourceTree = "<group>"; };
 		4CE8EB9E43A85B9C7BA3DFB9 /* flip-3d.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "flip-3d.json"; sourceTree = "<group>"; };
 		5A1331B331FC108EA6F39EFD /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
@@ -128,6 +131,7 @@
 		A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLayoutCompiler.swift; sourceTree = "<group>"; };
 		AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Audio.swift; sourceTree = "<group>"; };
 		AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */ = {isa = PBXFileReference; path = 12253998_1920_1080_30fps.mp4; sourceTree = "<group>"; };
+		B1C96D1B3B579EF0A78EE1A8 /* EditorPlaybackEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorPlaybackEngineTests.swift; sourceTree = "<group>"; };
 		B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NeonixEditor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA1A725849D22CE87008891F /* V2TextLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2TextLayer.swift; sourceTree = "<group>"; };
 		BE7E50DA11A8887C9B85D7E1 /* V2Filter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Filter.swift; sourceTree = "<group>"; };
@@ -264,12 +268,21 @@
 			children = (
 				1D9E9A5A7F733C82A4439DC1 /* App.swift */,
 				F839889FD42ECB08D6B6DA07 /* EditorDocument */,
+				C2E0193C6F975929BA9CC086 /* Playback */,
 				973941742DA543561C590A56 /* Protocol */,
 				5C64CD689A90249A1D0A9A83 /* Runtime */,
 				C43708708F363602634A35FC /* UI */,
 			);
 			name = AppModule;
 			path = "ios-editor/Sources/AppModule";
+			sourceTree = "<group>";
+		};
+		C2E0193C6F975929BA9CC086 /* Playback */ = {
+			isa = PBXGroup;
+			children = (
+				40B1601F643CD88AB9CB3AF1 /* EditorPlaybackEngine.swift */,
+			);
+			path = Playback;
 			sourceTree = "<group>";
 		};
 		C43708708F363602634A35FC /* UI */ = {
@@ -290,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				DDFA25B1EA2496F8CF6C52C4 /* EditorCommandTests.swift */,
+				B1C96D1B3B579EF0A78EE1A8 /* EditorPlaybackEngineTests.swift */,
 				3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */,
 				9B9800AA11F83D1DA6FBD198 /* LaneReflowTests.swift */,
 				4282E3502362639603E1394C /* ProtocolCodableTests.swift */,
@@ -464,6 +478,7 @@
 				41D16ADCF310990008560997 /* AssetDurationCache.swift in Sources */,
 				AB1296E0F747FF45D0689A11 /* EditorCommand.swift in Sources */,
 				04DF60F0F81E162FEA26F191 /* EditorHistory.swift in Sources */,
+				2274CDACE4770E0D463A8E38 /* EditorPlaybackEngine.swift in Sources */,
 				221F060F4DF4CB362AF66031 /* EditorShellView.swift in Sources */,
 				7872440707053F0692018063 /* EditorTextLayer.swift in Sources */,
 				7C5FE9D8227DA1347B4A3A2E /* EditorTool.swift in Sources */,
@@ -511,6 +526,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				114ADC128A49A0F39C058EE2 /* EditorCommandTests.swift in Sources */,
+				E398A01B8EC9A8F5259AA3D5 /* EditorPlaybackEngineTests.swift in Sources */,
 				9F2A51D3465DE2BED173A791 /* KeyframeSamplerTests.swift in Sources */,
 				5C048E1FABE98C503794E26D /* LaneReflowTests.swift in Sources */,
 				BAA228519B237836FF4813D2 /* ProtocolCodableTests.swift in Sources */,

@@ -3,6 +3,43 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## `EditorPlaybackEngine` owns the playhead — step 1 of 3, behavior-preserving
+
+Added 2026-10-09 (`Playback/EditorPlaybackEngine.swift`). Before this,
+`currentTimeMs` had **6 writers in 3 files** (software clock + `AVPlayer`
+observer in `EditorShellView`, drag + momentum in `TimelineView`, the
+fullscreen scrubber), and the scrub↔play hand-off was coordinated by loose
+`@State` flags in views (`playbackSeekCompleted`, `lingeringPlayer`,
+`sharpFrame`, `isSuspended`). The black/gray flashes were symptoms of that,
+not isolated bugs.
+
+**Now**: one `@MainActor @Observable` engine with a small state machine
+(`idle / scrubbing / coasting / playing`). Only the engine writes
+`currentTimeMs`. API: `play/pause/togglePlay`, `beginScrub` (idempotent per
+gesture, pauses playback, cancels a coast), `scrub(deltaMs:)`/`scrub(toMs:)`,
+`endScrub(velocityMsPerSecond:)` (slow → idle, fast → coast), `update(project:)`,
+`preloadPlayers()`. It also owns the playback `AVPlayer`, its time observer,
+the preloaded players and the momentum loop — all moved verbatim from
+`EditorShellView`/`TimelineView`. `EditorShellView` now only sends commands
+and reads (`currentTimeMs`/`isPlaying`/`maxDurationMs`/`activePlayerInfo` are
+read-only forwards); every write to `project` goes through `setProject(_:)`
+so the engine always sees the same layers the Stage renders.
+`TimelineView` takes the engine instead of a `@Binding` and an `onScrub`
+closure. The state machine is pure logic, so `EditorPlaybackEngineTests`
+covers it (scrub clamping, idempotent `beginScrub`, coast/stop thresholds,
+touch-during-coast, play/pause/end-of-timeline) — `simctl` can't synthesize
+drags, so this is the only automated coverage scrub logic has.
+
+**Deliberately unchanged in step 1**: the cached-still/player layering in
+`PreviewCanvas` (`VideoContentView`/`ScrubFrameView`) and its `@State`
+flags. **Step 2** moves the "last frame actually shown per video layer"
+decision into the engine (`.live(player)` vs `.still`) and deletes those
+flags — that's the real fix for the gray/black flicker after scrub→play, to
+be designed from a reproduction log, not guessed. **Step 3** (later):
+multiple simultaneous video clips, a real audio clock, Metal. `Runtime/`
+(`sampleLayer`, caches) is untouched; there is no `RuntimeProjectV3` in
+Swift yet — that name exists only in `packages/motion-protocol/README.md`.
+
 ## Scrubbing renders from a decoded frame cache, not an `AVPlayer` seek
 
 Changed 2026-10-08, superseding `ScrubPlayerView` (deleted) and the two

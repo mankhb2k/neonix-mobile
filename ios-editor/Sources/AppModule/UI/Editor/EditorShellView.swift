@@ -1,14 +1,6 @@
 import AVFoundation
 import SwiftUI
 
-/// Fires roughly at display refresh rate; while playing, `isPlaying`
-/// advances `currentTimeMs` by the elapsed wall-clock delta between ticks.
-/// Moved here 2026-10-08 from the old `ContentView` fixture picker when
-/// that screen was deleted — this is the Editor's own real playback clock,
-/// not demo-only code, so it stays even though the fixture UI around it
-/// went away.
-private let playbackTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
-
 /// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
 /// Titlebar / Timeline. See `ui-design-note.md` (repo root) for the full
 /// layout rationale and bug history.
@@ -16,41 +8,14 @@ struct EditorShellView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var project: V2Project
-    @State private var currentTimeMs: Double = 0
-    @State private var isPlaying = false
-    @State private var lastTick: Date = .init()
-    /// Real decoded playback: while `isPlaying` and the playhead sits over a
-    /// video layer, a real `AVPlayer` actually plays (`.play()`, not
-    /// repeated seeks) and *drives* `currentTimeMs` from its own periodic
-    /// time observer — the media clock is the master during playback, same
-    /// as any player. The instant no video covers the current moment (a
-    /// text-only stretch, or no video layer at all), playback falls back to
-    /// the software `playbackTimer` clock. Paused/scrubbing never touches
-    /// this player: the Stage reads cached decoded frames instead
-    /// (`ScrubFrameView`/`ScrubFrameCache`), so during a scrub
-    /// `currentTimeMs` is the only source of truth.
-    @State private var playbackPlayer: AVPlayer?
-    @State private var playbackAssetId: String?
-    /// Source↔timeline mapping of the clip `playbackPlayer` was seeked for.
-    @State private var playbackMapping: VideoTimeMapping?
-    /// `false` from the moment a new playback session starts until its
-    /// initial seek has actually completed. Until then the player isn't
-    /// handed to the Stage (it would show its old frame or black) and its
-    /// time observer is ignored (it can still report the *old* position,
-    /// which used to yank `currentTimeMs` backward for a moment on Play).
-    @State private var playbackSeekCompleted = false
-    @State private var playbackTimeObserver: Any?
-    /// One `AVPlayer` created up front per video asset (2026-10-08, at the
-    /// user's own request — "nạp sẵn video vào RAM"), not lazily the first
-    /// time `ensureRealPlayerPlaying` needs one. `AVPlayer(url:)`/
-    /// `AVURLAsset` construction plus the asset's own `duration`/`tracks`
-    /// metadata load takes real, measurable time on a cold start; doing
-    /// that once for every asset as soon as the project opens means the
-    /// very first Play press has nothing left to wait on — it reuses an
-    /// already-warm player instead of constructing one from scratch.
-    /// `ensureRealPlayerPlaying` reads from this dictionary instead of
-    /// calling `AVPlayer(url:)` itself now.
-    @State private var preloadedPlayers: [String: AVPlayer] = [:]
+    /// Owns the playhead clock, Play/Pause, scrubbing + momentum and the
+    /// playback `AVPlayer` (`Playback/EditorPlaybackEngine.swift`). This view
+    /// only sends it commands and reads from it — it never writes the time.
+    @State private var engine: EditorPlaybackEngine
+    private var currentTimeMs: Double { engine.currentTimeMs }
+    private var isPlaying: Bool { engine.isPlaying }
+    private var maxDurationMs: Double { engine.maxDurationMs }
+    private var activePlayerInfo: (assetId: String, player: AVPlayer)? { engine.activePlayerInfo }
     /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
     @State private var titlebarHeight: CGFloat = 60
     /// Toggled by the titlebar's "Enter Full Screen" button — swaps the
@@ -87,6 +52,14 @@ struct EditorShellView: View {
 
     init(project: V2Project) {
         _project = State(initialValue: project)
+        _engine = State(initialValue: EditorPlaybackEngine(project: project))
+    }
+
+    /// Every write to `project` goes through here so the engine always sees
+    /// the same layers the Stage and Timeline render.
+    private func setProject(_ newProject: V2Project) {
+        project = newProject
+        engine.update(project: newProject)
     }
 
     /// The one path every edit must go through — see `EditorHistory`'s own
@@ -94,17 +67,17 @@ struct EditorShellView: View {
     /// asking each `EditorCommand` to carry its own inverse.
     private func apply(_ command: EditorCommand) {
         history.record(current: project)
-        project = command.apply(to: project)
+        setProject(command.apply(to: project))
     }
 
     private func undo() {
         guard let previous = history.undo(current: project) else { return }
-        project = previous
+        setProject(previous)
     }
 
     private func redo() {
         guard let next = history.redo(current: project) else { return }
-        project = next
+        setProject(next)
     }
 
     /// Called once when a trim-handle drag starts — snapshots the
@@ -120,7 +93,7 @@ struct EditorShellView: View {
     /// `apply(_:)`/`history.record(_:)` so dragging doesn't spam the undo
     /// stack with one entry per pixel moved.
     private func updateTrim(_ command: EditorCommand) {
-        project = command.apply(to: project)
+        setProject(command.apply(to: project))
     }
 
     /// Called once when the drag ends — records the single pre-drag
@@ -130,12 +103,6 @@ struct EditorShellView: View {
         guard let original = trimDragOriginal else { return }
         history.record(current: original)
         trimDragOriginal = nil
-    }
-
-    private var maxDurationMs: Double {
-        let layerEnds = project.layers.map { $0.timing.start + $0.timing.duration }
-        let audioEnds = project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }
-        return max((layerEnds + audioEnds).max() ?? 1, 1)
     }
 
     var body: some View {
@@ -152,137 +119,8 @@ struct EditorShellView: View {
             guard newValue > 0 else { return }
             titlebarHeight = newValue
         }
-        .task { preloadVideoPlayers() }
-        .onReceive(playbackTimer) { now in
-            guard isPlaying else { return }
-            defer { lastTick = now }
-            if let active = activeVideoLayer(atMs: currentTimeMs) {
-                // A real video covers this instant — let its own AVPlayer
-                // actually play and drive the clock; the software tick
-                // below is deliberately skipped for as long as this stays
-                // true (see `playbackPlayer`'s own doc comment).
-                ensureRealPlayerPlaying(for: active)
-                return
-            }
-            releaseRealPlayer()
-            let deltaMs = now.timeIntervalSince(lastTick) * 1000
-            let next = currentTimeMs + deltaMs
-            if next >= maxDurationMs {
-                currentTimeMs = 0
-                isPlaying = false
-            } else {
-                currentTimeMs = next
-            }
-        }
-        .onChange(of: isPlaying) { _, playing in
-            guard !playing else { return }
-            releaseRealPlayer()
-        }
-    }
-
-    /// Creates (and starts warming up) one `AVPlayer` per distinct video
-    /// asset in the project, up front — called once from `.task` when the
-    /// Editor first appears. Guarded by `preloadedPlayers[id] == nil` so
-    /// calling this more than once (harmless) never recreates an already-
-    /// warm player. `loadValuesAsynchronously` kicks off `AVURLAsset`'s own
-    /// metadata load (duration/tracks/playable) in the background rather
-    /// than leaving it to happen lazily on first seek/play.
-    private func preloadVideoPlayers() {
-        for layer in project.layers where layer.type == "video" {
-            guard case .video(let payload) = layer.payload,
-                  preloadedPlayers[payload.assetId] == nil,
-                  let asset = project.assets.first(where: { $0.id == payload.assetId }),
-                  case .video(let videoAsset) = asset,
-                  let url = bundledURL(filename: videoAsset.uri)
-            else { continue }
-            let avAsset = AVURLAsset(url: url)
-            let player = AVPlayer(playerItem: AVPlayerItem(asset: avAsset))
-            player.automaticallyWaitsToMinimizeStalling = false
-            preloadedPlayers[payload.assetId] = player
-            Task {
-                _ = try? await avAsset.load(.duration, .tracks, .isPlayable)
-            }
-        }
-    }
-
-    /// The video layer (if any) whose own time range covers `ms` — at most
-    /// one can be active at once, matching `PreviewCanvas.activePlayer`'s
-    /// own single-asset shape (see its doc comment).
-    private func activeVideoLayer(atMs ms: Double) -> (layer: V2Layer, assetId: String, url: URL)? {
-        guard let layer = project.layers.first(where: { layer in
-            layer.type == "video" && ms >= layer.timing.start && ms < layer.timing.start + layer.timing.duration
-        }), case .video(let payload) = layer.payload,
-              let asset = project.assets.first(where: { $0.id == payload.assetId }),
-              case .video(let videoAsset) = asset,
-              let url = bundledURL(filename: videoAsset.uri)
-        else { return nil }
-        return (layer, payload.assetId, url)
-    }
-
-    /// Creates (or reuses) the `AVPlayer` for whichever video layer is
-    /// currently active and makes sure it's actually playing — seeking it
-    /// only when entering a clip whose source mapping differs from the one
-    /// already playing (`VideoTimeMapping.isContinuous`), so e.g. the two
-    /// halves of a split play straight through without a re-seek, and the
-    /// player's own clock is what advances `currentTimeMs` moment to moment.
-    private func ensureRealPlayerPlaying(for active: (layer: V2Layer, assetId: String, url: URL)) {
-        guard let mapping = VideoTimeMapping(layer: active.layer) else { return }
-        if playbackAssetId == active.assetId, let player = playbackPlayer,
-           let current = playbackMapping, current.isContinuous(with: mapping) {
-            if player.rate == 0 { player.rate = Float(mapping.rate) }
-            return
-        }
-        releaseRealPlayer()
-        let player = preloadedPlayers[active.assetId] ?? AVPlayer(url: active.url)
-        player.automaticallyWaitsToMinimizeStalling = false
-        playbackPlayer = player
-        playbackAssetId = active.assetId
-        playbackMapping = mapping
-        let sourceSeconds = mapping.sourceMs(atTimelineMs: currentTimeMs) / 1000
-        playbackSeekCompleted = false
-        player.seek(to: CMTime(seconds: sourceSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [self] finished in
-            DispatchQueue.main.async {
-                if finished, playbackPlayer === player { playbackSeekCompleted = true }
-            }
-        }
-        let interval = CMTime(seconds: 1.0 / 60, preferredTimescale: 600)
-        playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [self] time in
-            guard playbackSeekCompleted else { return }
-            let timelineMs = mapping.timelineMs(atSourceMs: time.seconds * 1000)
-            if timelineMs >= maxDurationMs {
-                currentTimeMs = 0
-                isPlaying = false
-            } else {
-                currentTimeMs = timelineMs
-            }
-        }
-        player.rate = Float(mapping.rate)
-    }
-
-    /// Pauses and tears down the real playback player — called whenever
-    /// playback stops entirely (pause, scrub, reaching the end) or when
-    /// the playhead moves into a different clip/asset than the one
-    /// currently playing.
-    private func releaseRealPlayer() {
-        guard let player = playbackPlayer else { return }
-        player.pause()
-        if let observer = playbackTimeObserver {
-            player.removeTimeObserver(observer)
-            playbackTimeObserver = nil
-        }
-        playbackPlayer = nil
-        playbackAssetId = nil
-        playbackMapping = nil
-        playbackSeekCompleted = false
-    }
-
-    /// Handed to `PreviewCanvas` so its matching video layer shows the real
-    /// player's live output on top of the cached still — `nil` whenever
-    /// nothing is playing, and also until the session's initial seek has
-    /// completed (see `playbackSeekCompleted`).
-    private var activePlayerInfo: (assetId: String, player: AVPlayer)? {
-        guard let playbackPlayer, let playbackAssetId, playbackSeekCompleted else { return nil }
-        return (playbackAssetId, playbackPlayer)
+        .task { engine.preloadPlayers() }
+        .onDisappear { engine.pause() }
     }
 
     private var windowedShell: some View {
@@ -321,9 +159,7 @@ struct EditorShellView: View {
                         layers: project.layers,
                         assets: project.assets,
                         audio: project.audio,
-                        currentTimeMs: $currentTimeMs,
-                        maxDurationMs: maxDurationMs,
-                        onScrub: { isPlaying = false },
+                        engine: engine,
                         selectedLayerId: $selectedLayerId,
                         onTrimBegin: beginTrim,
                         onTrimUpdate: updateTrim,
@@ -462,8 +298,7 @@ struct EditorShellView: View {
             HStack(spacing: 12) {
                 if !isScrubbing {
                     Button {
-                        isPlaying.toggle()
-                        lastTick = .init()
+                        engine.togglePlay()
                     } label: {
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                             .font(.title3)
@@ -474,12 +309,7 @@ struct EditorShellView: View {
                     .transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))
                 }
 
-                FullscreenScrubber(
-                    currentTimeMs: $currentTimeMs,
-                    maxDurationMs: maxDurationMs,
-                    isDragging: $isScrubbing,
-                    onScrubStart: { isPlaying = false }
-                )
+                FullscreenScrubber(engine: engine, isDragging: $isScrubbing)
 
                 if !isScrubbing {
                     Button {
@@ -550,8 +380,7 @@ struct EditorShellView: View {
             HStack {
                 Spacer()
                 Button {
-                    isPlaying.toggle()
-                    lastTick = .init()
+                    engine.togglePlay()
                 } label: {
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.headline)
@@ -608,14 +437,12 @@ struct EditorShellView: View {
 /// playback position); requiring a short hold first matches how the real
 /// Photos app behaves and avoids that.
 private struct FullscreenScrubber: View {
-    @Binding var currentTimeMs: Double
-    let maxDurationMs: Double
+    let engine: EditorPlaybackEngine
     @Binding var isDragging: Bool
-    let onScrubStart: () -> Void
 
     private var fraction: Double {
-        guard maxDurationMs > 0 else { return 0 }
-        return min(max(currentTimeMs / maxDurationMs, 0), 1)
+        guard engine.maxDurationMs > 0 else { return 0 }
+        return min(max(engine.currentTimeMs / engine.maxDurationMs, 0), 1)
     }
 
     var body: some View {
@@ -642,7 +469,10 @@ private struct FullscreenScrubber: View {
                             break
                         }
                     }
-                    .onEnded { _ in isDragging = false }
+                    .onEnded { _ in
+                        isDragging = false
+                        engine.endScrub(velocityMsPerSecond: 0)
+                    }
             )
         }
         .frame(height: 24)
@@ -651,12 +481,12 @@ private struct FullscreenScrubber: View {
     private func beginScrubbingIfNeeded() {
         guard !isDragging else { return }
         isDragging = true
-        onScrubStart()
+        engine.beginScrub()
     }
 
     private func seek(to x: CGFloat, trackWidth: CGFloat) {
         let fraction = min(max(x / trackWidth, 0), 1)
-        currentTimeMs = fraction * maxDurationMs
+        engine.scrub(toMs: fraction * engine.maxDurationMs)
     }
 }
 
