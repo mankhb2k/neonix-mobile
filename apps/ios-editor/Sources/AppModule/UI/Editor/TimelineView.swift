@@ -158,6 +158,7 @@ struct TimelineView: View {
                                     pxPerMs: pxPerMs,
                                     rowHeight: isMainLane ? rowHeight : otherRowHeight,
                                     visibleRange: visibleRange,
+                                    centerX: centerX,
                                     showsCoverAndMute: isMainLane,
                                     coverImage: coverImage,
                                     isMuted: isMuted,
@@ -319,6 +320,13 @@ private struct LaneRowView: View {
     let pxPerMs: Double
     let rowHeight: CGFloat
     let visibleRange: ClosedRange<Double>
+    /// Half the viewport's own width — a per-geometry layout constant (from
+    /// `GeometryReader`'s `geo.size.width / 2`, recomputed only when the
+    /// panel itself resizes), not a scroll-position value like
+    /// `visibleRange`. Used to center the mute/cover group in the screen's
+    /// left half symmetrically (see `prefixOffsetX`) without reintroducing
+    /// the per-scroll-tick recalculation the user explicitly rejected.
+    let centerX: CGFloat
     let showsCoverAndMute: Bool
     let coverImage: UIImage?
     let isMuted: Bool
@@ -333,8 +341,12 @@ private struct LaneRowView: View {
 
     private let prefixSpacing: CGFloat = 8
 
-    private var prefixWidth: CGFloat {
-        showsCoverAndMute ? 2 * rowHeight + 2 * prefixSpacing : 0
+    /// The mute/cover group's own real rendered width (two `rowHeight`
+    /// cells plus the one gap between them) — not inflated with any extra
+    /// margin; the margin on both sides now comes from centering (see
+    /// `prefixOffsetX`), not from a baked-in constant.
+    private var groupWidth: CGFloat {
+        2 * rowHeight + prefixSpacing
     }
 
     private var laneStartMs: Double {
@@ -345,22 +357,19 @@ private struct LaneRowView: View {
         CGFloat(laneStartMs) * pxPerMs
     }
 
-    /// Centers the mute/cover group inside whatever blank space currently
-    /// sits between the viewport's own left edge (`visibleRange.lowerBound`
-    /// — already computed by the caller) and the first clip's start, rather
-    /// than always sitting flush against the clip. At `currentTimeMs == 0`
-    /// the fixed-center playhead design leaves a large blank margin to the
-    /// left (confirmed as a real layout gap from a screenshot 2026-10-08,
-    /// not an intentional "always flush" choice) — flush-right placement
-    /// left all of that margin stranded on one side. Falls back to the old
-    /// flush position once scrolling leaves less blank room than the group
-    /// itself needs, so it never overlaps the clip or drifts off-screen.
+    /// Centers the mute/cover group in the screen's left half — the span
+    /// from the viewport's own left edge to the playhead (at `centerX`) —
+    /// symmetrically: equal blank space before the group and between the
+    /// group and the clip/playhead. This is a *static* placement (per the
+    /// user's own request 2026-10-08): it depends only on `centerX` (a
+    /// per-geometry layout constant) and each clip's own fixed
+    /// `timing.start`, never on `currentTimeMs`/`visibleRange` — so the
+    /// group scrolls as ordinary lane content exactly like a clip does,
+    /// it just rests at this centered position when the lane's own start
+    /// lines up with the playhead (the common case, since the main lane
+    /// always starts at `timing.start == 0`).
     private var prefixOffsetX: CGFloat {
-        let flushX = clipStartX - prefixWidth
-        let visibleLeft = CGFloat(visibleRange.lowerBound)
-        let totalBlank = clipStartX - visibleLeft
-        let slack = max(totalBlank - prefixWidth, 0)
-        return min(visibleLeft + slack / 2, flushX)
+        clipStartX - (centerX + groupWidth) / 2
     }
 
     var body: some View {
