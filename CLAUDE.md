@@ -3,6 +3,293 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Bottom nav tools: a phased roadmap exists, Phase 1 is now implemented
+
+Planned 2026-10-08 (via Plan Mode, approved by the user), Phase 1 built the
+same day. The 8-tool bottom nav (`EditorTool.swift`) has only ever
+highlighted whichever icon was tapped — nothing opened, nothing edited the
+project. The user asked for a plan to take these from placeholder to real
+features; the full phased roadmap (what's already built vs. missing per
+tool, 2 shared prerequisites, a 3rd prerequisite only 3 tools need, and the
+recommended phase order with reasoning) is **not duplicated here** — see
+the approved plan, still findable at
+`~/.claude/plans/twinkly-noodling-hearth.md`, or re-derive it: the
+reasoning won't have gone stale fast.
+
+**Two real gaps the planning pass found, confirmed by reading the code,
+not assumed**: nothing in `PreviewCanvas.swift` ever reads `layer.filter` —
+Adjust/Effects/Bộ lọc already compile to *correct* Protocol V2 JSON
+(`EffectPresetKind.colorAdjust`, `feColorLUT`, etc.) but have **zero
+visual effect** on the Stage, a real prerequisite (a Core Image–based
+filter bridge) gating 3 of the 8 tools specifically, not a vague "more work
+needed." And there was no Command/undo system at all (zero matches for
+`Command` in the whole module) despite this file's own long-standing
+"Command pattern, not JSON Patch or CRDT" rule — Phase 1 is also where
+that rule's first real implementation landed.
+
+**Phase 1 — Tỷ lệ khung hình (aspect ratio) + Phông nền (background)**,
+chosen first specifically because neither needs clip selection (they edit
+`composition`, not a layer) and neither needed the filter bridge —
+fastest path to a genuinely complete, visible feature end to end.
+- `EditorCommand.swift`: `protocol EditorCommand { func apply(to
+  project: V2Project) -> V2Project }`, plus `SetAspectRatioCommand`/
+  `SetBackgroundColorCommand`. Confirmed with the user before writing
+  this: changing aspect ratio **does not re-anchor or rescale any
+  layer** — layers keep their authored absolute `frame`/`transform`
+  values exactly, "like a crop," even if that means part of a layer now
+  sits outside the new canvas bounds. No automatic reflow logic exists or
+  is planned for this.
+- `EditorHistory.swift`: undo/redo via **whole-document snapshots**, not
+  per-command inverse operations — `V2Project` is a small, plain
+  `Codable` value type today, so snapshotting the entire document on every
+  edit is trivially correct and costs nothing meaningful yet. A
+  generalized diffing/patch engine is explicitly deferred until document
+  size or real collaboration actually requires it (same reasoning as this
+  file's own "CRDT deferred" rule below) — don't build one preemptively
+  when a tool's Command needs undo.
+- `ToolOptionsPanel.swift`: a contextual panel shown above the bottom nav,
+  gated by `EditorTool.hasOptionsPanel` (currently only `.aspectRatio`/
+  `.background`) — every other tool still shows nothing, matching
+  `EditorToolbarView`'s existing "tap only highlights" behavior exactly
+  where a tool has no panel yet.
+- `EditorShellView`'s previously-hardcoded-disabled undo/redo buttons are
+  now wired for real (`history.canUndo`/`canRedo`), the first thing in
+  this app that actually uses them.
+- Verified: `Tests/AppModuleTests/EditorCommandTests.swift` (apply +
+  undo/redo round-trips, matching `ProtocolCodableTests`' precedent of
+  testing pure logic directly) plus the usual simulator screenshot check
+  for both panels (forcing `selectedTool` briefly, same established
+  method). **A real bug the screenshot caught**: the first aspect-ratio
+  icon implementation fixed `width: 28` and scaled height from it
+  (`28 * height/width`), which overflows badly for a portrait ratio like
+  9:16 where height is the *larger* side — fixed with a proper aspect-fit
+  helper that picks whichever dimension is actually larger as the
+  constraint.
+
+## Phase 2 of the bottom-nav roadmap — Chỉnh sửa (clip selection + split/delete)
+
+Built 2026-10-08, right after Phase 1, per the same approved plan
+(`~/.claude/plans/twinkly-noodling-hearth.md`). Reuses Phase 1's Command/
+`ToolOptionsPanel` infra directly — no new shared mechanism needed, just
+the two pieces this tool specifically requires: clip selection (nothing
+in the Timeline was tappable before this) and two new commands.
+
+- **`SplitClipCommand`/`DeleteClipCommand`** (`EditorCommand.swift`) plus
+  a `V2Project.withLayers(_:)` helper alongside the existing
+  `withComposition(_:)`. Split is a no-op (returns `project` unchanged) if
+  `atMs` isn't strictly inside the target clip's own time range, or the
+  layer isn't found — matches this app's "no ported validator, fail
+  closed, not a crash" convention (see "Valid by construction" below)
+  rather than needing its own error path for something the UI already
+  prevents (the panel only enables Split when the playhead is actually
+  inside the selected clip). **Splitting a video clip shifts the second
+  half's `trimStart` forward by exactly the first half's duration** (same
+  ms units as `timing`, not seconds — a real mistake made and caught
+  writing this feature's own unit test, see below) so playback continues
+  from the correct source position instead of restarting. Both halves
+  keep the *original* layer's `order` unchanged, so they automatically
+  stay in the same lane — directly validates that the "lanes = shared
+  `order`, positioned by `timing.start`" model from the Timeline-lanes
+  note below composes with Split for free, no extra code needed.
+- **Selection state**: `EditorShellView`'s `@State selectedLayerId:
+  String?`, threaded down to `TimelineView` as a `Binding` and on into
+  `LaneRowView`/`FilmstripClipView`/`TimelineClipView`. Tap-to-select,
+  tap-again-to-deselect. Only visual `layers[]` clips are selectable —
+  the standalone audio lane is explicitly out of scope here (belongs to
+  the later Âm thanh phase). Visual treatment (an extra white stroke
+  overlay) and its two-part verification (NSLog confirming the state
+  reaches the view + an oversized debug-colored stroke confirming the
+  overlay mechanism itself renders, since the real 2.5pt white stroke is
+  subtle against this demo clip's background) are in `ui-design-note.md`,
+  not duplicated here.
+- **A real bug caught by writing the unit test, not the simulator check**:
+  the first `SplitClipCommand` test assumed `V2VideoPayload.trimStart` was
+  in seconds (matching `AVFoundation`-style APIs elsewhere in this app)
+  and asserted the shifted value as `2 + 3 = 5`. The actual result was
+  `3002.0` — correct, once re-checked against `V2Timing`'s own ms units:
+  `trimStart` is ms, same as `timing.start`/`duration` everywhere else in
+  Protocol V2, and the command's own `+ firstDuration` (ms) was right all
+  along. Fixed the test's fixture/assertion, not the command.
+- Verified: `EditorCommandTests.swift` gained
+  `testSplitClipCommandProducesTwoCorrectlyTimedLayersWithShiftedTrimStart`,
+  `testSplitClipCommandIsNoOpWhenSplitPointIsOutsideClipRange`,
+  `testDeleteClipCommandRemovesOnlyTheTargetedLayer` — full regression
+  suite (`KeyframeSamplerTests`/`ProtocolCodableTests`/
+  `EditorCommandTests`/`EditorNavigationUITests`) run and confirmed green
+  after the test fix.
+
+Drag-to-trim handles directly on a clip were deferred out of the phase
+above, then built the same day once the user asked for them specifically
+— see the next note.
+
+## Drag-to-trim clip handles — the "future work" from the note above, built the same day
+
+Added 2026-10-08. Scoped against a CapCut reference screenshot the user
+sent: a selected clip grows 2 draggable white handles at its own left/
+right edges instead of a border; an unselected clip is just a flat color
+block, no border at all (for video **or** text/audio) — both explicit,
+confirmed asks, not just a loose "match the picture."
+
+**Confirmed with the user before building, via `AskUserQuestion`**: should
+an *extend* drag (lengthening a clip) be capped at the clip's own current
+timing range (simpler), or allowed to reveal more real source footage up
+to the asset's actual duration (matches real CapCut, needs an async
+duration lookup)? **Chose the real-CapCut behavior.** This is why
+`AssetDurationCache` (`Runtime/`, new file) exists — an in-memory-only
+(no disk tier; a single `AVURLAsset.load(.duration)` per video is cheap)
+cache of a video asset's real total duration, keyed by filename, loaded
+by `FilmstripClipView` via `.task(id: isSelected)` once a clip is
+selected. Until it resolves, an extend-right drag just isn't clamped any
+further than what's already known — fails closed to "don't extend yet,"
+not a crash or a guess.
+
+- **Border removal**: `FilmstripClipView`'s permanent blue stroke,
+  `TimelineClipView`'s per-type stroke + 0.18-opacity fill, and the
+  standalone-audio-lane `AudioClipView`'s cyan stroke are all gone.
+  `TimelineClipView` now fills with the full type color (white icon/label
+  for contrast, since a solid block needs a light foreground) instead of
+  a translucent tint + outline — matches the reference screenshot's solid
+  orange text block exactly.
+- **`TrimClipCommand`** (`EditorCommand.swift`): writes `timing`/
+  `trimStart`/`trimEnd` verbatim, zero clamping of its own — the drag
+  gesture (`TimelineView`) is where the clamping/validation logic lives,
+  same "no ported validator, make invalid states unconstructable at the
+  call site" rule as every other Command here.
+- **Undo collapses a whole drag gesture into one step**, not one per
+  pixel: `EditorShellView` gained `beginTrim()`/`updateTrim(_:)`/
+  `endTrim()`, a different shape from the normal `apply(_:)` (which
+  records *and* applies together) specifically for this — `beginTrim()`
+  snapshots the pre-drag project once, every `onChanged` tick calls
+  `updateTrim(_:)` which applies directly without touching `history`, and
+  `endTrim()` (on `onEnded`) is the one place that actually calls
+  `history.record(_:)`, with the snapshot `beginTrim()` captured. Same
+  "don't record every intermediate state" reasoning that already kept
+  `TimelineView`'s own scrub-drag out of the undo stack — just applied
+  here to a drag that *does* need exactly one undo step at the end.
+- Full design rationale, the handle's own drag math (left handle moves
+  the clip's start while its end stays fixed, walking `trimStart` down to
+  a 0 floor for video; right handle moves the end, walking `trimEnd` up
+  to `assetDurationMs`; both floor `newDuration` at 200ms and simply stop
+  updating rather than overshoot), and the simulator verification are in
+  `ui-design-note.md` — not duplicated here.
+- Verified: `EditorCommandTests.swift` gained
+  `testTrimClipCommandWritesTimingAndVideoTrimFieldsVerbatim`/
+  `testTrimClipCommandIsNoOpForUnknownLayer` (covers the Command's own
+  contract; the drag-math clamping itself lived in view code, not unit-
+  tested directly this pass — **superseded by the next note**, which
+  extracted exactly that logic and gave it real test coverage) — full
+  regression suite run and confirmed green.
+
+## Drag-to-trim v2 — lane-wide ripple reflow + a black-bordered handle
+
+Added 2026-10-08, same day, after the user flagged the version above as
+"doing the trim wrong" and asked for their intent to be restated before
+more code. Full rationale and the worked examples that resolved 3
+ambiguities (each confirmed via `AskUserQuestion`) are in
+`ui-design-note.md` — this note is the architecture-level summary.
+
+**The core fix**: the first version only ever touched the single dragged
+clip. The corrected model treats a video/image lane as a "push lane" that
+must never show a gap (confirmed with the user) — extending or shrinking
+one clip cascades through *every* clip after it in the lane (not just the
+immediate neighbor), each keeping its own `timing.duration`, only its
+`timing.start` repositioning; the left handle uses the identical
+mechanism in reverse. Text/overlay lanes (gaps allowed) keep the simpler
+hard-stop-at-neighbor behavior unchanged.
+
+- **`reflowLane(...)`/`isPushLaneType(_:)`/`previousClipEnd(...)`/
+  `nextClipStart(...)`** (`TimelineView.swift`) — changed from `private`
+  to internal specifically so `LaneReflowTests.swift` (new file) could
+  reach them via `@testable import`, no gesture/view harness needed. 4
+  tests cover forward cascade (extend + shrink, confirming the
+  "pull closer" symmetry), backward cascade with genuine slack, and the
+  one subtle case that took a worked example from the user to nail down:
+  if cascading backward would push the lane's first clip below `0`, the
+  deficit gets added back onto every computed position *including the
+  dragged clip's own* — which is what makes a clip already packed tight
+  against an earlier neighbor simply refuse to extend left at all (no
+  slack to push into), while a clip with real room ahead of it still can.
+- **`TrimClipCommand` gained `siblingStarts: [String: Double]`**
+  (defaults to `[:]`, so every existing call site/test kept compiling
+  unchanged) — the dragged clip's own layer updates exactly as before,
+  plus every sibling in `siblingStarts` gets its `timing.start` rewritten
+  (duration untouched), all in the same atomic command/undo step.
+- **Handle visual**: `TrimHandleView` gained a black 1pt stroke around the
+  white bar (plain white disappeared against bright video content) and
+  grew slightly (4pt→6pt visible width, 70%→80% of row height) — matches
+  the CapCut reference more closely.
+- Verified: `LaneReflowTests.swift`'s 4 scenarios all matched hand-
+  computed expected values exactly; full regression suite
+  (`EditorCommandTests`/`KeyframeSamplerTests`/`LaneReflowTests`/
+  `ProtocolCodableTests`/`EditorNavigationUITests`) run and confirmed
+  green; the black-bordered handle confirmed on the simulator via the
+  usual forced-`@State` + screenshot method.
+
+## Timeline lanes: `order` identifies a *lane*, not a per-clip sequence number — no Protocol V2 change needed
+
+Decided 2026-10-08, after a design discussion with the user before any code.
+Starting point: `V2Layer.order` already existed (`Protocol/V2Layers.swift`)
+and was already used exactly one way — `PreviewCanvas.swift`'s `LayerTree`
+sorts siblings by it (`sorted { $0.order < $1.order }`) to decide render
+stacking, ascending = bottom of the stack. The question was how the
+Editor's future multi-clip timeline (main video track holding several
+sequential clips, future overlay/text/sticker tracks) should assign and
+interpret `order`.
+
+**Rejected first proposal**: number every individual clip its own `order`
+(main track clip1/clip2/clip3 = 0/1/2, overlay 1 = 3, overlay 2 = 4, ...).
+Walked through why with the user: inserting a 4th main-track clip would
+force renumbering every unrelated overlay layer that comes after it in the
+sequence — a cascading-renumber smell, and it duplicates information
+`timing.start` already carries (which clip comes first in a track is
+already fully determined by when it starts).
+
+**Decided model instead — three rules, confirmed one at a time:**
+
+1. **`order` identifies a lane (timeline row), not a clip.** Every layer
+   sharing one `order` value is the same row. Left-to-right position within
+   a lane comes from each clip's own `timing.start`, never from `order` —
+   moving a clip earlier/later in its lane is a plain `timing.start` edit
+   (ordinary Command, no "renumber order" step needed), and adding/removing
+   a clip from one lane never touches any other lane's `order`.
+2. **Lanes are homogeneous by type** — a lane only ever holds clips of one
+   `V2Layer.type` (all-video, or all-text, or all-image, never mixed). The
+   user's own reasoning: matches CapCut's own timeline, where each visual
+   "section" is one content category, and keeps the auto-lane-packing rule
+   below simple (never has to compare a video clip's time range against a
+   text clip's to decide shared-lane eligibility).
+3. **One packing rule for every lane type, not just the main track** — any
+   two clips of the same type that don't overlap in time (`timing.start`/
+   `duration` ranges disjoint) *may* share a lane; if they'd overlap, the
+   clip being placed needs a new lane (a new `order` value) instead. This
+   directly answers the user's own open question ("text theo hàng" — how
+   should several non-overlapping text captions lay out): generalizing what
+   used to look like a main-track-only exception into one rule means text/
+   overlay captions get exactly the same "pack if it fits" behavior video
+   clips do, instead of forcing one full row per caption. The actual
+   assignment algorithm (classic greedy interval packing — sort by
+   `timing.start`, place each clip in the first open lane whose last clip
+   ends before this one starts, else open a new lane) is Editor-tier/Command
+   logic, not built yet (no multi-clip authoring commands exist yet at all);
+   this note fixes the *data model* the eventual commands must honor.
+
+**Explicitly out of scope for this decision, by the user's own request**:
+audio. `V2AudioDomain.tracks[].clips[]` (`Protocol/V2Audio.swift`) already
+solves "multiple clips per track" for audio in a completely separate
+structure from `layers[]`/`order` — whether text/overlay should eventually
+follow that same dedicated-domain shape instead of flat `layers[]` + lane
+`order` was raised and **explicitly deferred**: the user wants a separate
+follow-up discussion about audio specifically, since it's "an exception that
+doesn't relate to this round's layer `order`" — don't fold audio into this
+model without that follow-up conversation happening first.
+
+**No Protocol V2 schema change** — `order`/`timing` already existed exactly
+as described; this is purely a convention for how the Editor assigns them,
+plus `TimelineView.swift`'s row-grouping logic (`LaneRowView` now renders
+*one lane*, i.e. a `[V2Layer]`, not one row per `V2Layer`) — see
+`ui-design-note.md` for the UI-side implementation notes and the
+multi-clip-lane fixture this was verified against.
+
 ## LUT (3D color grade) is a new asset kind + one new, deliberately non-SVG filter primitive
 
 Added 2026-10-07/08, Swift only so far (TS port not yet done — same

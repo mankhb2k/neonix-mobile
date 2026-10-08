@@ -65,12 +65,85 @@ struct ProjectsView: View {
             }
         }
         .fullScreenCover(item: $openedProject) { project in
-            EditorShellView(project: compile(EditorDemoView.makeDocument(
-                media: .videoPortrait, inOption: .none, outOption: .none,
-                effectOption: .none, easingOption: .linear,
-                composition: V2Composition(width: project.compositionWidth, height: project.compositionHeight, fps: 30, background: "#101820"),
-                frame: V2Frame(width: project.compositionWidth, height: project.compositionHeight)
-            )))
+            EditorShellView(project: Self.openEditorProject(for: project))
         }
+    }
+
+    /// "Trip to Paris" (the 9:16 sample) gets extra demo content — a
+    /// standalone audio track + a text lane — so the Timeline's lane UI
+    /// (video lane, text lane, audio lane) has something real to show,
+    /// per the user's own request 2026-10-08. The other 2 samples are
+    /// untouched (still just the plain compiled video). See `CLAUDE.md`'s
+    /// audio design note and "Timeline lanes" note for the model this
+    /// follows.
+    private static func openEditorProject(for project: ProjectSample) -> V2Project {
+        let videoProject = compile(EditorDemoView.makeDocument(
+            media: .videoPortrait, inOption: .none, outOption: .none,
+            effectOption: .none, easingOption: .linear,
+            composition: V2Composition(width: project.compositionWidth, height: project.compositionHeight, fps: 30, background: "#101820"),
+            frame: V2Frame(width: project.compositionWidth, height: project.compositionHeight)
+        ))
+        guard project.name == "Trip to Paris" else { return videoProject }
+
+        // Stretched from the demo's own default 2500ms so there's enough
+        // room to see the text lane and audio lane overlap/diverge from
+        // the main video lane.
+        var videoLayers = videoProject.layers
+        for index in videoLayers.indices {
+            videoLayers[index].timing = V2Timing(start: videoLayers[index].timing.start, duration: 8000)
+        }
+
+        // A text lane — compiled separately (its own `EditorDocument`,
+        // through the real `TextLayoutCompiler`/`PresetCompiler` pipeline,
+        // not a hand-built `V2TextLayerPayload`) then merged in with its
+        // own lane `order`, since `compile(_:)` itself has no lane concept
+        // (every compiled layer defaults to `order: 0`).
+        let textProject = compile(EditorDocument(
+            id: "trip-to-paris-text",
+            composition: videoProject.composition,
+            assets: [],
+            layers: [
+                EditorLayer(
+                    id: "demo-text", kind: "text",
+                    frame: V2Frame(width: project.compositionWidth, height: 80),
+                    timing: V2Timing(start: 1000, duration: 3000),
+                    text: EditorTextLayer(
+                        text: "Trip to Paris",
+                        fontFamily: "Helvetica",
+                        fontSize: 28,
+                        color: "#FFFFFFff",
+                        layout: EditorTextLayoutIntent(textAlign: "center", wrap: "none")
+                    )
+                ),
+            ]
+        ))
+        let textLayers: [V2Layer] = textProject.layers.map { layer in
+            var copy = layer
+            copy.order = 1
+            return copy
+        }
+
+        // A standalone audio clip — a real `V2AudioClip` in
+        // `V2AudioDomain`, independent of any video's embedded audio.
+        let audioAsset = V2Asset.audio(V2AudioAsset(id: "audio-demo", uri: "audio-demo.mp3", mimeType: "audio/mpeg", duration: 262_500))
+        let audioTrack = V2AudioTrack(
+            id: "track-1", pan: 0, muted: false,
+            clips: [
+                V2AudioClip(
+                    id: "audio-clip-1", assetId: "audio-demo",
+                    timing: V2AudioClipTiming(start: 0, duration: 8000),
+                    trim: V2AudioClipTrim(start: 0, end: nil),
+                    playbackRate: 1
+                ),
+            ]
+        )
+
+        return V2Project(
+            composition: videoProject.composition,
+            assets: videoProject.assets + [audioAsset],
+            filters: videoProject.filters,
+            layers: videoLayers + textLayers,
+            audio: V2AudioDomain(sampleRate: 48000, tracks: [audioTrack])
+        )
     }
 }

@@ -23,14 +23,78 @@ struct EditorShellView: View {
     /// yet (see `EditorTool.swift`), so this only drives which icon is
     /// highlighted, nothing else.
     @State private var selectedTool: EditorTool?
+    /// Phase 1 of the "Bottom nav tools" roadmap — see
+    /// `EditorCommand.swift`/`EditorHistory.swift`. Every edit goes through
+    /// `apply(_:)` below so it's recorded for undo/redo, never a direct
+    /// `project = ...` assignment elsewhere.
+    @State private var history = EditorHistory()
+    /// Phase 2 (Chỉnh sửa) — which clip is selected in the Timeline, if
+    /// any. Only visual layers are selectable this pass (see
+    /// `TimelineView`'s own doc comment on this).
+    @State private var selectedLayerId: String?
+    /// Drag-to-trim's own undo snapshot — captured once when a trim drag
+    /// *begins* (not per `history.record(_:)` call on every pixel moved),
+    /// so an entire drag gesture collapses into a single undo step. `nil`
+    /// whenever no trim drag is in progress.
+    @State private var trimDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
+    private let toolPanelHeight: CGFloat = 64
+
+    private var showsToolPanel: Bool {
+        selectedTool?.hasOptionsPanel ?? false
+    }
 
     init(project: V2Project) {
         _project = State(initialValue: project)
     }
 
+    /// The one path every edit must go through — see `EditorHistory`'s own
+    /// doc comment on why this snapshots the whole document rather than
+    /// asking each `EditorCommand` to carry its own inverse.
+    private func apply(_ command: EditorCommand) {
+        history.record(current: project)
+        project = command.apply(to: project)
+    }
+
+    private func undo() {
+        guard let previous = history.undo(current: project) else { return }
+        project = previous
+    }
+
+    private func redo() {
+        guard let next = history.redo(current: project) else { return }
+        project = next
+    }
+
+    /// Called once when a trim-handle drag starts — snapshots the
+    /// pre-drag project so `endTrim()` can record *that* into history,
+    /// not whatever the live-updated project happens to be by then.
+    private func beginTrim() {
+        guard trimDragOriginal == nil else { return }
+        trimDragOriginal = project
+    }
+
+    /// Called on every `DragGesture.onChanged` tick while trimming —
+    /// applies the live preview directly, deliberately bypassing
+    /// `apply(_:)`/`history.record(_:)` so dragging doesn't spam the undo
+    /// stack with one entry per pixel moved.
+    private func updateTrim(_ command: EditorCommand) {
+        project = command.apply(to: project)
+    }
+
+    /// Called once when the drag ends — records the single pre-drag
+    /// snapshot `beginTrim()` captured, collapsing the whole gesture into
+    /// one undo step.
+    private func endTrim() {
+        guard let original = trimDragOriginal else { return }
+        history.record(current: original)
+        trimDragOriginal = nil
+    }
+
     private var maxDurationMs: Double {
-        max(project.layers.map { $0.timing.start + $0.timing.duration }.max() ?? 1, 1)
+        let layerEnds = project.layers.map { $0.timing.start + $0.timing.duration }
+        let audioEnds = project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }
+        return max((layerEnds + audioEnds).max() ?? 1, 1)
     }
 
     var body: some View {
@@ -70,8 +134,9 @@ struct EditorShellView: View {
                 let squareSide = geo.size.width
                 let videoBoxSide = squareSide * 0.96
                 let stageHeight = squareSide
-                // Timeline: whatever's left after Stage/Titlebar/toolbar, no floor (see ui-design-note.md).
-                let timelineHeight = max(geo.size.height - titlebarHeight - stageHeight - toolbarHeight - 2, 0)
+                // Timeline: whatever's left after Stage/Titlebar/toolbar(/tool panel), no floor (see ui-design-note.md).
+                let reservedHeight = titlebarHeight + stageHeight + toolbarHeight + (showsToolPanel ? toolPanelHeight : 0)
+                let timelineHeight = max(geo.size.height - reservedHeight - (showsToolPanel ? 3 : 2), 0)
 
                 VStack(spacing: 0) {
                     // `.allowsHitTesting(false)` is load-bearing — see ui-design-note.md.
@@ -94,13 +159,38 @@ struct EditorShellView: View {
                     TimelineView(
                         layers: project.layers,
                         assets: project.assets,
+                        audio: project.audio,
                         currentTimeMs: $currentTimeMs,
                         maxDurationMs: maxDurationMs,
-                        onScrub: { isPlaying = false }
+                        onScrub: { isPlaying = false },
+                        selectedLayerId: $selectedLayerId,
+                        onTrimBegin: beginTrim,
+                        onTrimUpdate: updateTrim,
+                        onTrimEnd: endTrim
                     )
                     .frame(height: timelineHeight)
                     .clipped()
                     Divider()
+                    if let selectedTool, showsToolPanel {
+                        ToolOptionsPanel(
+                            tool: selectedTool,
+                            composition: project.composition,
+                            selectedLayer: project.layers.first { $0.id == selectedLayerId },
+                            currentTimeMs: currentTimeMs,
+                            onSetAspectRatio: { width, height in apply(SetAspectRatioCommand(width: width, height: height)) },
+                            onSetBackgroundColor: { hex in apply(SetBackgroundColorCommand(hex: hex)) },
+                            onSplit: { layerId, atMs in
+                                apply(SplitClipCommand(layerId: layerId, atMs: atMs))
+                                selectedLayerId = nil
+                            },
+                            onDelete: { layerId in
+                                apply(DeleteClipCommand(layerId: layerId))
+                                selectedLayerId = nil
+                            }
+                        )
+                        .frame(height: toolPanelHeight)
+                        Divider()
+                    }
                     EditorToolbarView(selectedTool: $selectedTool)
                         .frame(height: toolbarHeight)
                 }
@@ -320,18 +410,18 @@ struct EditorShellView: View {
                 Spacer()
 
                 HStack(spacing: 22) {
-                    Button {} label: {
+                    Button(action: undo) {
                         Image(systemName: "arrow.uturn.backward")
                             .font(.headline)
                             .fontWeight(.regular)
                     }
-                    .disabled(true)
-                    Button {} label: {
+                    .disabled(!history.canUndo)
+                    Button(action: redo) {
                         Image(systemName: "arrow.uturn.forward")
                             .font(.headline)
                             .fontWeight(.regular)
                     }
-                    .disabled(true)
+                    .disabled(!history.canRedo)
                 }
             }
         }
