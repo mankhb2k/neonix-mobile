@@ -214,6 +214,12 @@ private struct LayerContentView: View {
 /// this view only reads them. When `refines` (playhead at rest) and it has
 /// held still for `settleNanoseconds`, an exact full-quality frame replaces
 /// the downscaled preview frame.
+///
+/// Never draws nothing once it has drawn something: when the server has no
+/// frame for this asset (a playhead jump evicted the old region and the new
+/// reader is still walking from the previous keyframe — up to ~2 s for the
+/// long-GOP sample files on the simulator), the last frame shown stays up
+/// until a new one arrives. An empty Stage there was a real bug.
 private struct VideoFrameView: View {
     let assetId: String
     let url: URL
@@ -222,6 +228,9 @@ private struct VideoFrameView: View {
     let refines: Bool
 
     @State private var sharpFrame: (seconds: Double, image: CGImage)?
+    /// Reference box on purpose: remembering what was drawn mustn't itself
+    /// trigger another render.
+    @State private var lastShown = LastShownFrame()
 
     private static let settleNanoseconds: UInt64 = 150_000_000
 
@@ -232,7 +241,8 @@ private struct VideoFrameView: View {
 
     var body: some View {
         let sharp = refines ? sharpFrame.flatMap { $0.seconds == atSeconds ? $0.image : nil } : nil
-        let image = sharp ?? VideoFrameServer.shared.image(assetId: assetId, atSeconds: atSeconds)
+        let image = sharp ?? VideoFrameServer.shared.image(assetId: assetId, atSeconds: atSeconds) ?? lastShown.image
+        let _ = lastShown.image = image
         Group {
             if let image {
                 Image(decorative: image, scale: 1)
@@ -253,6 +263,10 @@ private struct VideoFrameView: View {
             sharpFrame = (target, image)
         }
     }
+}
+
+private final class LastShownFrame {
+    var image: CGImage?
 }
 
 /// Resources (`project.yml`'s `buildPhase: resources` on

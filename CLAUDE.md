@@ -42,6 +42,20 @@ as history.
 - Deleted: `ScrubFrameCache.swift`, `VideoPlayerLayerView.swift`,
   `VideoContentView`, the `activePlayer` plumbing, preloaded players.
 
+**Blank Stage after a jump, fixed the same day.** The user saw an empty
+Stage (just the composition background + text) after scrolling. Logged
+`VideoFrameServer` on the simulator: a jump evicts every frame outside the
+keep window, and the new reader needs ≥1.8 s (keyframe walk on the
+simulator) — up to 8 s at app launch, when it competes with the filmstrip
+batch, cover image and sharp-frame requests for the decoder — before its
+first frame. `VideoFrameView` drew `Color.clear` meanwhile. It now keeps the
+last frame it drew (`LastShownFrame`) until a new one arrives. Benchmarked
+in the iOS simulator itself (not just Mac): the composition decode path is
+fine in isolation — first frame 81–114 ms from a keyframe, 72–118 fps;
+Rec.709 tags cost nothing; `AVAssetReaderTrackOutput` + CI scaling was not
+faster. Startup decoder contention is the remaining lever if launch-to-first-
+frame matters on device.
+
 Measured with a standalone decode script on the sample 1080×1920 clip
 (Mac): sequential decode ~190 fps after a 231 ms open; starting mid-GOP at
 6.5 s costs ~385 ms to the first frame (the 250-frame keyframe interval).
