@@ -3,6 +3,44 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Real device showed letterboxed black bars (simulator didn't) — `GENERATE_INFOPLIST_FILE` was missing on the main target
+
+Found 2026-10-08, running on a real iPhone for the first time this
+project (everything up to this point had only ever been verified on the
+Simulator). The user reported the app rendering inside a small centered
+box with solid black letterboxing top and bottom on their physical
+iPhone, while every simulator screenshot this whole project had ever
+confirmed full-screen rendering with zero issues — the classic iOS
+symptom of an app missing a proper Launch Screen, which makes SpringBoard
+fall back to an old, un-scaled legacy canvas. Confirmed by actually
+inspecting the built `.app`'s `Info.plist`
+(`/usr/libexec/PlistBuddy -c "Print" NeonixEditor.app/Info.plist`), not
+guessed: it had **no `UILaunchScreen` key at all**, despite `project.yml`
+declaring `INFOPLIST_KEY_UILaunchScreen_Generation: "YES"` right there in
+the target's settings.
+
+**Root cause**: `INFOPLIST_KEY_*` build settings only get synthesized into
+the compiled Info.plist when `GENERATE_INFOPLIST_FILE: "YES"` is also set
+— without it, Xcode just silently ignores every `INFOPLIST_KEY_*` entry.
+`project.yml`'s two test targets already had `GENERATE_INFOPLIST_FILE:
+"YES"`; the main `NeonixEditor` target never did, even though it was the
+one actually declaring `INFOPLIST_KEY_UILaunchScreen_Generation` and
+`INFOPLIST_KEY_UISupportedInterfaceOrientations`. **The Simulator
+tolerates a missing `UILaunchScreen` key far more leniently than a real
+device's SpringBoard does** — this is why the gap went unnoticed through
+every single simulator-based verification this project has ever done.
+
+Fixed by adding `GENERATE_INFOPLIST_FILE: "YES"` next to the existing
+`INFOPLIST_KEY_*` lines in `project.yml`'s `NeonixEditor` target,
+regenerating via `xcodegen generate --spec project.yml`, and confirming
+directly against the rebuilt `.app`'s `Info.plist` that `UILaunchScreen`
+and `UISupportedInterfaceOrientations` are both now actually present.
+Full unit + UI test suite re-run green after the fix. **Lesson for next
+time a real-device-only symptom shows up**: `PlistBuddy -c "Print"` the
+actual built Info.plist directly rather than trusting what `project.yml`
+*declares* — a setting that has no effect is indistinguishable from a
+correct one by reading the YAML alone.
+
 ## Scrubbing lag, fixed two different ways for two different parts of the Timeline
 
 Reported 2026-10-08 as "kéo timeline, video chạy không real-time — kéo xong
