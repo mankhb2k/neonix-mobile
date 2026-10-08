@@ -37,6 +37,8 @@ struct EditorShellView: View {
     /// `currentTimeMs` is the only source of truth.
     @State private var playbackPlayer: AVPlayer?
     @State private var playbackAssetId: String?
+    /// Source↔timeline mapping of the clip `playbackPlayer` was seeked for.
+    @State private var playbackMapping: VideoTimeMapping?
     @State private var playbackTimeObserver: Any?
     /// One `AVPlayer` created up front per video asset (2026-10-08, at the
     /// user's own request — "nạp sẵn video vào RAM"), not lazily the first
@@ -219,12 +221,15 @@ struct EditorShellView: View {
 
     /// Creates (or reuses) the `AVPlayer` for whichever video layer is
     /// currently active and makes sure it's actually playing — seeking it
-    /// to the right spot only on a genuine asset switch (entering a new
-    /// clip), not on every tick, so the player's own clock is what's
-    /// really advancing `currentTimeMs` moment to moment.
+    /// only when entering a clip whose source mapping differs from the one
+    /// already playing (`VideoTimeMapping.isContinuous`), so e.g. the two
+    /// halves of a split play straight through without a re-seek, and the
+    /// player's own clock is what advances `currentTimeMs` moment to moment.
     private func ensureRealPlayerPlaying(for active: (layer: V2Layer, assetId: String, url: URL)) {
-        if playbackAssetId == active.assetId, let player = playbackPlayer {
-            if player.rate == 0 { player.play() }
+        guard let mapping = VideoTimeMapping(layer: active.layer) else { return }
+        if playbackAssetId == active.assetId, let player = playbackPlayer,
+           let current = playbackMapping, current.isContinuous(with: mapping) {
+            if player.rate == 0 { player.rate = Float(mapping.rate) }
             return
         }
         releaseRealPlayer()
@@ -232,20 +237,20 @@ struct EditorShellView: View {
         player.automaticallyWaitsToMinimizeStalling = false
         playbackPlayer = player
         playbackAssetId = active.assetId
-        let localSeconds = max((currentTimeMs - active.layer.timing.start) / 1000, 0)
-        player.seek(to: CMTime(seconds: localSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-        let layerStartMs = active.layer.timing.start
+        playbackMapping = mapping
+        let sourceSeconds = mapping.sourceMs(atTimelineMs: currentTimeMs) / 1000
+        player.seek(to: CMTime(seconds: sourceSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         let interval = CMTime(seconds: 1.0 / 60, preferredTimescale: 600)
         playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [self] time in
-            let globalMs = layerStartMs + time.seconds * 1000
-            if globalMs >= maxDurationMs {
+            let timelineMs = mapping.timelineMs(atSourceMs: time.seconds * 1000)
+            if timelineMs >= maxDurationMs {
                 currentTimeMs = 0
                 isPlaying = false
             } else {
-                currentTimeMs = globalMs
+                currentTimeMs = timelineMs
             }
         }
-        player.play()
+        player.rate = Float(mapping.rate)
     }
 
     /// Pauses and tears down the real playback player — called whenever
@@ -261,6 +266,7 @@ struct EditorShellView: View {
         }
         playbackPlayer = nil
         playbackAssetId = nil
+        playbackMapping = nil
     }
 
     /// Handed to `PreviewCanvas` so its matching video layer renders the

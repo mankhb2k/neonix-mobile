@@ -301,7 +301,8 @@ struct TimelineView: View {
     private func loadCoverImage() async {
         guard let primaryVideoLaneOrder, let layer = lane(for: primaryVideoLaneOrder).first else { return }
         guard let assetId = assetId(for: layer), let url = assetURL(for: layer) else { return }
-        coverImage = await VideoFrameCache.shared.frame(assetId: assetId, url: url, atSeconds: layer.timing.start / 1000)
+        let sourceMs = VideoTimeMapping(layer: layer)?.sourceMs(atTimelineMs: layer.timing.start) ?? 0
+        coverImage = await VideoFrameCache.shared.frame(assetId: assetId, url: url, atSeconds: sourceMs / 1000)
     }
 
     private func assetId(for layer: V2Layer) -> String? {
@@ -749,7 +750,7 @@ private struct FilmstripClipView: View {
         // don't re-trigger it. Consumes the stream tile-by-tile (not one
         // final collected dictionary) so tiles fill in as each decode
         // actually finishes, not all at once after the whole batch settles.
-        .task(id: FilmstripBatchKey(assetId: assetId, tileCount: tileCount)) {
+        .task(id: FilmstripBatchKey(assetId: assetId, tileCount: tileCount, trimStartMs: VideoTimeMapping(layer: layer)?.trimStartMs, rate: VideoTimeMapping(layer: layer)?.rate)) {
             guard let assetId, let assetURL else { return }
             let times = (0..<tileCount).map(tileSeconds)
             for await (index, image) in VideoFrameCache.shared.filmstripImages(assetId: assetId, url: assetURL, times: times) {
@@ -864,9 +865,13 @@ private struct FilmstripClipView: View {
         return min(rowHeight, clipWidth - start)
     }
 
+    /// Source time (inside the asset file) shown at this tile's left edge —
+    /// not timeline time, which ignored `trimStart` and showed the wrong
+    /// footage for trimmed clips or any clip not starting at source 0.
     private func tileSeconds(_ index: Int) -> Double {
         let localMs = Double(index) * Double(rowHeight) / pxPerMs
-        return (layer.timing.start + min(localMs, layer.timing.duration)) / 1000
+        let timelineMs = layer.timing.start + localMs
+        return (VideoTimeMapping(layer: layer)?.sourceMs(atTimelineMs: timelineMs) ?? timelineMs) / 1000
     }
 
 }
@@ -1039,11 +1044,16 @@ private struct FilmstripTileView: View {
 }
 
 /// `.task(id:)` key for `FilmstripClipView`'s batch thumbnail fetch —
-/// re-fetches only when the asset or the tile count itself changes (e.g. a
-/// trim that widens/narrows the clip), not on every unrelated re-render.
+/// re-fetches only when the tiles' *source* times change: a different
+/// asset, tile count (the clip got wider/narrower), `trimStart` (a left
+/// trim shifts which footage every tile shows) or rate. Deliberately not
+/// keyed on `timing.start`: a ripple push moves the clip on the timeline
+/// without changing what any tile shows.
 private struct FilmstripBatchKey: Equatable {
     let assetId: String?
     let tileCount: Int
+    let trimStartMs: Double?
+    let rate: Double?
 }
 
 /// Loads a file's full-waveform envelope (`WaveformCache`, decoded once per

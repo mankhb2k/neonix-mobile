@@ -199,9 +199,11 @@ struct ResolvedLayerFrame {
     var motionDx: Double = 0
     var motionDy: Double = 0
     var motionRotation: Double = 0
-    /// Layer-local elapsed time, clamped to `[0, timing.duration]`. Video
-    /// layers use this to pick which source frame to extract.
+    /// Layer-local elapsed time, clamped to `[0, timing.duration]`.
     var elapsedMs: Double
+    /// Video layers only: the position inside the asset file to show at this
+    /// moment (`VideoTimeMapping` — accounts for `trimStart`/`playbackRate`).
+    var sourceMs: Double? = nil
     /// Resolved per-line text runs, `kind == "text"` only — see
     /// `ResolvedTextRun`. Always already-shaped (no wrap/align left to
     /// decide); the renderer only ever draws these numbers.
@@ -340,6 +342,7 @@ func sampleLayer(_ layer: V2Layer, atMs: Double) -> ResolvedLayerFrame {
         rotateZ: layer.transform.rotate.z,
         perspective: layer.transform.perspective,
         elapsedMs: min(max(atMs - layer.timing.start, 0), layer.timing.duration),
+        sourceMs: VideoTimeMapping(layer: layer)?.sourceMs(atTimelineMs: atMs),
         textRuns: layer.textPayload.map { resolveTextRuns($0, layer: layer, atMs: atMs) }
     )
 

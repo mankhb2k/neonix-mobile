@@ -40,10 +40,20 @@ decode, not compositing. Revisit only if compositing many layers becomes
 the bottleneck. The real long-term fix for long-GOP footage is an
 all-intra/short-GOP proxy made at import, which is also what pro NLEs do.
 
-**Known gap found while doing this, not fixed**: `ResolvedLayerFrame.
-elapsedMs` (and `EditorShellView`'s play seek) ignore `V2VideoPayload.
-trimStart`, so after a left trim both scrub and play show source frames
-offset by the trim amount.
+**Source-time mapping fixed the same day**: every place that picked a frame
+from the file used timeline-relative time and ignored
+`V2VideoPayload.trimStart` — after a left trim (or for any clip not
+starting at source 0, e.g. a split's 2nd half), Stage scrub, Stage play,
+filmstrip tiles and the cover image all showed the wrong footage.
+`Runtime/VideoTimeMapping.swift` is now the single timeline↔source
+conversion (`trimStart` + elapsed × `playbackRate`) used by all four:
+`ResolvedLayerFrame.sourceMs` (Stage scrub), `EditorShellView`'s player
+seek/time observer, `FilmstripClipView.tileSeconds`, and the cover image.
+Playback carries straight across split halves without a re-seek
+(`isContinuous(with:)`). The filmstrip's batch key now includes
+`trimStart`/rate so a left trim refetches tiles. Covered by
+`VideoTimeMappingTests`. Editing commands (split/trim handles) still assume
+`playbackRate == 1`; nothing authors a rate yet.
 
 Build clean, unit tests green; no simulator pass this round per the user's
 request (they test on their device).

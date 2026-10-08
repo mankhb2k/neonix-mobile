@@ -173,7 +173,7 @@ private struct LayerContentView: View {
             if let asset, let activePlayer, activePlayer.assetId == asset.id {
                 VideoPlayerLayerView(player: activePlayer.player, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
             } else if let asset, let url = bundledURL(filename: asset.uri) {
-                ScrubFrameView(assetId: asset.id, url: url, atSeconds: frame.elapsedMs / 1000, contentMode: contentMode)
+                ScrubFrameView(assetId: asset.id, url: url, atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000, contentMode: contentMode)
             } else {
                 Color.gray
             }
