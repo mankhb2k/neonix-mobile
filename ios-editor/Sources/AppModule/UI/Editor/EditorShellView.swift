@@ -1,4 +1,3 @@
-import AVFoundation
 import SwiftUI
 
 /// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
@@ -8,14 +7,13 @@ struct EditorShellView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var project: V2Project
-    /// Owns the playhead clock, Play/Pause, scrubbing + momentum and the
-    /// playback `AVPlayer` (`Playback/EditorPlaybackEngine.swift`). This view
-    /// only sends it commands and reads from it — it never writes the time.
+    /// Owns the playhead clock, Play/Pause, scrubbing + momentum
+    /// (`Playback/EditorPlaybackEngine.swift`). This view only sends it
+    /// commands and reads from it — it never writes the time.
     @State private var engine: EditorPlaybackEngine
     private var currentTimeMs: Double { engine.currentTimeMs }
     private var isPlaying: Bool { engine.isPlaying }
     private var maxDurationMs: Double { engine.maxDurationMs }
-    private var activePlayerInfo: (assetId: String, player: AVPlayer)? { engine.activePlayerInfo }
     /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
     @State private var titlebarHeight: CGFloat = 60
     /// Toggled by the titlebar's "Enter Full Screen" button — swaps the
@@ -119,7 +117,7 @@ struct EditorShellView: View {
             guard newValue > 0 else { return }
             titlebarHeight = newValue
         }
-        .task { engine.preloadPlayers() }
+        .task { engine.prepare() }
         .onDisappear { engine.pause() }
     }
 
@@ -143,7 +141,7 @@ struct EditorShellView: View {
                         assets: project.assets,
                         layers: project.layers,
                         atMs: currentTimeMs,
-                        activePlayer: activePlayerInfo
+                        refinesStills: engine.mode == .idle
                     )
                     .allowsHitTesting(false)
                     .frame(width: videoBoxSide, height: videoBoxSide)
@@ -213,7 +211,7 @@ struct EditorShellView: View {
                     assets: project.assets,
                     layers: project.layers,
                     atMs: currentTimeMs,
-                    activePlayer: activePlayerInfo
+                    refinesStills: engine.mode == .idle
                 )
                 .allowsHitTesting(false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

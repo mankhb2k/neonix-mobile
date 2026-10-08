@@ -41,10 +41,9 @@ struct PreviewCanvas: View {
     let assets: [V2Asset]
     let layers: [V2Layer]
     let atMs: Double
-    /// Set only while a video layer is actively playing: that one layer
-    /// renders the live `AVPlayer` output instead of an extracted still
-    /// frame. Paused/scrubbing never sets this.
-    var activePlayer: (assetId: String, player: AVPlayer)? = nil
+    /// `true` while the playhead is at rest: video layers then swap their
+    /// decoded preview frame for an exact full-quality one.
+    var refinesStills: Bool = true
 
     /// Scales the fixed `composition.width`/`height` coordinate space to fit
     /// whatever box the caller gives this view. `.clipped()` keeps drawing
@@ -68,7 +67,7 @@ struct PreviewCanvas: View {
         return ZStack {
             Color(hex: composition.background)
             ForEach(tree, id: \.layer.id) { node in
-                LayerNodeView(node: node, atMs: atMs, assets: assets, activePlayer: activePlayer)
+                LayerNodeView(node: node, atMs: atMs, assets: assets, refinesStills: refinesStills)
             }
         }
         .clipped()
@@ -82,7 +81,7 @@ private struct LayerNodeView: View {
     let node: LayerTreeNode
     let atMs: Double
     let assets: [V2Asset]
-    let activePlayer: (assetId: String, player: AVPlayer)?
+    let refinesStills: Bool
 
     var body: some View {
         let frame = sampleLayer(node.layer, atMs: atMs)
@@ -90,11 +89,11 @@ private struct LayerNodeView: View {
             if node.layer.type == "group" {
                 ZStack {
                     ForEach(node.children, id: \.layer.id) { child in
-                        LayerNodeView(node: child, atMs: atMs, assets: assets, activePlayer: activePlayer)
+                        LayerNodeView(node: child, atMs: atMs, assets: assets, refinesStills: refinesStills)
                     }
                 }
             } else {
-                LayerContentView(frame: frame, asset: assets.first { $0.id == frame.assetId }, activePlayer: activePlayer)
+                LayerContentView(frame: frame, asset: assets.first { $0.id == frame.assetId }, refinesStills: refinesStills)
                     .frame(width: frame.frameWidth, height: frame.frameHeight)
                     .clipped()
             }
@@ -151,12 +150,12 @@ private struct LayerNodeView: View {
 
 /// Renders one layer's own content (before the shared transform/opacity
 /// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
-/// still frame for an image, and for video either the live playback
-/// `AVPlayer` (while playing) or a cached decoded frame (`ScrubFrameView`).
+/// still for an image, and the decoded frame at the playhead for video
+/// (`VideoFrameView`).
 private struct LayerContentView: View {
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
-    let activePlayer: (assetId: String, player: AVPlayer)?
+    let refinesStills: Bool
 
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
@@ -171,12 +170,12 @@ private struct LayerContentView: View {
             }
         case "video":
             if let asset, let url = bundledURL(filename: asset.uri) {
-                VideoContentView(
+                VideoFrameView(
                     assetId: asset.id,
                     url: url,
                     atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
                     contentMode: contentMode,
-                    livePlayer: activePlayer.flatMap { $0.assetId == asset.id ? $0.player : nil }
+                    refines: refinesStills
                 )
             } else {
                 Color.gray
@@ -208,71 +207,19 @@ private struct LayerContentView: View {
     }
 }
 
-/// One video layer's pixels. The cached/sharp still (`ScrubFrameView`) is
-/// *always* rendered underneath; the playback `AVPlayerLayer` sits on top
-/// only while there's a player to show. Swapping one view for the other
-/// (the previous design) flashed black on every Play, because a fresh
-/// `AVPlayerLayer` draws nothing until its player has a decoded frame —
-/// `VideoPlayerLayerView` now stays invisible until `isReadyForDisplay`, so
-/// the still underneath shows through instead of black.
-///
-/// After a pause, the paused player keeps being shown (`lingeringPlayer` —
-/// it's already displaying exactly the right frame) until the still has an
-/// exact frame for the same moment, or until the playhead moves.
-private struct VideoContentView: View {
+/// One video layer's pixels: always the frame at the playhead, read
+/// synchronously from `VideoFrameServer` — the same path while scrubbing,
+/// coasting and playing, so there is never a hand-off between two kinds of
+/// view to flash. `EditorPlaybackEngine` keeps the frames decoded ahead;
+/// this view only reads them. When `refines` (playhead at rest) and it has
+/// held still for `settleNanoseconds`, an exact full-quality frame replaces
+/// the downscaled preview frame.
+private struct VideoFrameView: View {
     let assetId: String
     let url: URL
     let atSeconds: Double
     let contentMode: ContentMode
-    /// Non-nil only while playback is running *and* has finished seeking
-    /// (see `EditorShellView.activePlayerInfo`).
-    let livePlayer: AVPlayer?
-
-    @State private var lingeringPlayer: AVPlayer?
-
-    var body: some View {
-        let displayPlayer = livePlayer ?? lingeringPlayer
-        ZStack {
-            ScrubFrameView(
-                assetId: assetId,
-                url: url,
-                atSeconds: atSeconds,
-                contentMode: contentMode,
-                isSuspended: livePlayer != nil,
-                refineImmediately: lingeringPlayer != nil,
-                onExactFrame: { lingeringPlayer = nil }
-            )
-            if let displayPlayer {
-                VideoPlayerLayerView(player: displayPlayer, gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill)
-            }
-        }
-        .onChange(of: livePlayer) { oldPlayer, newPlayer in
-            lingeringPlayer = newPlayer == nil ? oldPlayer : nil
-        }
-        .onChange(of: atSeconds) { _, _ in
-            if livePlayer == nil { lingeringPlayer = nil }
-        }
-    }
-}
-
-/// Paused/scrubbing video frame: read synchronously from `ScrubFrameCache`
-/// (decoded ahead with `AVAssetReader`), so the picture follows
-/// `currentTimeMs` in the same render pass as every other layer instead of
-/// waiting on an `AVPlayer` seek. Once the playhead has held still for
-/// `settleNanoseconds`, an exact full-quality frame replaces the cached one.
-///
-/// `isSuspended` (playback running on top) stops all background decoding
-/// so it never competes with the player for the hardware decoder.
-/// `refineImmediately` skips the settle delay — used right after a pause,
-/// when the player's frozen frame is waiting on this view to take over.
-private struct ScrubFrameView: View {
-    let assetId: String
-    let url: URL
-    let atSeconds: Double
-    let contentMode: ContentMode
-    let isSuspended: Bool
-    let refineImmediately: Bool
-    let onExactFrame: () -> Void
+    let refines: Bool
 
     @State private var sharpFrame: (seconds: Double, image: CGImage)?
 
@@ -280,50 +227,30 @@ private struct ScrubFrameView: View {
 
     private struct RefineKey: Equatable {
         let atSeconds: Double
-        let isSuspended: Bool
-        let refineImmediately: Bool
+        let refines: Bool
     }
 
     var body: some View {
-        let image = sharpFrame.flatMap { $0.seconds == atSeconds ? $0.image : nil }
-            ?? ScrubFrameCache.shared.image(assetId: assetId, atSeconds: atSeconds)
+        let sharp = refines ? sharpFrame.flatMap { $0.seconds == atSeconds ? $0.image : nil } : nil
+        let image = sharp ?? VideoFrameServer.shared.image(assetId: assetId, atSeconds: atSeconds)
         Group {
             if let image {
                 Image(decorative: image, scale: 1)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else {
-                Color.gray
+                Color.clear
             }
         }
-        .onAppear {
-            guard !isSuspended else { return }
-            ScrubFrameCache.shared.prefetch(assetId: assetId, url: url, around: atSeconds)
-        }
-        .onChange(of: atSeconds) { _, newValue in
-            guard !isSuspended else { return }
-            ScrubFrameCache.shared.prefetch(assetId: assetId, url: url, around: newValue)
-        }
-        .onChange(of: isSuspended) { _, suspended in
-            guard !suspended else { return }
-            ScrubFrameCache.shared.prefetch(assetId: assetId, url: url, around: atSeconds)
-        }
-        .task(id: RefineKey(atSeconds: atSeconds, isSuspended: isSuspended, refineImmediately: refineImmediately)) {
-            guard !isSuspended else { return }
-            if sharpFrame?.seconds == atSeconds {
-                onExactFrame()
-                return
-            }
-            if !refineImmediately {
-                try? await Task.sleep(nanoseconds: Self.settleNanoseconds)
-            }
+        .task(id: RefineKey(atSeconds: atSeconds, refines: refines)) {
+            guard refines, sharpFrame?.seconds != atSeconds else { return }
+            try? await Task.sleep(nanoseconds: Self.settleNanoseconds)
             guard !Task.isCancelled else { return }
             let target = atSeconds
             guard let image = await SharpFrameLoader.shared.image(assetId: assetId, url: url, atSeconds: target),
                   !Task.isCancelled
             else { return }
             sharpFrame = (target, image)
-            onExactFrame()
         }
     }
 }

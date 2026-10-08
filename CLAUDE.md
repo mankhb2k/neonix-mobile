@@ -3,6 +3,52 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Play and scrub are one pipeline now — no `AVPlayer` on the Stage
+
+Changed 2026-10-09 (step 2 of the engine plan below), at the user's
+explicit request: "why do play and scroll use two different logics?"
+Two paths existed only because `AVPlayer` plays sequentially well but can't
+jump to an arbitrary time fast — so scrub used decoded frames and Play used
+an `AVPlayerLayer`, and every switch between them was a hand-off that could
+flash (black, gray, a blurry 640 px still) or briefly show a stale frame.
+**This supersedes** the notes below titled "Play now uses a real `AVPlayer`
+clock", the black-flash fix, and the scrub frame-cache design; they're kept
+as history.
+
+**Now**, for scrubbing, momentum *and* Play:
+- `Playback/EditorPlaybackEngine.swift` is the only clock
+  (`Playback/DisplayLinkClock.swift`, a `CADisplayLink` — vsync-aligned,
+  replacing the `Task.sleep(16 ms)` loops). Every `currentTimeMs` change goes
+  through `setTime(_:)`, which also asks the frame server to prefetch for
+  every video clip covering the playhead (and clips starting within 1 s, so
+  cuts don't wait). During Play, if the next frame isn't decoded the clock
+  **holds** (max 2 s) like a buffering player instead of skipping — covered
+  by `testPlaybackHoldsTheClockUntilFramesAreDecoded` via the
+  `frameReadiness` test seam.
+- `Playback/VideoFrameServer.swift` (replaces `Runtime/ScrubFrameCache.swift`)
+  runs at most one `AVAssetReader` per asset, reading **forward
+  continuously** from where it started, with backpressure (`DecodeGate`): it
+  decodes up to 1 s ahead of the playhead (0.3 s when moving backward), then
+  waits. So Play is one uninterrupted sequential decode — no seek per
+  frame, no re-seek on Play. A new reader (one keyframe walk) only starts
+  when the playhead jumps or moves backward past what's decoded. Frames are
+  960 px long edge at the asset's native fps, tagged Rec.709 in the video
+  composition so colors match the source (a suspected cause of the "dim
+  gray/black" look before). Tunables + memory budget in `VideoFrameTuning`.
+- `PreviewCanvas`'s `VideoFrameView` always draws the frame at the playhead
+  from the server — the same view in every mode. `PreviewCanvas.refinesStills`
+  (`engine.mode == .idle`) lets it swap in an exact full-quality frame
+  (`SharpFrameLoader`) after 150 ms at rest.
+- Deleted: `ScrubFrameCache.swift`, `VideoPlayerLayerView.swift`,
+  `VideoContentView`, the `activePlayer` plumbing, preloaded players.
+
+Measured with a standalone decode script on the sample 1080×1920 clip
+(Mac): sequential decode ~190 fps after a 231 ms open; starting mid-GOP at
+6.5 s costs ~385 ms to the first frame (the 250-frame keyframe interval).
+No audio is lost: neither sample video has an audio track and nothing played
+the standalone audio clip; real audio must later follow `currentTimeMs`.
+Build clean, 43/43 unit tests; no simulator run per the user's request.
+
 ## `EditorPlaybackEngine` owns the playhead — step 1 of 3, behavior-preserving
 
 Added 2026-10-09 (`Playback/EditorPlaybackEngine.swift`). Before this,

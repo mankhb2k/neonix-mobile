@@ -114,6 +114,35 @@ final class EditorPlaybackEngineTests: XCTestCase {
         XCTAssertEqual(engine.mode, .scrubbing)
     }
 
+    func testPlaybackHoldsTheClockUntilFramesAreDecoded() async throws {
+        final class Readiness { var ready = false }
+        let readiness = Readiness()
+        let layer = V2Layer(
+            id: "g",
+            order: 0,
+            frame: V2Frame(width: 100, height: 100),
+            transform: .identity,
+            timing: V2Timing(start: 0, duration: 60_000),
+            payload: .group(render3d: nil)
+        )
+        let project = V2Project(
+            composition: V2Composition(width: 360, height: 640, fps: 30, background: "#000000"),
+            assets: [],
+            layers: [layer]
+        )
+        let engine = EditorPlaybackEngine(project: project, frameReadiness: { _ in readiness.ready })
+
+        engine.play()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(engine.currentTimeMs, 0, "clock must hold while the next frame isn't decoded")
+
+        readiness.ready = true
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertGreaterThan(engine.currentTimeMs, 50)
+        engine.pause()
+    }
+
     func testReachingTheEndResetsToZeroAndStops() async throws {
         let engine = makeEngine(durationMs: 100)
         engine.play()
