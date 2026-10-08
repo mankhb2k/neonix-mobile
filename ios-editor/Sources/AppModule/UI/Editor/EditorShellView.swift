@@ -17,13 +17,7 @@ struct EditorShellView: View {
 
     @State private var project: V2Project
     @State private var currentTimeMs: Double = 0
-    /// Defaults to `true` (2026-10-08, at the user's own request) purely so
-    /// opening the Editor starts playback immediately for manual real-
-    /// device testing of the AVPlayer-driven Play path above, without
-    /// having to tap Play every launch. Revert to `false` once that
-    /// round of testing is done — this isn't meant to be the shipped
-    /// default.
-    @State private var isPlaying = true
+    @State private var isPlaying = false
     @State private var lastTick: Date = .init()
     /// Real decoded playback: while `isPlaying` and the playhead sits over a
     /// video layer, a real `AVPlayer` actually plays (`.play()`, not
