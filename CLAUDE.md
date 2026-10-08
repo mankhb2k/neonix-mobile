@@ -3,6 +3,57 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Play now uses a real `AVPlayer` clock — scrubbing's tolerant-seek path is explicitly untouched
+
+Added 2026-10-08, after the user tested momentum scrolling on a real
+iPhone and found a separate problem: pressing Play still didn't look
+smooth. Root cause, confirmed by reading the code rather than guessed:
+`EditorShellView` never actually set `PreviewCanvas.activePlayer` —
+"Play" was just the same software `playbackTimer` tick advancing
+`currentTimeMs` 60×/sec, which `ScrubPlayerView` turned into 60 tolerant
+re-seeks per second. Tolerant seeking is the right tool for *scrubbing*
+(see the earlier scrub-lag note) but is not, and was never going to be,
+genuinely smooth decoded video — the user explicitly asked to set the
+frame/scrub question aside entirely and "gỡ từng nút thắt" (untangle one
+knot at a time): just make Play call the real iOS player.
+
+**What changed, scoped narrowly to Play only:**
+- `EditorShellView` gained `activeVideoLayer(atMs:)` (which video layer, if
+  any, covers a given moment), `ensureRealPlayerPlaying(for:)`, and
+  `releaseRealPlayer()`. While `isPlaying` and a video layer covers
+  `currentTimeMs`, a real `AVPlayer` is created once per asset, seeked
+  there, and actually `.play()`s — its own `addPeriodicTimeObserver`
+  drives `currentTimeMs` from then on, not the software timer tick.
+  `onReceive(playbackTimer)` now only does the old software-clock advance
+  when *no* video covers the current moment (e.g. a text-only stretch),
+  so the two clocks never fight over the same instant.
+- Both `PreviewCanvas` call sites (windowed + fullscreen Stage) now pass
+  a real `activePlayer: (assetId, AVPlayer)?` instead of always `nil` —
+  `LayerContentView`'s existing `VideoPlayerLayerView` branch (which
+  already existed in the code, just never actually reachable before this)
+  is what finally renders the real decoded output during Play.
+- Pausing, scrubbing, or reaching the end all route through
+  `releaseRealPlayer()` (also wired to `.onChange(of: isPlaying)`), so
+  nothing keeps decoding once Play isn't actually running.
+
+**Deliberately out of scope, per the user's own framing**: `ScrubPlayerView`
+(paused/scrubbing preview) is completely untouched — still tolerant-seek
+based, still the thing the earlier scrub-lag/momentum notes describe.
+Multi-clip seamless hand-off when playback crosses from one video clip
+into a *different* one mid-lane is handled (the asset switch re-creates
+the player), but was not stress-tested beyond the single-clip sample
+projects this app ships today.
+
+Verified on the simulator by temporarily forcing `isPlaying = true` in
+`EditorShellView`'s `init` (same forced-default-then-revert pattern used
+throughout this file) and screenshotting: the playhead/filmstrip had
+genuinely advanced (to `00:06`) and the Pause icon was showing, confirming
+real playback is actually driving the clock, not a single static render.
+Full unit + UI test suite green. Real-device smoothness itself (the
+actual thing being fixed) still needs the user's own eyes on a real
+iPhone — a simulator screenshot can confirm the clock is advancing, not
+how smooth the decoded motion looks frame to frame.
+
 ## Timeline momentum scrolling + velocity-aware scrub tolerance
 
 Added 2026-10-08, after the user tested the scrub-lag fix above on a real

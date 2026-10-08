@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// Fires roughly at display refresh rate; while playing, `isPlaying`
@@ -18,6 +19,24 @@ struct EditorShellView: View {
     @State private var currentTimeMs: Double = 0
     @State private var isPlaying = false
     @State private var lastTick: Date = .init()
+    /// Real decoded playback, added 2026-10-08 per the user's own request
+    /// after testing on a real iPhone: Play used to just re-seek a frame
+    /// 60 times/sec via `ScrubPlayerView` (the same tolerant-seek path
+    /// scrubbing uses) — fine for scrubbing, but nothing like genuinely
+    /// smooth decoded video. Deliberately scoped narrow ("gỡ từng nút
+    /// thắt" — untangle one knot at a time, not everything at once): while
+    /// `isPlaying` and the playhead sits over a video layer, a real
+    /// `AVPlayer` actually plays (`.play()`, not repeated seeks) and
+    /// *drives* `currentTimeMs` from its own periodic time observer
+    /// instead of the software `playbackTimer` tick. The instant no video
+    /// covers the current moment (a text-only stretch, or no video layer
+    /// at all), playback falls back to the pre-existing software clock —
+    /// same `onReceive(playbackTimer)` as before, untouched. Scrub/paused
+    /// frame rendering (`ScrubPlayerView`) is explicitly out of scope here
+    /// and left exactly as it was.
+    @State private var playbackPlayer: AVPlayer?
+    @State private var playbackAssetId: String?
+    @State private var playbackTimeObserver: Any?
     /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
     @State private var titlebarHeight: CGFloat = 60
     /// Toggled by the titlebar's "Enter Full Screen" button — swaps the
@@ -121,8 +140,17 @@ struct EditorShellView: View {
         }
         .onReceive(playbackTimer) { now in
             guard isPlaying else { return }
+            defer { lastTick = now }
+            if let active = activeVideoLayer(atMs: currentTimeMs) {
+                // A real video covers this instant — let its own AVPlayer
+                // actually play and drive the clock; the software tick
+                // below is deliberately skipped for as long as this stays
+                // true (see `playbackPlayer`'s own doc comment).
+                ensureRealPlayerPlaying(for: active)
+                return
+            }
+            releaseRealPlayer()
             let deltaMs = now.timeIntervalSince(lastTick) * 1000
-            lastTick = now
             let next = currentTimeMs + deltaMs
             if next >= maxDurationMs {
                 currentTimeMs = 0
@@ -131,6 +159,79 @@ struct EditorShellView: View {
                 currentTimeMs = next
             }
         }
+        .onChange(of: isPlaying) { _, playing in
+            guard !playing else { return }
+            releaseRealPlayer()
+        }
+    }
+
+    /// The video layer (if any) whose own time range covers `ms` — at most
+    /// one can be active at once, matching `PreviewCanvas.activePlayer`'s
+    /// own single-asset shape (see its doc comment).
+    private func activeVideoLayer(atMs ms: Double) -> (layer: V2Layer, assetId: String, url: URL)? {
+        guard let layer = project.layers.first(where: { layer in
+            layer.type == "video" && ms >= layer.timing.start && ms < layer.timing.start + layer.timing.duration
+        }), case .video(let payload) = layer.payload,
+              let asset = project.assets.first(where: { $0.id == payload.assetId }),
+              case .video(let videoAsset) = asset,
+              let url = bundledURL(filename: videoAsset.uri)
+        else { return nil }
+        return (layer, payload.assetId, url)
+    }
+
+    /// Creates (or reuses) the `AVPlayer` for whichever video layer is
+    /// currently active and makes sure it's actually playing — seeking it
+    /// to the right spot only on a genuine asset switch (entering a new
+    /// clip), not on every tick, so the player's own clock is what's
+    /// really advancing `currentTimeMs` moment to moment.
+    private func ensureRealPlayerPlaying(for active: (layer: V2Layer, assetId: String, url: URL)) {
+        if playbackAssetId == active.assetId, let player = playbackPlayer {
+            if player.rate == 0 { player.play() }
+            return
+        }
+        releaseRealPlayer()
+        let player = AVPlayer(url: active.url)
+        player.automaticallyWaitsToMinimizeStalling = false
+        playbackPlayer = player
+        playbackAssetId = active.assetId
+        let localSeconds = max((currentTimeMs - active.layer.timing.start) / 1000, 0)
+        player.seek(to: CMTime(seconds: localSeconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let layerStartMs = active.layer.timing.start
+        let interval = CMTime(seconds: 1.0 / 60, preferredTimescale: 600)
+        playbackTimeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [self] time in
+            let globalMs = layerStartMs + time.seconds * 1000
+            if globalMs >= maxDurationMs {
+                currentTimeMs = 0
+                isPlaying = false
+            } else {
+                currentTimeMs = globalMs
+            }
+        }
+        player.play()
+    }
+
+    /// Pauses and tears down the real playback player — called whenever
+    /// playback stops entirely (pause, scrub, reaching the end) or when
+    /// the playhead moves into a different clip/asset than the one
+    /// currently playing.
+    private func releaseRealPlayer() {
+        guard let player = playbackPlayer else { return }
+        player.pause()
+        if let observer = playbackTimeObserver {
+            player.removeTimeObserver(observer)
+            playbackTimeObserver = nil
+        }
+        playbackPlayer = nil
+        playbackAssetId = nil
+    }
+
+    /// Handed to `PreviewCanvas` so its matching video layer renders the
+    /// real player's live output (`VideoPlayerLayerView`) instead of
+    /// `ScrubPlayerView`'s tolerant-seeked still frames — `nil` whenever
+    /// nothing is actually playing right now.
+    private var activePlayerInfo: (assetId: String, player: AVPlayer)? {
+        guard let playbackPlayer, let playbackAssetId else { return nil }
+        return (playbackAssetId, playbackPlayer)
     }
 
     private var windowedShell: some View {
@@ -152,7 +253,8 @@ struct EditorShellView: View {
                         composition: project.composition,
                         assets: project.assets,
                         layers: project.layers,
-                        atMs: currentTimeMs
+                        atMs: currentTimeMs,
+                        activePlayer: activePlayerInfo
                     )
                     .allowsHitTesting(false)
                     .frame(width: videoBoxSide, height: videoBoxSide)
@@ -223,7 +325,8 @@ struct EditorShellView: View {
                     composition: project.composition,
                     assets: project.assets,
                     layers: project.layers,
-                    atMs: currentTimeMs
+                    atMs: currentTimeMs,
+                    activePlayer: activePlayerInfo
                 )
                 .allowsHitTesting(false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
