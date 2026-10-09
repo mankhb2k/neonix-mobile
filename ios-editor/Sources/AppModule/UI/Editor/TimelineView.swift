@@ -83,6 +83,10 @@ struct TimelineView: View {
     @State private var dragRebaseX: CGFloat = 0
     /// Only fed while a metrics run is recording; see `ReleaseVelocityEstimator`.
     @State private var releaseEstimator = ReleaseVelocityEstimator()
+    /// Vertical scroll of the lanes below the main lane (see `LaneScroll`).
+    @State private var laneScrollY: CGFloat = 0
+    @State private var laneScrollStartY: CGFloat = 0
+    @State private var dragAxis: LaneScroll.Axis?
     /// Only the main (primary video) lane uses this height — every other
     /// lane, including every standalone audio track, uses the smaller
     /// `otherRowHeight` instead. Confirmed with the user 2026-10-08: the
@@ -148,6 +152,13 @@ struct TimelineView: View {
         return rowsHeight + spacingHeight
     }
 
+    /// Height of every lane except the pinned main one, spacing included.
+    private var scrollingLanesHeight: CGFloat {
+        let count = rowCount - (primaryVideoLaneOrder == nil ? 0 : 1)
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * otherRowHeight + CGFloat(count - 1) * rowSpacing
+    }
+
     private var panelHeight: CGFloat {
         rulerHeight + rowsTopPadding + tracksHeight
     }
@@ -168,6 +179,13 @@ struct TimelineView: View {
                     PlaybackMetrics.shared.gauge(.rulerMinorMs, TimelineZoom.rulerIntervals(pxPerMs: pxPerMs, fps: fps).minorMs)
                 }()
                 let windowMs = TimelineZoom.visibleWindowMs(currentTimeMs: currentTimeMs, viewportWidth: Double(geo.size.width), pxPerMs: pxPerMs)
+                // Main lane pinned under the ruler; the rest scroll vertically.
+                let mainOrder = primaryVideoLaneOrder
+                let scrollContentHeight = scrollingLanesHeight
+                let pinnedHeight: CGFloat = mainOrder == nil ? 0 : rowHeight + rowSpacing
+                let scrollViewportHeight = max(geo.size.height - rulerHeight - rowsTopPadding - pinnedHeight, 0)
+                let maxLaneScroll = LaneScroll.maxOffset(contentHeight: scrollContentHeight, viewportHeight: scrollViewportHeight)
+                let laneOffsetY = LaneScroll.clamped(laneScrollY, maxOffset: maxLaneScroll)
 
                 ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: rowsTopPadding) {
@@ -175,48 +193,41 @@ struct TimelineView: View {
                             .frame(height: rulerHeight)
 
                         VStack(alignment: .leading, spacing: rowSpacing) {
-                            ForEach(laneOrders, id: \.self) { order in
-                                let isMainLane = order == primaryVideoLaneOrder
-                                LaneRowView(
-                                    clips: lane(for: order),
-                                    pxPerMs: pxPerMs,
-                                    windowMs: windowMs,
-                                    rowHeight: isMainLane ? rowHeight : otherRowHeight,
-                                    centerX: centerX,
-                                    showsCoverAndMute: isMainLane,
-                                    coverImage: coverImage,
-                                    isMuted: isMuted,
-                                    onToggleMute: { isMuted.toggle() },
-                                    resolveAsset: { layer in (assetId(for: layer), assetURL(for: layer)) },
-                                    resolveAudioURL: { layer in audioDerivativeURL(for: layer) },
-                                    selectedLayerId: selectedLayerId,
-                                    onSelectLayer: { id in
-                                        selectedLayerId = (selectedLayerId == id) ? nil : id
-                                        selectedAudioClipId = nil
-                                    },
-                                    onTrimBegin: onTrimBegin,
-                                    onTrimUpdate: onTrimUpdate,
-                                    onTrimEnd: onTrimEnd
-                                )
+                            if let mainOrder {
+                                laneRow(order: mainOrder, centerX: centerX, windowMs: windowMs)
                             }
 
-                            ForEach(audio.tracks, id: \.id) { track in
-                                AudioTrackRowView(
-                                    track: track,
-                                    pxPerMs: pxPerMs,
-                                    rowHeight: otherRowHeight,
-                                    resolveAudioURL: { clip in audioClipURL(for: clip) },
-                                    selectedClipId: selectedAudioClipId,
-                                    onSelectClip: { id in
-                                        selectedAudioClipId = (selectedAudioClipId == id) ? nil : id
-                                        selectedLayerId = nil
+                            if scrollContentHeight > 0 {
+                                VStack(alignment: .leading, spacing: rowSpacing) {
+                                    ForEach(laneOrders.filter { $0 != mainOrder }, id: \.self) { order in
+                                        laneRow(order: order, centerX: centerX, windowMs: windowMs)
                                     }
-                                )
+
+                                    ForEach(audio.tracks, id: \.id) { track in
+                                        AudioTrackRowView(
+                                            track: track,
+                                            pxPerMs: pxPerMs,
+                                            rowHeight: otherRowHeight,
+                                            resolveAudioURL: { clip in audioClipURL(for: clip) },
+                                            selectedClipId: selectedAudioClipId,
+                                            onSelectClip: { id in
+                                                selectedAudioClipId = (selectedAudioClipId == id) ? nil : id
+                                                selectedLayerId = nil
+                                            }
+                                        )
+                                    }
+                                }
+                                .offset(y: -laneOffsetY)
+                                .frame(height: min(scrollContentHeight, scrollViewportHeight), alignment: .topLeading)
+                                .clipped()
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("lane-scroll")
+                                .accessibilityValue(String(format: "%.0f", laneOffsetY))
                             }
                         }
                     }
                     .offset(x: contentOffsetX)
-                    .frame(width: geo.size.width, height: panelHeight, alignment: .topLeading)
+                    .frame(width: geo.size.width, height: min(panelHeight, geo.size.height), alignment: .topLeading)
                     .clipped()
 
                     // Only the playhead itself stays fixed — the cover cell
@@ -267,6 +278,15 @@ struct TimelineView: View {
                                 dragNeedsRebase = true
                                 return
                             }
+                            if dragAxis == nil {
+                                dragAxis = LaneScroll.axis(forTranslation: value.translation, canScrollVertically: maxLaneScroll > 0)
+                                if dragAxis == .vertical { laneScrollStartY = laneOffsetY }
+                            }
+                            guard let axis = dragAxis else { return }
+                            if axis == .vertical {
+                                laneScrollY = LaneScroll.clamped(laneScrollStartY - value.translation.height, maxOffset: maxLaneScroll)
+                                return
+                            }
                             if dragNeedsRebase {
                                 dragRebaseX = value.translation.width
                                 dragNeedsRebase = false
@@ -286,9 +306,11 @@ struct TimelineView: View {
                             }
                         }
                         .onEnded { value in
+                            let axis = dragAxis
+                            dragAxis = nil
                             dragNeedsRebase = false
                             dragRebaseX = 0
-                            guard !isPinching else { return }
+                            guard !isPinching, axis == .horizontal else { return }
                             let metrics = PlaybackMetrics.shared
                             if metrics.isRecording {
                                 metrics.record(.releaseFingerPxPerSecond, ms: abs(Double(value.velocity.width)))
@@ -321,6 +343,33 @@ struct TimelineView: View {
         .task(id: coverAssetKey) {
             await loadCoverImage()
         }
+    }
+
+    private func laneRow(order: Int, centerX: CGFloat, windowMs: ClosedRange<Double>) -> some View {
+        let isMainLane = order == primaryVideoLaneOrder
+        return LaneRowView(
+            clips: lane(for: order),
+            pxPerMs: pxPerMs,
+            windowMs: windowMs,
+            rowHeight: isMainLane ? rowHeight : otherRowHeight,
+            centerX: centerX,
+            showsCoverAndMute: isMainLane,
+            coverImage: coverImage,
+            isMuted: isMuted,
+            onToggleMute: { isMuted.toggle() },
+            resolveAsset: { layer in (assetId(for: layer), assetURL(for: layer)) },
+            resolveAudioURL: { layer in audioDerivativeURL(for: layer) },
+            selectedLayerId: selectedLayerId,
+            onSelectLayer: { id in
+                selectedLayerId = (selectedLayerId == id) ? nil : id
+                selectedAudioClipId = nil
+            },
+            onTrimBegin: onTrimBegin,
+            onTrimUpdate: onTrimUpdate,
+            onTrimEnd: onTrimEnd
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(isMainLane ? "lane-main" : "lane-\(order)")
     }
 
     /// The cover thumbnail always represents the primary video lane's

@@ -86,4 +86,26 @@ final class TimelineZoomTests: XCTestCase {
         XCTAssertLessThanOrEqual(widthPx, 402 * 4 + 1)
         XCTAssertLessThan(widthPx, 31_200 * pxPerMs / 10)
     }
+
+    // MARK: LaneScroll
+
+    func testLaneScrollRangeIsContentMinusViewportNeverNegative() {
+        XCTAssertEqual(LaneScroll.maxOffset(contentHeight: 200, viewportHeight: 80), 120)
+        XCTAssertEqual(LaneScroll.maxOffset(contentHeight: 50, viewportHeight: 80), 0)
+        XCTAssertEqual(LaneScroll.clamped(-30, maxOffset: 120), 0)
+        XCTAssertEqual(LaneScroll.clamped(500, maxOffset: 120), 120)
+        XCTAssertEqual(LaneScroll.clamped(40, maxOffset: 120), 40)
+    }
+
+    func testDragIsAlwaysAScrubWhenLanesCannotScroll() {
+        XCTAssertEqual(LaneScroll.axis(forTranslation: CGSize(width: 0, height: 0), canScrollVertically: false), .horizontal)
+        XCTAssertEqual(LaneScroll.axis(forTranslation: CGSize(width: 1, height: 30), canScrollVertically: false), .horizontal)
+    }
+
+    func testAxisIsLockedFromTheDominantDirectionOnceMovedFarEnough() {
+        XCTAssertNil(LaneScroll.axis(forTranslation: CGSize(width: 1, height: 2), canScrollVertically: true))
+        XCTAssertEqual(LaneScroll.axis(forTranslation: CGSize(width: 1, height: 6), canScrollVertically: true), .vertical)
+        XCTAssertEqual(LaneScroll.axis(forTranslation: CGSize(width: -8, height: 3), canScrollVertically: true), .horizontal)
+        XCTAssertEqual(LaneScroll.axis(forTranslation: CGSize(width: 5, height: -5), canScrollVertically: true), .horizontal)
+    }
 }

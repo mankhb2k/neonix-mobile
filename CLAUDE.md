@@ -106,6 +106,11 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   that don't overlap in time may share a lane, else a new `order` (greedy interval
   packing, as `AddTextLayerCommand`/`AddAudioClipCommand` do). Audio has its own domain
   (`V2AudioDomain.tracks[].clips[]`), not `layers[]`.
+  The main lane (first lane with a video clip) is **pinned under the ruler**; every other
+  lane and the audio tracks scroll vertically (`LaneScroll`, one drag gesture: axis locked
+  from the first 4 pt, vertical only when the lanes overflow; no vertical momentum yet).
+  Lanes with a lower `order` than the main one therefore render below it. `EDITOR_EXTRA_LANES=N`
+  (Debug) seeds extra lanes for `TimelineLaneScrollUITests`.
 - **Trim**: video/image lanes are push lanes (never a gap; the change cascades through
   every later clip, `reflowLane`, tested in `LaneReflowTests`); text/overlay lanes stop at
   the neighbour. Extend may reveal source footage up to the asset duration

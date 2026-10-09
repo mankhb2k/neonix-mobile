@@ -128,6 +128,20 @@ struct ProjectsView: View {
             return copy
         }
 
+        // Debug/UI tests: `EDITOR_EXTRA_LANES=N` stacks N more copies of the text
+        // lane (one lane each) so the timeline's vertical scrolling can be exercised.
+        var extraLayers: [V2Layer] = []
+        #if DEBUG
+        let extraLanes = Int(ProcessInfo.processInfo.environment["EDITOR_EXTRA_LANES"] ?? "") ?? 0
+        for n in 0..<max(extraLanes, 0) {
+            for var copy in textLayers {
+                copy.id = "\(copy.id)-extra-\(n)"
+                copy.order = 2 + n
+                extraLayers.append(copy)
+            }
+        }
+        #endif
+
         // A standalone audio clip — a real `V2AudioClip` in
         // `V2AudioDomain`, independent of any video's embedded audio.
         let audioAsset = V2Asset.audio(V2AudioAsset(id: "audio-demo", uri: "audio-demo.mp3", mimeType: "audio/mpeg", duration: 262_500))
@@ -147,7 +161,7 @@ struct ProjectsView: View {
             composition: videoProject.composition,
             assets: videoProject.assets + [audioAsset],
             filters: videoProject.filters,
-            layers: videoLayers + textLayers,
+            layers: videoLayers + textLayers + extraLayers,
             audio: V2AudioDomain(sampleRate: 48000, tracks: [audioTrack])
         )
     }

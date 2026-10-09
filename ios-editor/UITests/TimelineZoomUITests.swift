@@ -67,3 +67,44 @@ final class TimelineZoomUITests: XCTestCase {
         XCTAssertEqual(scale(of: timeline), before, accuracy: 1e-9, "a one-finger drag must not zoom")
     }
 }
+
+
+/// Vertical lane scrolling: the main (video) lane stays pinned while the lanes
+/// below it scroll, and a vertical drag must not move the playhead.
+final class TimelineLaneScrollUITests: XCTestCase {
+    func testVerticalDragScrollsLowerLanesWithoutScrubbing() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["EDITOR_EXTRA_LANES"] = "6"
+        app.launch()
+        app.buttons["Folder"].tap()
+        let row = app.staticTexts["Trip to Paris"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let timeline = app.otherElements["timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 15))
+
+        func shot(_ name: String) {
+            guard let dir = ProcessInfo.processInfo.environment["ZOOM_SHOTS_DIR"] else { return }
+            try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+        shot("lanes_0_top")
+        let main = app.otherElements["lane-main"]
+        let lanes = app.otherElements["lane-scroll"]
+        XCTAssertTrue(main.waitForExistence(timeout: 5), "the main lane should be identifiable")
+        XCTAssertTrue(lanes.exists, "the lanes below the main lane should sit in a scroll container")
+        XCTAssertEqual(lanes.value as? String, "0")
+        let mainFrameBefore = main.frame
+        let scaleBefore = timeline.value as? String
+        let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
+        let end = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.45))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        // Read the scroll value first: the query waits for the app to go idle, so the
+        // screenshot below shows the settled state.
+        let scrolled = Double(lanes.value as? String ?? "") ?? 0
+        shot("lanes_1_scrolled")
+        XCTAssertGreaterThan(scrolled, 40, "dragging up ~40% of the panel must scroll the lower lanes well past 40 pt (got \(scrolled))")
+        XCTAssertEqual(main.frame.minY, mainFrameBefore.minY, accuracy: 0.5, "the main lane must stay pinned")
+        XCTAssertEqual(timeline.value as? String, scaleBefore, "a vertical drag must not change the zoom")
+    }
+}
