@@ -47,10 +47,16 @@ struct TimelineView: View {
     let engine: EditorPlaybackEngine
     /// Chỉnh sửa (Phase 2 of the "Bottom nav tools" roadmap) — which
     /// layer's clip is selected, if any. Only visual layers (`layers[]`)
-    /// are selectable this pass; standalone audio clips belong to the
-    /// later Âm thanh phase, not Chỉnh sửa, so `AudioTrackRowView`/
-    /// `AudioClipView` deliberately don't take a tap gesture here.
+    /// are selectable via this binding; standalone audio clips use their
+    /// own `selectedAudioClipId` below (Âm thanh's own phase).
     @Binding var selectedLayerId: String?
+    /// Âm thanh — which standalone `V2AudioClip` is selected, if any. A
+    /// separate selection from `selectedLayerId` since audio clips live in
+    /// `project.audio`, not `layers[]`, and tapping one deselects any
+    /// selected layer and vice versa (`EditorShellView` clears the other
+    /// whenever one changes) so the options panel never has to reconcile
+    /// two simultaneous selections.
+    @Binding var selectedAudioClipId: String?
     /// Drag-to-trim (added 2026-10-08, confirmed against a CapCut reference
     /// screenshot): a selected clip grows 2 draggable handles at its own
     /// left/right edges instead of a plain selection border. These 3
@@ -78,11 +84,11 @@ struct TimelineView: View {
 
     private var currentTimeMs: Double { engine.currentTimeMs }
     private var maxDurationMs: Double { engine.maxDurationMs }
-    /// Placeholder toggle — this editor doesn't play real audio at all yet
-    /// (see `VideoFrameCache`'s doc comment: preview is driven by a custom
-    /// clock, not `AVPlayer` playback), so there's nothing to actually mute.
-    /// Wiring this to `V2VideoPayload.audio.enabled` is future work once a
-    /// real audio engine exists.
+    /// Still a placeholder toggle — `AudioMixEngine` (see CLAUDE.md's audio
+    /// roadmap note) now plays real sound, including a video's embedded
+    /// audio derivative, but this button isn't wired to
+    /// `V2VideoPayload.audio.enabled` yet; tapping it only changes this
+    /// view's own local state today.
     @State private var isMuted = false
     @State private var coverImage: UIImage?
 
@@ -160,7 +166,10 @@ struct TimelineView: View {
                                     resolveAsset: { layer in (assetId(for: layer), assetURL(for: layer)) },
                                     resolveAudioURL: { layer in audioDerivativeURL(for: layer) },
                                     selectedLayerId: selectedLayerId,
-                                    onSelectLayer: { id in selectedLayerId = (selectedLayerId == id) ? nil : id },
+                                    onSelectLayer: { id in
+                                        selectedLayerId = (selectedLayerId == id) ? nil : id
+                                        selectedAudioClipId = nil
+                                    },
                                     onTrimBegin: onTrimBegin,
                                     onTrimUpdate: onTrimUpdate,
                                     onTrimEnd: onTrimEnd
@@ -172,7 +181,12 @@ struct TimelineView: View {
                                     track: track,
                                     pxPerMs: pxPerMs,
                                     rowHeight: otherRowHeight,
-                                    resolveAudioURL: { clip in audioClipURL(for: clip) }
+                                    resolveAudioURL: { clip in audioClipURL(for: clip) },
+                                    selectedClipId: selectedAudioClipId,
+                                    onSelectClip: { id in
+                                        selectedAudioClipId = (selectedAudioClipId == id) ? nil : id
+                                        selectedLayerId = nil
+                                    }
                                 )
                             }
                         }
@@ -427,11 +441,14 @@ private struct AudioTrackRowView: View {
     let pxPerMs: Double
     let rowHeight: CGFloat
     let resolveAudioURL: (V2AudioClip) -> URL?
+    let selectedClipId: String?
+    let onSelectClip: (String) -> Void
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ForEach(track.clips, id: \.id) { clip in
-                AudioClipView(clip: clip, audioURL: resolveAudioURL(clip), pxPerMs: pxPerMs, rowHeight: rowHeight)
+                AudioClipView(clip: clip, audioURL: resolveAudioURL(clip), pxPerMs: pxPerMs, rowHeight: rowHeight, isSelected: clip.id == selectedClipId)
+                    .onTapGesture { onSelectClip(clip.id) }
             }
         }
         .frame(height: rowHeight, alignment: .topLeading)
@@ -450,6 +467,12 @@ private struct AudioClipView: View {
     let audioURL: URL?
     let pxPerMs: Double
     let rowHeight: CGFloat
+    /// Âm thanh (added once standalone audio clips became selectable) —
+    /// same bounding-frame stroke `TimelineClipView`/`FilmstripClipView`
+    /// already use for a selected visual clip, reused rather than
+    /// reinvented. No drag-to-trim handles yet (see the roadmap plan) —
+    /// just the selection indicator.
+    var isSelected: Bool = false
 
     private var clipWidth: CGFloat {
         max(CGFloat(clip.timing.duration) * pxPerMs, 28)
@@ -480,7 +503,9 @@ private struct AudioClipView: View {
         }
         .frame(width: clipWidth, height: rowHeight, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(isSelected ? RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
         .offset(x: CGFloat(clip.timing.start) * pxPerMs)
+        .zIndex(isSelected ? 1 : 0)
     }
 }
 

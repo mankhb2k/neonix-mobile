@@ -40,6 +40,11 @@ struct PreviewCanvas: View {
     let composition: V2Composition
     let assets: [V2Asset]
     let layers: [V2Layer]
+    /// Resolved via each layer's own `filter: String?` id — see
+    /// `FilterRenderer`/CLAUDE.md's "Tuỳ chỉnh" note. Empty on every call
+    /// site that never authors a filter, same "no-op by default" shape as
+    /// every other optional Protocol V2 feature this renderer reads.
+    var filters: [V2Filter] = []
     let atMs: Double
     /// `true` while the playhead is at rest: video layers then swap their
     /// decoded preview frame for an exact full-quality one.
@@ -67,7 +72,7 @@ struct PreviewCanvas: View {
         return ZStack {
             Color(hex: composition.background)
             ForEach(tree, id: \.layer.id) { node in
-                LayerNodeView(node: node, atMs: atMs, assets: assets, refinesStills: refinesStills)
+                LayerNodeView(node: node, atMs: atMs, assets: assets, filters: filters, refinesStills: refinesStills)
             }
         }
         .clipped()
@@ -81,6 +86,7 @@ private struct LayerNodeView: View {
     let node: LayerTreeNode
     let atMs: Double
     let assets: [V2Asset]
+    let filters: [V2Filter]
     let refinesStills: Bool
 
     var body: some View {
@@ -89,13 +95,17 @@ private struct LayerNodeView: View {
             if node.layer.type == "group" {
                 ZStack {
                     ForEach(node.children, id: \.layer.id) { child in
-                        LayerNodeView(node: child, atMs: atMs, assets: assets, refinesStills: refinesStills)
+                        LayerNodeView(node: child, atMs: atMs, assets: assets, filters: filters, refinesStills: refinesStills)
                     }
                 }
             } else {
-                LayerContentView(frame: frame, asset: assets.first { $0.id == frame.assetId }, refinesStills: refinesStills)
-                    .frame(width: frame.frameWidth, height: frame.frameHeight)
-                    .clipped()
+                LayerContentView(
+                    frame: frame, asset: assets.first { $0.id == frame.assetId },
+                    filter: node.layer.filter.flatMap { id in filters.first { $0.id == id } },
+                    refinesStills: refinesStills
+                )
+                .frame(width: frame.frameWidth, height: frame.frameHeight)
+                .clipped()
             }
         }
         // `anchor` is an offset from the layer's own center (see CLAUDE.md's
@@ -155,6 +165,10 @@ private struct LayerNodeView: View {
 private struct LayerContentView: View {
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
+    /// Tuỳ chỉnh — see `FilteredImageView`/`FilterRenderer`. `nil` for every
+    /// layer that hasn't had a filter applied (the overwhelming common
+    /// case), in which case `FilteredImageView` is a pure pass-through.
+    let filter: V2Filter?
     let refinesStills: Bool
 
     var body: some View {
@@ -162,9 +176,7 @@ private struct LayerContentView: View {
         switch frame.kind {
         case "image":
             if let asset, let uiImage = BundledImageCache.image(filename: asset.uri) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
+                FilteredImageView(sourceKey: asset.uri, source: uiImage.cgImage, filter: filter, contentMode: contentMode)
             } else {
                 Color.gray
             }
@@ -175,7 +187,8 @@ private struct LayerContentView: View {
                     url: url,
                     atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
                     contentMode: contentMode,
-                    refines: refinesStills
+                    refines: refinesStills,
+                    filter: filter
                 )
             } else {
                 Color.gray
@@ -226,6 +239,10 @@ private struct VideoFrameView: View {
     let atSeconds: Double
     let contentMode: ContentMode
     let refines: Bool
+    /// Tuỳ chỉnh — only actually applied while `refines` (playhead at rest);
+    /// see `FilteredImageView`'s own doc comment for why live Play doesn't
+    /// grade yet.
+    var filter: V2Filter?
 
     @State private var sharpFrame: (seconds: Double, image: CGImage)?
     /// Reference box on purpose: remembering what was drawn mustn't itself
@@ -245,9 +262,7 @@ private struct VideoFrameView: View {
         let _ = lastShown.image = image
         Group {
             if let image {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
+                FilteredImageView(sourceKey: "\(assetId)-\(atSeconds)", source: image, filter: refines ? filter : nil, contentMode: contentMode)
             } else {
                 Color.clear
             }
@@ -269,13 +284,84 @@ private final class LastShownFrame {
     var image: CGImage?
 }
 
+/// Tuỳ chỉnh's one display-side entry point: given a raw decoded/cached
+/// `CGImage` and an optional `V2Filter`, runs it through `FilterRenderer`
+/// asynchronously and draws whichever is freshest — the newly filtered
+/// result once it's ready, the previous filtered result while a new one is
+/// computing, or the unfiltered `source` if there's no filter (or none has
+/// resolved yet). Never renders `Color.clear`/nothing once `source` exists,
+/// same "never show nothing" discipline as `VideoFrameView`'s own
+/// `lastShown`, and never runs `FilterRenderer` synchronously from `body`
+/// (see CLAUDE.md's "Scrubbing must never re-decode media inline from
+/// `body`" rule — filtering is exactly that same category of work).
+///
+/// Used by both the `"image"` layer case and `VideoFrameView` — the one
+/// place this app draws a `CGImage` onto the Stage, now the one place it
+/// gets filtered too.
+private struct FilteredImageView: View {
+    /// Identifies *which* image `source` is (a bundled image's own
+    /// filename, or `"<assetId>-<atSeconds>"` for a video frame) — needed
+    /// alongside the filter snapshot below because `CGImage` has no cheap
+    /// stable identity of its own: without this, scrubbing a graded video
+    /// clip would keep re-showing a stale filtered frame from whichever
+    /// moment the filter's own values last changed, not the frame actually
+    /// at the playhead now.
+    let sourceKey: String
+    let source: CGImage?
+    let filter: V2Filter?
+    let contentMode: ContentMode
+
+    @State private var filtered: CGImage?
+
+    /// `.task(id:)`'s own key — `sourceKey` plus a JSON snapshot of the
+    /// filter's current values. The filter-snapshot half is generic on
+    /// purpose: works for *any* future filter shape (Blur/Noise/Vignette/
+    /// ...) with zero changes here, since it never has to know what the
+    /// primitives mean, only when they've changed. Cheap for the
+    /// 2-4-primitive chains this app compiles today.
+    private var cacheKey: String {
+        guard let filter, let data = try? JSONEncoder().encode(filter) else { return sourceKey }
+        return sourceKey + "|" + data.base64EncodedString()
+    }
+
+    var body: some View {
+        let image = filtered ?? source
+        Group {
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                Color.clear
+            }
+        }
+        .task(id: cacheKey) {
+            guard let filter, let source else {
+                filtered = nil
+                return
+            }
+            let result = FilterRenderer.apply(filter, to: source)
+            guard !Task.isCancelled else { return }
+            filtered = result
+        }
+    }
+}
+
 /// Resources (`project.yml`'s `buildPhase: resources` on
 /// `Sources/AppModule/Resources`) land flattened in the app's main bundle
 /// root, so lookup is by filename alone, split into base name + extension.
+/// Falls back to `MediaImportService.importedMediaDirectory` (Documents) for
+/// anything imported/recorded/extracted at runtime, which obviously isn't in
+/// the app bundle — every existing call site gets this for free, no changes
+/// needed anywhere else.
 func bundledURL(filename: String) -> URL? {
     let parts = filename.split(separator: ".", maxSplits: 1)
     guard parts.count == 2 else { return nil }
-    return Bundle.main.url(forResource: String(parts[0]), withExtension: String(parts[1]))
+    if let bundled = Bundle.main.url(forResource: String(parts[0]), withExtension: String(parts[1])) {
+        return bundled
+    }
+    let imported = MediaImportService.importedMediaDirectory.appendingPathComponent(filename)
+    return FileManager.default.fileExists(atPath: imported.path) ? imported : nil
 }
 
 /// Decodes each bundled image exactly once and reuses it. Unlike a video

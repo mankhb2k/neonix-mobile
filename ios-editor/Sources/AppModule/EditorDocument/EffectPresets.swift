@@ -17,7 +17,17 @@ import Foundation
 // itself (see CLAUDE.md).
 
 enum EffectPresetKind: Codable {
-    case colorAdjust(brightness: Double, contrast: Double, saturation: Double, hueRotate: Double)
+    /// `exposure`/`lightness` added 2026-10-09 for the "Tuỳ chỉnh" tool's
+    /// own sliders — `exposure` is an EV-stop multiplicative gain, distinct
+    /// from `brightness` (additive offset); `lightness` completes the
+    /// Hue/Saturation/Lightness trio (`hueRotate` already covers Hue) and
+    /// is mathematically identical to `brightness` (another additive
+    /// offset) — kept as its own field purely so the UI can present 2
+    /// separate sliders without them silently overwriting each other; both
+    /// fold into the same `tone` stage's intercept, no extra primitive.
+    /// No other call site constructed `.colorAdjust` before this, so
+    /// adding fields is a pure addition, nothing to migrate.
+    case colorAdjust(brightness: Double, contrast: Double, saturation: Double, exposure: Double, hueRotate: Double, lightness: Double)
     case grayscale(amount: Double)
     case sepia(amount: Double)
     case invert(amount: Double)
@@ -27,10 +37,39 @@ enum EffectPresetKind: Codable {
     case outerGlow(radius: Double, color: V2Color, opacity: Double)
     case innerGlow(radius: Double, color: V2Color, opacity: Double)
     case noise(scale: Double, amount: Double, opacity: Double, seed: Int)
+    /// Tuỳ chỉnh — Temperature (warm/cool) + Tint (green/magenta), both a
+    /// simple per-channel bias shift — a reasonable, documented
+    /// approximation of white balance (not a true chromaticity/Planckian-
+    /// locus computation), same spirit as `sepia`'s own fixed CSS-standard
+    /// matrix.
+    case whiteBalance(temperature: Double, tint: Double)
+    /// Tuỳ chỉnh — Highlights/Shadows/Whites/Blacks, 4 sliders sharing one
+    /// 5-point tone curve (`feComponentTransfer` `table`): `blacks`/`whites`
+    /// move the curve's 2 end points, `shadows`/`highlights` move the
+    /// quarter points, the midpoint stays fixed. The real interactive
+    /// curve-graph editor (drag-your-own control points) is explicitly
+    /// deferred — these 4 parametrized sliders were confirmed with the
+    /// user as the substitute for this pass.
+    case toneCurve(blacks: Double, shadows: Double, highlights: Double, whites: Double)
+    /// Tuỳ chỉnh — Sharpen. A standard Laplacian unsharp 3×3 kernel scaled
+    /// by `amount`, not a blur-based unsharp mask (that's `clarity`below).
+    case sharpen(amount: Double)
+    /// Tuỳ chỉnh — Clarity (local contrast). The textbook unsharp-mask
+    /// technique: blur, then push the original away from the blurred
+    /// version (`feGaussianBlur` + `feComposite` `arithmetic`), at a wider
+    /// radius than `sharpen` so it reads as "punchier midtones," not edge
+    /// sharpening.
+    case clarity(amount: Double)
+    /// Tuỳ chỉnh — Vignette. Compiles straight to the one `feVignette`
+    /// primitive (see that case's own doc comment in `V2Filter.swift` for
+    /// why this is a 2nd deliberate non-SVG exception alongside
+    /// `feColorLUT`).
+    case vignette(intensity: Double, radius: Double)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, brightness, contrast, saturation, hueRotate, amount, radius
+        case kind, brightness, contrast, saturation, exposure, hueRotate, lightness, amount, radius
         case offset, blur, spread, color, inset, opacity, scale, seed
+        case temperature, tint, blacks, shadows, highlights, whites, intensity
     }
 
     init(from decoder: Decoder) throws {
@@ -39,7 +78,8 @@ enum EffectPresetKind: Codable {
         case "colorAdjust":
             self = .colorAdjust(
                 brightness: try c.decode(Double.self, forKey: .brightness), contrast: try c.decode(Double.self, forKey: .contrast),
-                saturation: try c.decode(Double.self, forKey: .saturation), hueRotate: try c.decode(Double.self, forKey: .hueRotate)
+                saturation: try c.decode(Double.self, forKey: .saturation), exposure: try c.decode(Double.self, forKey: .exposure),
+                hueRotate: try c.decode(Double.self, forKey: .hueRotate), lightness: try c.decode(Double.self, forKey: .lightness)
             )
         case "grayscale": self = .grayscale(amount: try c.decode(Double.self, forKey: .amount))
         case "sepia": self = .sepia(amount: try c.decode(Double.self, forKey: .amount))
@@ -61,6 +101,17 @@ enum EffectPresetKind: Codable {
                 scale: try c.decode(Double.self, forKey: .scale), amount: try c.decode(Double.self, forKey: .amount),
                 opacity: try c.decode(Double.self, forKey: .opacity), seed: try c.decode(Int.self, forKey: .seed)
             )
+        case "whiteBalance":
+            self = .whiteBalance(temperature: try c.decode(Double.self, forKey: .temperature), tint: try c.decode(Double.self, forKey: .tint))
+        case "toneCurve":
+            self = .toneCurve(
+                blacks: try c.decode(Double.self, forKey: .blacks), shadows: try c.decode(Double.self, forKey: .shadows),
+                highlights: try c.decode(Double.self, forKey: .highlights), whites: try c.decode(Double.self, forKey: .whites)
+            )
+        case "sharpen": self = .sharpen(amount: try c.decode(Double.self, forKey: .amount))
+        case "clarity": self = .clarity(amount: try c.decode(Double.self, forKey: .amount))
+        case "vignette":
+            self = .vignette(intensity: try c.decode(Double.self, forKey: .intensity), radius: try c.decode(Double.self, forKey: .radius))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown effect preset: \(other)")
         }
@@ -69,10 +120,11 @@ enum EffectPresetKind: Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .colorAdjust(let brightness, let contrast, let saturation, let hueRotate):
+        case .colorAdjust(let brightness, let contrast, let saturation, let exposure, let hueRotate, let lightness):
             try c.encode("colorAdjust", forKey: .kind)
             try c.encode(brightness, forKey: .brightness); try c.encode(contrast, forKey: .contrast)
-            try c.encode(saturation, forKey: .saturation); try c.encode(hueRotate, forKey: .hueRotate)
+            try c.encode(saturation, forKey: .saturation); try c.encode(exposure, forKey: .exposure); try c.encode(hueRotate, forKey: .hueRotate)
+            try c.encode(lightness, forKey: .lightness)
         case .grayscale(let amount): try c.encode("grayscale", forKey: .kind); try c.encode(amount, forKey: .amount)
         case .sepia(let amount): try c.encode("sepia", forKey: .kind); try c.encode(amount, forKey: .amount)
         case .invert(let amount): try c.encode("invert", forKey: .kind); try c.encode(amount, forKey: .amount)
@@ -89,6 +141,16 @@ enum EffectPresetKind: Codable {
         case .noise(let scale, let amount, let opacity, let seed):
             try c.encode("noise", forKey: .kind)
             try c.encode(scale, forKey: .scale); try c.encode(amount, forKey: .amount); try c.encode(opacity, forKey: .opacity); try c.encode(seed, forKey: .seed)
+        case .whiteBalance(let temperature, let tint):
+            try c.encode("whiteBalance", forKey: .kind); try c.encode(temperature, forKey: .temperature); try c.encode(tint, forKey: .tint)
+        case .toneCurve(let blacks, let shadows, let highlights, let whites):
+            try c.encode("toneCurve", forKey: .kind)
+            try c.encode(blacks, forKey: .blacks); try c.encode(shadows, forKey: .shadows)
+            try c.encode(highlights, forKey: .highlights); try c.encode(whites, forKey: .whites)
+        case .sharpen(let amount): try c.encode("sharpen", forKey: .kind); try c.encode(amount, forKey: .amount)
+        case .clarity(let amount): try c.encode("clarity", forKey: .kind); try c.encode(amount, forKey: .amount)
+        case .vignette(let intensity, let radius):
+            try c.encode("vignette", forKey: .kind); try c.encode(intensity, forKey: .intensity); try c.encode(radius, forKey: .radius)
         }
     }
 }
@@ -137,24 +199,110 @@ func filterPrimitives(for kind: EffectPresetKind, idPrefix: String, input: Strin
         let b = base("opacity", in: input)
         return ([.feComponentTransfer(b, functions: functions)], b.result!)
 
-    case .colorAdjust(let brightness, let contrast, let saturation, let hueRotate):
+    case .colorAdjust(let brightness, let contrast, let saturation, let exposure, let hueRotate, let lightness):
         let hue = base("hue", in: input)
         let sat = base("sat", in: hue.result!)
-        let tone = base("tone", in: sat.result!)
+        let exp = base("exposure", in: sat.result!)
+        let tone = base("tone", in: exp.result!)
+        // EV-stop gain (`2^exposure`) as its own linear stage — kept
+        // separate from `tone`'s contrast/brightness pivot rather than
+        // folded into one combined formula, so each slider's own math stays
+        // simple to read and to invert later if this gets a real intent
+        // round-trip.
+        let exposureFunctions = V2ComponentTransferFunctions(
+            r: .linear(slope: pow(2, exposure), intercept: 0),
+            g: .linear(slope: pow(2, exposure), intercept: 0),
+            b: .linear(slope: pow(2, exposure), intercept: 0),
+            a: nil
+        )
+        // `lightness` folds into the same additive offset as `brightness` —
+        // they're mathematically identical (see this case's own doc
+        // comment), so no extra stage.
+        let toneIntercept = brightness + lightness + 0.5 * (1 - contrast)
         let toneFunctions = V2ComponentTransferFunctions(
-            r: .linear(slope: contrast, intercept: brightness + 0.5 * (1 - contrast)),
-            g: .linear(slope: contrast, intercept: brightness + 0.5 * (1 - contrast)),
-            b: .linear(slope: contrast, intercept: brightness + 0.5 * (1 - contrast)),
+            r: .linear(slope: contrast, intercept: toneIntercept),
+            g: .linear(slope: contrast, intercept: toneIntercept),
+            b: .linear(slope: contrast, intercept: toneIntercept),
             a: nil
         )
         return (
             [
                 .feColorMatrix(hue, kind: "hueRotate", values: [hueRotate]),
                 .feColorMatrix(sat, kind: "saturate", values: [saturation]),
+                .feComponentTransfer(exp, functions: exposureFunctions),
                 .feComponentTransfer(tone, functions: toneFunctions),
             ],
             tone.result!
         )
+
+    case .whiteBalance(let temperature, let tint):
+        // A simple per-channel bias shift, not true chromaticity math (see
+        // this case's own doc comment on `EffectPresetKind`) — warm/cool
+        // moves R against B, green/magenta moves G against R+B.
+        let values: [Double] = [
+            1, 0, 0, 0, temperature * 0.15 - tint * 0.075,
+            0, 1, 0, 0, tint * 0.15,
+            0, 0, 1, 0, -temperature * 0.15 - tint * 0.075,
+            0, 0, 0, 1, 0,
+        ]
+        let b = base("whitebalance", in: input)
+        return ([.feColorMatrix(b, kind: "matrix", values: values)], b.result!)
+
+    case .toneCurve(let blacks, let shadows, let highlights, let whites):
+        // One shared 5-point tone curve (`feComponentTransfer` `table`) —
+        // `blacks`/`whites` move the curve's own end points, `shadows`/
+        // `highlights` the quarter points, the midpoint stays fixed. See
+        // this case's own doc comment on `EffectPresetKind` for why this
+        // (not a real draggable curve graph) is this pass's Đồ thị
+        // substitute.
+        func clamp01(_ v: Double) -> Double { min(max(v, 0), 1) }
+        let values: [Double] = [
+            clamp01(0 + blacks * 0.25),
+            clamp01(0.25 + shadows * 0.25),
+            0.5,
+            clamp01(0.75 + highlights * 0.25),
+            clamp01(1 + whites * 0.25),
+        ]
+        let functions = V2ComponentTransferFunctions(
+            r: .table(values: values), g: .table(values: values), b: .table(values: values), a: nil
+        )
+        let b = base("tonecurve", in: input)
+        return ([.feComponentTransfer(b, functions: functions)], b.result!)
+
+    case .sharpen(let amount):
+        // Standard Laplacian unsharp 3×3 kernel, weights sum to 1 (preserves
+        // overall brightness): center `1 + 4k`, the 4 orthogonal neighbors
+        // `-k`, corners `0`.
+        let k = amount
+        let kernel: [Double] = [
+            0, -k, 0,
+            -k, 1 + 4 * k, -k,
+            0, -k, 0,
+        ]
+        let b = base("sharpen", in: input)
+        return (
+            [.feConvolveMatrix(b, order: V2XYInt(x: 3, y: 3), kernelMatrix: kernel, divisor: nil, bias: nil, target: nil, edgeMode: "duplicate", preserveAlpha: true)],
+            b.result!
+        )
+
+    case .clarity(let amount):
+        // Textbook unsharp-mask local contrast: blur wide, then push the
+        // original away from the blurred version —
+        // `result = (1+amount)*original - amount*blurred`, i.e.
+        // `feComposite(operator: "arithmetic", k1: 0, k2: 1+amount, k3: -amount, k4: 0)`.
+        let blurBase = base("clarity-blur", in: input)
+        let compositeBase = base("clarity-composite", in: input)
+        return (
+            [
+                .feGaussianBlur(blurBase, stdDeviation: V2FilterStdDeviation(x: 20, y: 20)),
+                .feComposite(compositeBase, in2: blurBase.result!, operator_: "arithmetic", k1: 0, k2: 1 + amount, k3: -amount, k4: 0),
+            ],
+            compositeBase.result!
+        )
+
+    case .vignette(let intensity, let radius):
+        let b = base("vignette", in: input)
+        return ([.feVignette(b, radius: radius, intensity: intensity)], b.result!)
 
     case .shadow(let offset, let blurRadius, let spread, let color, _):
         // `inset` is a known simplification — always an outer/drop shadow

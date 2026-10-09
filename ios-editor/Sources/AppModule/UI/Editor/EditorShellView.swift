@@ -36,11 +36,25 @@ struct EditorShellView: View {
     /// any. Only visual layers are selectable this pass (see
     /// `TimelineView`'s own doc comment on this).
     @State private var selectedLayerId: String?
+    /// Âm thanh — which standalone audio clip is selected, if any (see
+    /// `TimelineView`'s own doc comment on why this is separate from
+    /// `selectedLayerId`).
+    @State private var selectedAudioClipId: String?
     /// Drag-to-trim's own undo snapshot — captured once when a trim drag
     /// *begins* (not per `history.record(_:)` call on every pixel moved),
     /// so an entire drag gesture collapses into a single undo step. `nil`
     /// whenever no trim drag is in progress.
     @State private var trimDragOriginal: V2Project?
+    /// Tuỳ chỉnh — the last slider values set per layer this *session*
+    /// (never persisted to `project`/exported). Needed because a compiled
+    /// `V2Filter` has no cheap way to read brightness/contrast/saturation/
+    /// exposure back out of it — see CLAUDE.md's "Tuỳ chỉnh" note on why
+    /// this is a stated, deliberate limitation rather than a bug: the
+    /// Stage/export always reflect the real persisted filter; only the
+    /// slider *positions* reset to neutral after reopening the editor.
+    @State private var adjustIntents: [String: AdjustValues] = [:]
+    /// Same "one undo step per drag gesture" shape as `trimDragOriginal`.
+    @State private var adjustDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
     private let toolPanelHeight: CGFloat = 64
 
@@ -78,6 +92,53 @@ struct EditorShellView: View {
         setProject(next)
     }
 
+    /// Âm thanh — "Thêm nhạc": the file picker hands back a raw URL
+    /// (already a temp copy, see `AudioFilePicker`'s own doc comment);
+    /// this runs the real import (copy into the sandbox + read duration)
+    /// off the main actor's own async context, then applies the result as
+    /// one ordinary undoable command, same as every other edit.
+    private func addAudio(from url: URL) {
+        Task {
+            guard let asset = try? await MediaImportService.importAudio(from: url) else { return }
+            apply(AddAudioClipCommand(asset: asset, durationMs: asset.duration, atMs: currentTimeMs))
+        }
+    }
+
+    /// Văn bản — "Thêm chữ": generates the new layer's id here (not inside
+    /// the command) so it can be selected immediately after — typing again
+    /// right away edits the clip just added instead of creating a second
+    /// one.
+    private func addText(_ text: String) {
+        let layerId = "text-\(UUID().uuidString.prefix(8))"
+        apply(AddTextLayerCommand(layerId: layerId, text: text, atMs: currentTimeMs))
+        selectedLayerId = layerId
+        selectedAudioClipId = nil
+    }
+
+    /// Trích xuất — pulls the selected video layer's own audio out onto the
+    /// audio lane, positioned to exactly line up with that clip (same
+    /// `timing.start`/duration, `trim` matching the video's own `trimStart`)
+    /// since `MediaImportService.extractAudio` always exports the *whole*
+    /// source asset's audio, cached, not just the trimmed slice this one
+    /// clip currently shows.
+    private func extractAudio(fromLayerId layerId: String) {
+        guard let layer = project.layers.first(where: { $0.id == layerId }),
+              case .video(let payload) = layer.payload,
+              let videoAsset = project.assets.first(where: { $0.id == payload.assetId }),
+              case .video(let v) = videoAsset,
+              let url = bundledURL(filename: v.uri)
+        else { return }
+
+        let trimStart = payload.trimStart ?? 0
+        Task {
+            guard let asset = try? await MediaImportService.extractAudio(from: url) else { return }
+            apply(AddAudioClipCommand(
+                asset: asset, durationMs: layer.timing.duration, atMs: layer.timing.start,
+                trimStartMs: trimStart, trimEndMs: trimStart + layer.timing.duration
+            ))
+        }
+    }
+
     /// Called once when a trim-handle drag starts — snapshots the
     /// pre-drag project so `endTrim()` can record *that* into history,
     /// not whatever the live-updated project happens to be by then.
@@ -101,6 +162,28 @@ struct EditorShellView: View {
         guard let original = trimDragOriginal else { return }
         history.record(current: original)
         trimDragOriginal = nil
+    }
+
+    /// Tuỳ chỉnh — same "one undo step per gesture" shape as `beginTrim`,
+    /// just triggered by `Slider`'s own `onEditingChanged(true)` instead of
+    /// a custom `DragGesture.onChanged`'s first tick.
+    private func beginAdjust() {
+        guard adjustDragOriginal == nil else { return }
+        adjustDragOriginal = project
+    }
+
+    /// Called on every slider tick — live preview, bypassing `apply(_:)`
+    /// same as `updateTrim`, plus remembers the full 4-value tuple so a
+    /// later edit to a *different* slider doesn't silently drop this one.
+    private func updateAdjust(layerId: String, values: AdjustValues) {
+        adjustIntents[layerId] = values
+        setProject(SetAdjustCommand(layerId: layerId, values: values).apply(to: project))
+    }
+
+    private func endAdjust() {
+        guard let original = adjustDragOriginal else { return }
+        history.record(current: original)
+        adjustDragOriginal = nil
     }
 
     var body: some View {
@@ -140,6 +223,7 @@ struct EditorShellView: View {
                         composition: project.composition,
                         assets: project.assets,
                         layers: project.layers,
+                        filters: project.filters ?? [],
                         atMs: currentTimeMs,
                         refinesStills: engine.mode == .idle
                     )
@@ -159,6 +243,7 @@ struct EditorShellView: View {
                         audio: project.audio,
                         engine: engine,
                         selectedLayerId: $selectedLayerId,
+                        selectedAudioClipId: $selectedAudioClipId,
                         onTrimBegin: beginTrim,
                         onTrimUpdate: updateTrim,
                         onTrimEnd: endTrim
@@ -171,6 +256,7 @@ struct EditorShellView: View {
                             tool: selectedTool,
                             composition: project.composition,
                             selectedLayer: project.layers.first { $0.id == selectedLayerId },
+                            selectedAudioClip: project.audio.tracks.flatMap(\.clips).first { $0.id == selectedAudioClipId },
                             currentTimeMs: currentTimeMs,
                             onSetAspectRatio: { width, height in apply(SetAspectRatioCommand(width: width, height: height)) },
                             onSetBackgroundColor: { hex in apply(SetBackgroundColorCommand(hex: hex)) },
@@ -181,7 +267,24 @@ struct EditorShellView: View {
                             onDelete: { layerId in
                                 apply(DeleteClipCommand(layerId: layerId))
                                 selectedLayerId = nil
-                            }
+                            },
+                            onExtractAudio: { layerId in extractAudio(fromLayerId: layerId) },
+                            onPickAudioFile: { url in addAudio(from: url) },
+                            onSetAudioVolume: { clipId, gainDb in apply(SetAudioClipVolumeCommand(clipId: clipId, gainDb: gainDb)) },
+                            onDeleteAudio: { clipId in
+                                apply(DeleteAudioClipCommand(clipId: clipId))
+                                selectedAudioClipId = nil
+                            },
+                            onRecordingFinished: { url in addAudio(from: url) },
+                            onAddSoundEffect: { preset in
+                                apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
+                            },
+                            onAddText: { text in addText(text) },
+                            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) },
+                            adjustValues: selectedLayerId.flatMap { adjustIntents[$0] } ?? AdjustValues(),
+                            onAdjustBegin: beginAdjust,
+                            onAdjustChange: { layerId, values in updateAdjust(layerId: layerId, values: values) },
+                            onAdjustEnd: endAdjust
                         )
                         .frame(height: toolPanelHeight)
                         Divider()
@@ -210,6 +313,7 @@ struct EditorShellView: View {
                     composition: project.composition,
                     assets: project.assets,
                     layers: project.layers,
+                    filters: project.filters ?? [],
                     atMs: currentTimeMs,
                     refinesStills: engine.mode == .idle
                 )
@@ -352,10 +456,10 @@ struct EditorShellView: View {
     @ViewBuilder
     private var cancelButton: some View {
         if #available(iOS 26.0, *) {
-            Button("Huỷ") { dismiss() }
+            Button("Cancel") { dismiss() }
                 .buttonStyle(.glass)
         } else {
-            Button("Huỷ") { dismiss() }
+            Button("Cancel") { dismiss() }
                 .foregroundColor(.primary)
         }
     }
@@ -363,10 +467,10 @@ struct EditorShellView: View {
     @ViewBuilder
     private var exportButton: some View {
         if #available(iOS 26.0, *) {
-            Button("Xuất") { dismiss() }
+            Button("Export") { dismiss() }
                 .buttonStyle(.glassProminent)
         } else {
-            Button("Xuất") { dismiss() }
+            Button("Export") { dismiss() }
                 .buttonStyle(.borderedProminent)
         }
     }

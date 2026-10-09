@@ -26,6 +26,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Cho phép truy cập micro để ghi âm giọng nói vào video"
         ENABLE_PREVIEWS: "YES"
     info:
       path: Generated-Info.plist

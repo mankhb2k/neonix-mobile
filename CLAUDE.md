@@ -3,6 +3,525 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Văn bản — "Thêm chữ", by reusing the real text-compile pipeline, not hand-built JSON
+
+Added 2026-10-09. `EditorTool.text` existed (bottom-nav scope decided back
+on 2026-10-07) but had zero wiring — tapping it only highlighted the icon,
+same as every other still-placeholder tool. This is the first real
+implementation: add a new text clip at the playhead, and edit an existing
+one's content, both from one `TextField` in the tool's own options panel.
+
+**The key design question was reuse, not new design**: a text layer's
+`V2TextLayerPayload` is resolved, shaped output (`chunks`/`spans` with real
+per-character origins) — CLAUDE.md's own "Text layout stays atomic" note
+already establishes that only real Core Text shaping (`TextLayoutCompiler`)
+can produce a valid one, so hand-building that JSON shape for a typed
+string was never on the table. `ProjectsView.openEditorProject`'s "Trip to
+Paris" demo text lane already proved the reusable path — wrap one
+`EditorLayer(kind: "text", text: EditorTextLayer(...))` in a throwaway
+`EditorDocument`, call the top-level `compile(_:)` (`EditorDocument/
+PresetCompiler.swift:73`), lift the one resulting `V2Layer` back out. Both
+new commands (`EditorCommand.swift`) do exactly that, nothing hand-rolled:
+
+- **`AddTextLayerCommand`** — builds the one-layer document (fixed
+  defaults: Helvetica 32pt white, centered, no wrap, 3000ms duration —
+  there's no font/size/color picker UI yet, so nothing else to author),
+  compiles it, then places the resulting layer's `order` using the exact
+  same "reuse a lane that doesn't already overlap this time range, else
+  open a new one" search `AddAudioClipCommand` already does for audio
+  tracks — this is the first thing to actually implement the "lanes are
+  homogeneous by type, pack if non-overlapping" rule from the "Timeline
+  lanes" note for a non-audio lane type.
+- **`SetTextContentCommand`** — re-runs the *same* compile step (a text
+  edit can't just poke `.source.text` in place; `chunks` are resolved
+  output, not live text) but only overwrites the existing `V2Layer`'s
+  `payload` — `id`/`order`/`frame`/`transform`/`timing` all stay exactly as
+  authored, so editing content never moves or resizes the clip. No-op
+  (fail closed) if the layer isn't found or isn't actually `.text`.
+- **`ToolOptionsPanel`'s new `.text` case** is one `TextField` that does
+  double duty off `selectedLayer` (the same selection Chỉnh sửa's
+  Tách/Tách tiếng/Xoá already act on — selecting a text clip in either tool
+  works): empty + "Thêm chữ" button when nothing text-ish is selected,
+  pre-filled with the clip's real current text (read back via
+  `payload.source.text`) + "Xong" when a text layer is. `EditorShellView`
+  generates the new layer's id itself (not inside the command) so it can
+  `selectedLayerId = layerId` right after adding — typing again immediately
+  edits the clip just created instead of silently adding a second one.
+- Deliberately not done: no font/size/color/alignment picker (fixed
+  defaults only), no drag-to-reposition for text (same gap as every other
+  clip type — no position-editing UI exists anywhere yet), no multi-line
+  authoring (`wrap: "none"` always).
+
+Verified: `EditorCommandTests.swift` gained 5 tests — a real compile
+happens (not a placeholder: asserts `chunks` is non-empty with real `x`
+origins), the lane-packing search (new lane when overlapping, shared lane
+when not), content-edit-preserves-position, and the no-op guards. Full
+62-test suite green. Simulator screenshots (forced `selectedTool`/
+`selectedLayerId`, same established method) confirm both panel states: the
+empty "Nhập nội dung…" + disabled "Thêm chữ" button, and — selecting the
+"Trip to Paris" demo text lane already seeded by `ProjectsView` — the field
+pre-filled with its real text and a "Xong" button, confirming the
+read-back-from-compiled-payload path actually works, not just the write
+path.
+
+## Tuỳ chỉnh — the full slider list (Sharpen, Clarity, Blur, Vignette, Noise, Tone Curve, White Balance, HSL)
+
+Added 2026-10-09, right after the Core Image bridge + first 4 sliders
+shipped, extending the same architecture to the rest of the list the user
+originally asked about (confirmed atomic in that earlier discussion). Two
+scope calls confirmed with the user first: (1) "Đồ thị" (a real draggable
+curve-graph editor) is explicitly deferred — the 4 parametrized
+Highlights/Shadows/Whites/Blacks sliders are this pass's stand-in, sharing
+the same `feComponentTransfer` `table` mechanism a real curve editor would
+eventually also use; (2) do the whole remaining list in one pass rather
+than splitting it, since every item reuses the same `FilterRenderer`/
+`EffectPresetKind`/`SetAdjustCommand` architecture already proven.
+
+**One real Protocol V2 addition this pass, flagged explicitly (not silently
+contradicting the earlier "no protocol change, ever" claim)**: `feVignette`
+(`Protocol/V2Filter.swift`) — a 2nd deliberate non-SVG exception alongside
+`feColorLUT`. A faithful SVG vignette needs a radial-gradient paint server
+rendered through `feImage` then composited back, which this app's filter
+graph has never plumbed (no paint server has ever reached `FilterRenderer`);
+Core Image already has a purpose-built `CIVignette` filter taking exactly
+`radius`/`intensity`, so adding one small, well-justified primitive case
+(mirroring `feColorLUT`'s own precedent exactly) was the honest tradeoff
+over fake-plumbing paint servers through for one slider.
+
+**`EffectPresets.swift`** gained 5 new `EffectPresetKind` cases —
+`whiteBalance` (Temperature/Tint, a `feColorMatrix` channel-bias
+approximation, not true chromaticity math), `toneCurve` (Highlights/
+Shadows/Whites/Blacks → one shared 5-point `feComponentTransfer` table),
+`sharpen` (a standard Laplacian 3×3 `feConvolveMatrix`, weights sum to 1),
+`clarity` (`feGaussianBlur` + `feComposite` `arithmetic` — the textbook
+unsharp-mask local-contrast technique), `vignette` (straight to the one
+`feVignette` primitive) — plus `lightness` added to `colorAdjust` (folds
+into the same additive offset as `brightness`, no extra primitive) and
+reusing `hueRotate` for the Hue slider (it already existed, just was never
+exposed in the UI). `blur`/`noise` needed **no new preset** — both already
+existed from the original effects-preset system, just never had a renderer
+or a command path before now.
+
+**`Runtime/FilterRenderer.swift`** gained real implementations for
+`feGaussianBlur` (`CIGaussianBlur`, `.clampedToExtent()` before +
+`.cropped(to:)` after — without the clamp, the blur samples transparent
+past the image edge and bleeds a dark fringe in), `feComposite`
+`arithmetic` (only the `k1 == 0` shape — no true per-pixel multiplicative
+term — since that's the only shape anything compiles to; implemented as 2
+`CIColorMatrix` scales + `CIAdditionCompositing`, not a custom kernel),
+`feConvolveMatrix` (3×3 only, via `CIConvolution3X3`), `feTurbulence`
+(approximated with `CIRandomGenerator` — white noise, not true Perlin/
+fractal turbulence, documented as such, "close enough for film grain" is
+the actual bar here), `feMerge` (`CISourceOverCompositing` chained in
+painter's-model order), `feComponentTransfer`'s `table` case (via
+`CIToneCurve`'s 5 fixed control points — an exact match only when r/g/b
+share an identical 5-value table, which is all this app ever compiles;
+other lengths/divergent channels fall through to identity, documented
+gap), and `feVignette` (`CIVignette`, direct 1:1 param mapping).
+
+**`SetAdjustCommand`/`AdjustValues`** — `AdjustValues` grew to 17 fields
+across 5 groups (basics, HSL, white balance, tone curve, detail/effects).
+The command only compiles a preset for a slider **group** that actually
+moved off neutral — touching only Vignette compiles a 1-primitive filter,
+not an 8-preset chain padded with identity stages for everything else.
+
+**`ToolOptionsPanel`'s `AdjustOptionsRow`** is one long horizontal scroll
+with `Divider()`s between groups — no new navigation chrome for ~17
+sliders, simplest thing that works.
+
+Verified: `FilterRendererTests.swift` gained 8 new tests — flat-field
+invariance checks for blur/sharpen/clarity (a uniform-color image is its
+own fixed point under all 3, which exercises the clamp/crop/kernel-sum
+plumbing without needing a non-uniform reference image), identity and
+flat-black tone-curve cases, a vignette-at-zero-intensity identity check,
+and a noise-chain smoke test (output exists, correct size — `CIRandomGenerator`
+is non-deterministic by design, so exact pixel assertions aren't
+meaningful there). `EditorCommandTests.swift` gained a sparse-compilation
+test confirming only-the-touched-group gets compiled. Full 78-test suite
+green. Simulator screenshot (`AdjustValues(vignette: 2)` forced via the
+established method) confirms `feVignette` actually darkens the frame edges
+on real video, not just in the unit test's synthetic solid-color image.
+
+## All in-app UI text is now English — conversation stays Vietnamese, the app doesn't
+
+Changed 2026-10-09, at the user's explicit request, right before the next
+"Tuỳ chỉnh" slider batch: every tool title, button label, placeholder, and
+hint string that actually renders on screen is English now — "Chỉnh sửa" →
+"Edit", "Âm thanh" → "Audio", "Huỷ"/"Xuất" → "Cancel"/"Export", "Thêm nhạc"
+→ "Add Music", "Ghi âm" → "Record", the 4 slider labels ("Độ sáng" →
+"Brightness", etc.), every hint sentence, the 5 named sound effects in
+`SoundEffectCatalog.swift` ("Vút qua" → "Whoosh", etc.) — the full list is
+in this commit's diff across `EditorTool.swift`, `ToolOptionsPanel.swift`,
+`EditorShellView.swift`'s 2 nav buttons, and `SoundEffectCatalog.swift`.
+The user will Vietnamese-subtitle the shipped app themselves later; this
+session's own conversation and every doc comment/CLAUDE.md note stay
+Vietnamese-mixed as before — only strings a `Text`/`Button`/`TextField`
+actually draws changed. Confirmed via a full-codebase string inventory
+(an Explore pass) that no Vietnamese string doubles as a switch/compare key
+anywhere (every real identifier — `EditorTool`'s raw values,
+`SoundEffectPreset.id`, layer `type` strings — was already English); this
+was a pure cosmetic find-and-replace, zero logic touched. Build clean,
+full 70-test suite still green, 2 simulator screenshots (Tuỳ chỉnh panel,
+Âm thanh panel) confirm the rendered text is genuinely English end to end.
+
+## Ghi âm — the 4th and last piece of the audio roadmap (Thêm nhạc, Hiệu ứng âm thanh, Trích xuất, Ghi âm)
+
+Added 2026-10-09. Deliberately the smallest of the 4 — records to a temp
+file via `AVAudioRecorder`, then hands that file to the *exact same*
+`EditorShellView.addAudio(from:)`/`MediaImportService.importAudio(from:)`
+path `AudioFilePicker`'s own pick result already uses. No new command, no
+new asset-minting logic: from the moment recording stops, a mic recording
+and a Files-app pick are identical.
+
+- `project.yml` gained `INFOPLIST_KEY_NSMicrophoneUsageDescription` — the
+  first usage-description key this app has ever needed (confirmed
+  greenfield when Thêm nhạc was scoped: no camera/mic/photo-library
+  permission precedent existed anywhere in this repo before Ghi âm).
+- `Runtime/AudioRecorderService.swift` (new) — `@MainActor
+  ObservableObject` wrapping `AVAudioRecorder` + `AVAudioSession`
+  (`.playAndRecord`) + the iOS 17-native `AVAudioApplication
+  .requestRecordPermission` (available exactly at this project's 17.0
+  floor, not the older `AVAudioSession`-based permission API). Records to
+  `FileManager.default.temporaryDirectory`, not
+  `MediaImportService.importedMediaDirectory` — recording straight into the
+  sandbox would mean either skipping `importAudio`'s copy step (a second,
+  parallel describe-only code path) or copying a file that's already in
+  the right place (wasted I/O); recording to a true temp location instead
+  means `addAudio(from:)` treats it exactly like any other external pick,
+  zero special-casing.
+- `ToolOptionsPanel`'s `AudioOptionsRow` (Âm thanh tool, empty state) gained
+  a second button next to "Thêm nhạc": "Ghi âm" (idle) → tap starts
+  recording, button becomes a red "stop" showing live elapsed `mm:ss`; tap
+  again stops and immediately imports + places the clip at the playhead,
+  same as picking a file. **The one piece of error UI Ghi âm adds to this
+  app's otherwise-uniform "fail closed, no-op" convention**: if the user
+  denies mic permission, a visible "Cần quyền micro trong Cài đặt" hint
+  appears — a totally silent failure felt genuinely user-hostile here
+  (tapping record and having nothing happen, with no way to know why,
+  unlike every other fail-closed case in this app which has no user-facing
+  action that *looks* like it should do something).
+
+**Not attempted this pass, stated plainly**: interruption handling (a phone
+call arriving mid-recording), background recording, and waveform preview
+while actively recording (the clip only gets a real waveform once imported,
+via the existing `WaveformCache`, same as any other audio clip) — none of
+these came up as required for a first working version, and AVAudioRecorder
+without a delegate handles the common case (user starts, user stops) fine.
+
+Verified: full 70-test suite still green (nothing here was meaningfully
+unit-testable without a real microphone — same "needs the user's own ears/
+hands" limitation this file already states for scrub feel and the audio
+mixing engine). Simulator screenshot confirms the "Ghi âm" button renders
+in the Âm thanh panel next to "Thêm nhạc"; actually recording and hearing
+the result needs the user's own device (no mic in the Simulator, and
+`simctl` can't synthesize the tap either way).
+
+## Tuỳ chỉnh — the Core Image render bridge, proven with Brightness/Contrast/Saturation/Exposure
+
+Added 2026-10-09, via Plan Mode, after the user asked whether Protocol V2's
+JSON is atomic enough for a full grading tool (brightness, contrast,
+saturation, exposure, sharpen, clarity, HSL, curves,
+highlights/shadows/whites/blacks, temperature, tint, blur, vignette, noise)
+— discussed before any code. Confirmed: `Protocol/V2Filter.swift` already
+ports **all 17 standard SVG filter primitives** plus `feColorLUT`; every
+item on that list maps onto an existing primitive, no Protocol V2 change
+needed, now or ever for this list. The real gap was the **renderer**:
+nothing in this app ever read `layer.filter`, and no `CIFilter` rendering
+existed anywhere except one `CIContext` in `VideoFrameServer.swift` used
+only to convert a decoded pixel buffer to `CGImage`. This builds that
+bridge and proves it with exactly 4 sliders (confirmed: "độ chói" =
+Exposure, not Vibrance; HSL scoped to global, not Lightroom-style
+per-hue-band — both would need baking into a `feColorLUT`, deferred). The
+rest of the list becomes incremental additions to the same bridge, not new
+architecture.
+
+**`EffectPresets.swift`'s `EffectPresetKind.colorAdjust` already compiled
+brightness/contrast/saturation into the right primitive chain** — built
+during the original 8-tool scoping pass specifically because it's "atomic
+today, no protocol change needed," just never wired to a command or a
+renderer until now. Gained one more parameter, `exposure` (EV-stop gain,
+its own `feComponentTransfer` `linear(slope: pow(2, exposure))` stage,
+separate from the brightness/contrast `tone` stage so each slider's math
+stays simple to read).
+
+**`Runtime/FilterRenderer.swift` (new)** — walks a `V2Filter.primitives`
+chain as a real `CIImage` pipeline (named `in`/`result` wiring, just like a
+browser evaluating an SVG `<filter>`). V1 implements exactly 2 primitive
+types — `feColorMatrix` (`matrix`/`saturate`/`hueRotate`, the literal W3C
+Filter Effects formulas) and `feComponentTransfer` (`identity`/`linear`,
+which maps exactly onto `CIColorMatrix`'s diagonal+bias, no custom kernel
+needed) — everything else passes its input through unchanged rather than
+crashing, written as one `switch` so `feGaussianBlur`/`feTurbulence`/
+`feConvolveMatrix`/etc. are additive later, not a rewrite.
+
+**Two real Core Image gotchas found building this, both confirmed on
+device/simulator, not guessed:**
+- **Color management silently breaks the W3C formulas.** Left on, Core
+  Image linearizes 8-bit sRGB values before running the matrix math and
+  re-encodes after — a `saturate(0)` test case came back off by ~70 of 255,
+  not rounding-level drift. Fixed with `.workingColorSpace: NSNull()` on
+  the shared `CIContext`, confirmed via `FilterRendererTests`' real
+  rendered-pixel assertions.
+- **A `CGImage` with no embedded color space won't draw.** The first fix
+  also set `.outputColorSpace: NSNull()`, which made every unit test pass
+  (they read raw bytes via `CGContext`, which doesn't care) but blanked the
+  real Stage the instant any filter touched a video layer — confirmed by
+  screenshotting with no filter applied (renders fine) vs. with one applied
+  (solid background, no video at all). `Image(decorative:)` silently
+  refuses to draw a colorspace-less `CGImage`; raw pixel reads don't hit
+  that path, so the gap was invisible to tests alone. Fixed by keeping
+  `.workingColorSpace: NSNull()` (for correct math) but passing an explicit
+  `CGColorSpaceCreateDeviceRGB()` to `createCGImage(_:from:format:
+  colorSpace:)` per call instead of nulling the context's own output space.
+  **Lesson for next time a Core Image output "disappears" on the real
+  Stage but tests stay green**: raw-byte pixel tests can't catch a
+  SwiftUI-can't-draw-this-image class of bug — a real simulator screenshot
+  with real decoded content is the only thing that did here.
+
+**`PreviewCanvas.swift`** threads `filters: [V2Filter]` through
+`content`→`LayerNodeView`→`LayerContentView`, resolving `node.layer.filter`
+once per node. New `FilteredImageView` (used by both the `"image"` case and
+`VideoFrameView`) resolves via `FilterRenderer` asynchronously (`.task(id:)`
+keyed on `sourceKey` — `"<assetId>-<atSeconds>"` for video, the filename
+for a static image — plus a JSON snapshot of the filter's current values;
+generic, so any future filter shape needs zero changes here), caching the
+last successful result and falling back to the unfiltered source meanwhile
+— same "never block `body`, never show nothing" discipline as
+`VideoFrameView`'s own `lastShown`. **Stated V1 limitation**: a video
+layer's filter only actually applies while `refinesStills` (playhead at
+rest) — a graded clip shows correctly paused/scrubbed-to-rest, not yet
+during active Play. Baking it into `VideoFrameServer`'s own per-asset decode
+cache would be wrong anyway (two clips could share one asset with
+different grades); a fresh Core Image render every ~16ms during Play risks
+never finishing before the next frame cancels it. A real, separate
+follow-up, stated plainly, not silently skipped.
+
+**`EditorCommand.swift`** gained `AdjustValues` (4 doubles, neutral at
+`brightness:0, contrast:1, saturation:1, exposure:0`) and
+`SetAdjustCommand` — writes a **stable** filter id (`"adjust-<layerId>"`)
+so repeated slider drags replace the same `project.filters[]` entry instead
+of accumulating one per tick, and clears `layer.filter` entirely when all 4
+values are neutral (no dead-weight identity filter on an untouched clip).
+`EditorShellView` keeps a session-only `adjustIntents: [String:
+AdjustValues]` cache (never persisted to `project`) — a compiled
+`V2Filter` has no cheap way to read brightness/contrast/saturation/exposure
+back out of it (same two-tier intent-vs-resolved split as
+`EditorTextLayoutIntent`), so without this cache, nudging only the Contrast
+slider after reselecting a clip would silently discard a previously-set
+Brightness value. **Known, stated limitation**: reopening the editor fresh
+loses this cache, so a previously-graded clip's sliders show neutral even
+though the real persisted filter (and the exported video) is still
+correct — only the slider *position* misrepresents it until touched again.
+`ToolOptionsPanel`'s new `.adjust` row updates live on every slider tick
+(`onChange`, not commit-on-release like `AudioOptionsRow`'s volume slider —
+a grading tool is useless without real-time feedback), while `Slider`'s own
+`onEditingChanged` brackets exactly one undo step per drag, same shape as
+`TimelineView`'s drag-to-trim handles.
+
+Verified: `FilterRendererTests.swift` (new) — real `CIContext` renders, not
+mocks, reading back actual pixels and comparing against hand-computed W3C
+formula values (saturate/hueRotate/linear, plus a 2-primitive chained case
+confirming `in`/`result` wiring actually feeds forward). `EditorCommandTests
+.swift` gained `SetAdjustCommand` coverage (stable id reuse, neutral-clears,
+no-op for unknown layer). Full 70-test suite green. Simulator: forced
+`selectedTool = .adjust` + a real `SetAdjustCommand(saturation: 0, exposure:
+0.8)` on the video layer, screenshotted — the Stage genuinely renders the
+video desaturated and brightened, not a placeholder.
+
+## Trích xuất — extract a video clip's audio onto the audio lane
+
+Added 2026-10-09, the 3rd of the 4-part audio roadmap (Thêm nhạc, Hiệu ứng
+âm thanh, **Trích xuất**, Ghi âm). Reuses every piece the earlier 2 passes
+built — `AddAudioClipCommand`, `MediaImportService`'s "mint a `V2AudioAsset`
++ dedupe by stable id" pattern — same shape as Hiệu ứng âm thanh turning out
+to be a one-tap variant of Thêm nhạc, not new infrastructure.
+
+- `MediaImportService.extractAudio(from videoURL:)` (new) — exports the
+  **whole** source video's audio track once via `AVAssetExportSession`
+  (`AVAssetExportPresetAppleM4A`), cached under
+  `importedMediaDirectory` keyed by the source filename (`"extracted-
+  <name>.m4a"`), so extracting from a second clip of the same underlying
+  asset — or re-extracting after deleting the first clip — reuses the
+  export instead of redoing it. Uses the older completion-handler
+  `exportAsynchronously` (wrapped in `withCheckedThrowingContinuation`), not
+  the newer `async throws export()`, which needs a higher deployment target
+  than this project's 17.0 floor.
+- `AddAudioClipCommand` gained `trimStartMs`/`trimEndMs` (both default to
+  the old behavior — `0`/`nil` — so Thêm nhạc/Hiệu ứng âm thanh's existing
+  call sites needed no changes). Trích xuất is the one caller that sets
+  them: since the exported file is the asset's *entire* audio, the placed
+  clip needs its own `trim` to show only the slice matching the video
+  layer's own `trimStart`/duration — `EditorShellView.extractAudio(fromLayerId:)`
+  reads the selected video layer's `timing`/`trimStart` and passes them
+  straight through.
+- UI lives in `ToolOptionsPanel`'s existing `EditOptionsRow` (Chỉnh sửa),
+  not a new tool — a new "Tách tiếng" button next to Tách/Xoá, shown only
+  when the selected clip's `type == "video"` (there's no audio to pull out
+  of an image/text/shape layer).
+- **Deliberately not done**: muting/disabling the original video's own
+  embedded audio after extraction (what CapCut does, so the same sound
+  doesn't play twice). Skipped because it's currently inert either way —
+  `AudioMixEngine` only ever plays a video's embedded audio when a real
+  `V2VideoAudioDerivative` exists, and this app's own bundled sample videos
+  have none (see the audio foundation note below) — not worth the extra
+  field-wiring for a no-op today. Revisit once a real video-with-audio
+  asset exists in this app.
+
+Verified: new `MediaImportServiceTests.swift` — a synthesized (not
+downloaded) source file stands in for "a video's audio track" since this
+repo's own sample videos have no audio at all; confirms a real
+`AVAssetExportSession` round-trip produces a file with the right duration,
+and that a second call reuses the cached file/id rather than re-exporting.
+`EditorCommandTests.swift` gained a test for `AddAudioClipCommand`'s new
+trim fields. Full 57-test suite green. Simulator screenshot (forced
+`selectedTool`/`selectedLayerId`, same established method) confirms "Tách
+tiếng" renders next to Tách/Xoá when a video clip is selected.
+
+## Hiệu ứng âm thanh is a sound-effect library, not a DSP effect — corrected same day
+
+Corrected 2026-10-09, right after the note below shipped: that note's own
+"Hiệu ứng âm thanh needs a new atomic Protocol V2 primitive... mapped onto
+native `AVAudioUnitEQ`/`Reverb`/`Delay`/`TimePitch`" framing was wrong. The
+user clarified: "hiệu ứng âm thanh chỉ là sound effect giống chọn audio
+thôi" — it's a one-tap sound-effect library (pop/whoosh/ding/...), the same
+action as Thêm nhạc, just picking from a bundled catalog instead of the
+Files app. No new Protocol V2 primitive, no DSP engine, no design
+discussion needed — it reuses every piece the audio foundation note already
+built.
+
+- `Resources/Media/SoundEffects/*.wav` (6 files) — synthesized placeholder
+  SFX (a python `wave`-module script, not downloaded/licensed audio; no real
+  sound pack exists in this repo yet). Swap in a real licensed pack later by
+  replacing these files and `SoundEffectCatalog.swift`'s list; nothing else
+  about the feature changes.
+- `Protocol/SoundEffectCatalog.swift` (new) — `SoundEffectPreset` (id,
+  title, filename, durationMs, icon) + `SoundEffectCatalog.presets`, and
+  `asset(for:)` which mints a `V2AudioAsset` with a **stable id per preset**
+  (`"sfx-pop"` etc., not a UUID like `MediaImportService.importAudio`'s) —
+  this is what makes tapping the same effect twice reuse one
+  `project.assets` entry instead of appending a duplicate.
+- `AddAudioClipCommand` (`EditorCommand.swift`) gained exactly one line:
+  skip appending `asset` if `project.assets` already has that id. Safe for
+  Thêm nhạc too (every import mints a fresh UUID, so it never collides) —
+  this is what makes it reusable for both.
+- `ToolOptionsPanel` gained a `.effects` case/`SoundEffectsOptionsRow` — a
+  horizontal icon row, same shape as `AspectRatioOptionsRow`; tapping calls
+  `AddAudioClipCommand` at the playhead immediately, no selection state of
+  its own (unlike Âm thanh — there's nothing to configure per-tap).
+
+Verified: `EditorCommandTests.swift` gained
+`testAddAudioClipCommandDoesNotDuplicateAnAssetAlreadyPresent`; full
+54-test suite green; simulator screenshot (same forced-`selectedTool`
+method as the note below) confirms the 6-effect panel renders under
+"Hiệu ứng". Real audible confirmation of each synthesized effect needs the
+user's own ears, same standing limitation as the rest of this audio work.
+
+## Real audio playback, and "Thêm nhạc" — the first 2 of a 4-part audio roadmap
+
+Added 2026-10-09, via Plan Mode (`~/.claude/plans/gleaming-leaping-lemon.md`),
+at the user's request to build out Âm thanh: thêm nhạc, hiệu ứng âm thanh,
+trích xuất, ghi âm. Recon found the real blocker before any of those could
+be verifiable: **nothing in this app had ever played sound**, not a
+standalone `V2AudioClip`, not a video's own embedded audio — `PreviewCanvas`/
+`EditorPlaybackEngine`/`VideoFrameServer` only ever decode and draw
+`CGImage` frames. This pass builds the playback foundation, then the first
+user-facing feature on it (Thêm nhạc). Ghi âm/Trích xuất/Hiệu ứng âm thanh
+are the next 3 passes — each becomes easier with the pieces below already
+in place (import pipeline, mixing engine, audio-clip selection UI).
+
+**`Playback/AudioMixEngine.swift` (new)** — an `AVAudioEngine` +
+`AVAudioPlayerNode`-per-active-clip mixer, native AVFoundation only (no
+third-party engine, per this file's own standing rule). Mirrors the
+`VideoFrameServer`/`EditorPlaybackEngine` split: owns decode+mixing,
+`EditorPlaybackEngine` stays the one clock. `update(project:)` rebuilds the
+source list from two places every time the project changes: standalone
+`V2AudioDomain` clips, and every video layer whose asset carries a
+`V2VideoAudioDerivative` with `V2EmbeddedVideoAudio.enabled` (today's bundled
+sample videos have no derivative, so that second path is real but untested
+until a real video-with-audio asset exists). `play(atMs:)` fully stops and
+reschedules every active node from scratch at the given time — no
+`AVAudioPlayerNode.pause()`/resume bookkeeping — which doubles as the resync
+point after a frame-decode stall. `advance(toMs:)` (called every
+`playbackTick` while actually playing) starts newly-entered sources, stops
+ended ones, and updates each node's volume for `gainDb` + its fade-in/out
+curve. **Deliberate scope cut, stated plainly, not hidden**: audio only ever
+plays during real Play — scrubbing/coasting stay silent — and there's no
+sample-accurate master-clock sync between `DisplayLinkClock` and the audio
+hardware clock; re-seeking on every `play()`/pause()/stall boundary bounds
+drift to a few hundred ms at most, closing it further is the same "real
+audio clock" step 3 work this file already flagged as future, not new scope.
+
+**A real bug found and fixed before this could ship**: the first version
+called `AVAudioEngine.start()` unconditionally inside `play(atMs:)`, even
+with zero audio sources. This hung `EditorPlaybackEngineTests` for a full
+600 seconds in the test runner (confirmed via `xcodebuild test`'s own
+"Timed out after 600.0 seconds while waiting for a response from the
+invoked process" + the specific `play()`/`pause()`-calling tests failing) —
+the test process has no configured `AVAudioSession`, and touching real audio
+hardware there blocks. Fixed by moving `engine.start()` into `startNode`,
+lazily, only called once a node is actually about to play — a project/test
+with no audio at all now never touches `AVAudioEngine` beyond constructing
+it. Full 53-test suite (including this one) green after the fix.
+
+**`EditorPlaybackEngine.swift`** owns one `AudioMixEngine`; `update(project:)`/
+`play()`/`pause()`/`beginScrub()`/`playbackTick`'s stall branch and
+successful-tick branch all call through to it (see the file for the exact
+call sites) — the same "one clock tells every decoder what to do" shape
+`VideoFrameServer` already had.
+
+**`UI/PreviewCanvas.swift`'s `bundledURL(filename:)`** (previously
+`Bundle.main` only) now falls back to
+`MediaImportService.importedMediaDirectory` (`Documents/ImportedMedia`) when
+the bundle lookup misses — every existing call site (`TimelineView`,
+`EditorPlaybackEngine`, `VideoFrameServer`, `SharpFrameLoader`) picks this up
+for free, same "one resolver, not one per call site" convention as
+`VideoTimeMapping`/`WaveformCache`.
+
+**Thêm nhạc**: `Runtime/MediaImportService.swift` (new) copies a picked file
+into that sandbox directory and mints a `V2AudioAsset` (real duration via
+`AVURLAsset.load(.duration)`) — the same shared import step Ghi âm/Trích
+xuất will reuse later (recording/extraction both end by handing a local
+file to this same step). `UI/Editor/AudioFilePicker.swift` (new) wraps
+`UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy:
+true)` — `asCopy: true` avoids the security-scoped-resource dance.
+`EditorCommand.swift` gained `withAssets(_:)`/`withAudio(_:)` project
+helpers (alongside the existing `withComposition`/`withLayers`) and 3
+commands: `AddAudioClipCommand` (places the new clip at the playhead, on the
+first track that doesn't already overlap that range, or a new track),
+`DeleteAudioClipCommand`, `SetAudioClipVolumeCommand` (writes `gainDb`
+verbatim, same "UI converts/validates, command just writes" split
+`TrimClipCommand` already uses). `TimelineView`'s `AudioClipView` — which
+previously took no tap gesture at all ("belongs to the later Âm thanh
+phase") — is now selectable (`selectedAudioClipId`, parallel to
+`selectedLayerId`, each clearing the other on selection) with the same
+bounding-frame stroke visual selected video/text clips already use.
+`ToolOptionsPanel` gained an `.audio` case/`AudioOptionsRow`: "Thêm nhạc" +
+hint when nothing's selected, a volume slider + "Xoá" when a clip is.
+
+**Deliberately out of scope this pass** (next increments, not forgotten):
+dragging a standalone audio clip to reposition/trim it, per-clip fade UI,
+multiple simultaneous tracks exposed beyond automatic first-non-overlapping-
+track placement, ducking music under voice.
+**Trích xuất, Hiệu ứng âm thanh, and Ghi âm all shipped in the days right
+after this note — see the roadmap notes above this one for each.** Hiệu
+ứng âm thanh turned out not to need a new primitive at all (it's a one-tap
+sound-effect library, not a DSP processing effect); Trích xuất reused
+`AddAudioClipCommand` as-is, just teaching it a `trimStartMs`/`trimEndMs`;
+Ghi âm reused the exact same `addAudio(from:)` import path as Thêm nhạc,
+just sourced from `AVAudioRecorder` instead of the Files app. The 4-part
+audio roadmap this note opened with is now fully built.
+
+Verified: `EditorCommandTests.swift` (5 new tests covering
+`AddAudioClipCommand`'s track-placement search, `DeleteAudioClipCommand`,
+`SetAudioClipVolumeCommand`) and new `AudioMixEngineTests.swift` (source
+selection from `update(project:)`, including the muted-track/disabled-clip
+skip cases; the fade/gain volume math) — full 53-test suite green. Simulator
+screenshot (temporarily forcing `selectedTool = .audio` and the WindowGroup's
+root, same established pattern this file uses elsewhere) confirms the
+"Thêm nhạc" panel renders. Real audible confirmation (does sound actually
+come out, is it in sync) needs the user's own ears on a real device — same
+documented limitation this file already has for scrub/momentum feel.
+
 ## Play and scrub are one pipeline now — no `AVPlayer` on the Stage
 
 Changed 2026-10-09 (step 2 of the engine plan below), at the user's

@@ -26,14 +26,14 @@ enum EditorTool: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .edit: return "Chỉnh sửa"
-        case .audio: return "Âm thanh"
-        case .text: return "Văn bản"
-        case .effects: return "Hiệu ứng"
-        case .filter: return "Bộ lọc"
-        case .aspectRatio: return "Tỷ lệ khung hình"
-        case .background: return "Phông nền"
-        case .adjust: return "Tuỳ chỉnh"
+        case .edit: return "Edit"
+        case .audio: return "Audio"
+        case .text: return "Text"
+        case .effects: return "Effects"
+        case .filter: return "Filter"
+        case .aspectRatio: return "Aspect Ratio"
+        case .background: return "Background"
+        case .adjust: return "Adjust"
         }
     }
 

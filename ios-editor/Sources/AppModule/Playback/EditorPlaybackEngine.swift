@@ -50,6 +50,10 @@ final class EditorPlaybackEngine {
     @ObservationIgnored private var coastVelocityMsPerSecond: Double = 0
     @ObservationIgnored private var stalledSeconds: Double = 0
     @ObservationIgnored private let clock = DisplayLinkClock()
+    /// Real sound — see `AudioMixEngine`'s own doc comment for the sync
+    /// model. Only ever told to play from `playbackTick`/`play()`, never
+    /// from scrubbing/coasting.
+    @ObservationIgnored private let audioMixEngine = AudioMixEngine()
     /// Test seam: decides whether every video frame needed at a timeline time
     /// is decoded. Defaults to asking `VideoFrameServer`.
     @ObservationIgnored private let frameReadiness: ((Double) -> Bool)?
@@ -89,6 +93,7 @@ final class EditorPlaybackEngine {
         let audioEnds = project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }
         maxDurationMs = max((layerEnds + audioEnds).max() ?? 1, 1)
         prefetchFrames()
+        audioMixEngine.update(project: project)
     }
 
     /// Starts decoding around the current time — call once when the editor
@@ -104,12 +109,14 @@ final class EditorPlaybackEngine {
         clock.stop()
         mode = .playing
         stalledSeconds = 0
+        audioMixEngine.play(atMs: currentTimeMs)
         clock.start { [weak self] dt in self?.playbackTick(dt) }
     }
 
     func pause() {
         clock.stop()
         mode = .idle
+        audioMixEngine.pause()
     }
 
     func togglePlay() {
@@ -127,6 +134,9 @@ final class EditorPlaybackEngine {
         clock.stop()
         mode = .scrubbing
         scrubStartTimeMs = currentTimeMs
+        // Scrubbing stays silent in this pass (see `AudioMixEngine`'s doc
+        // comment) — if Play was already running, stop its audio too.
+        audioMixEngine.pause()
     }
 
     /// Moves the playhead relative to where `beginScrub()` found it.
@@ -177,10 +187,14 @@ final class EditorPlaybackEngine {
         }
         if !framesReady(atMs: next), stalledSeconds < Self.maxStallSeconds {
             stalledSeconds += dt
+            // Holds audio too, so it never runs ahead of a frozen Stage —
+            // the next successful tick's `advance(toMs:)` resumes it fresh.
+            audioMixEngine.pause()
             return
         }
         stalledSeconds = 0
         setTime(next)
+        audioMixEngine.advance(toMs: next)
     }
 
     // MARK: Time + frames
