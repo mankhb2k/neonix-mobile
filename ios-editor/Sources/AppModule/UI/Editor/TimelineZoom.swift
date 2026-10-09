@@ -99,10 +99,10 @@ enum TimelineZoom {
     }
 }
 
-/// Vertical scrolling of the lanes below the main (primary video) lane, which
-/// stays pinned like in CapCut. The timeline has one drag gesture for both
-/// scrubbing (horizontal) and lane scrolling (vertical); the axis is locked
-/// from the first few points of movement. Pure, so it is unit-tested.
+/// Rules for the lanes below the main (primary video) lane, which stays pinned
+/// like in CapCut. Those lanes sit in a native vertical `ScrollView`; the
+/// timeline's own drag gesture only scrubs, so it locks the drag's axis from
+/// the first few points and ignores vertical ones. Pure, so it is unit-tested.
 enum LaneScroll {
     enum Axis: Equatable {
         case horizontal, vertical
@@ -111,12 +111,10 @@ enum LaneScroll {
     /// Movement needed before a drag commits to an axis when the lanes can scroll.
     static let directionLockPx: CGFloat = 4
 
+    /// How far the lanes can scroll: 0 when everything fits (then nothing
+    /// scrolls, like a browser), otherwise the overflow.
     static func maxOffset(contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         max(contentHeight - viewportHeight, 0)
-    }
-
-    static func clamped(_ offset: CGFloat, maxOffset: CGFloat) -> CGFloat {
-        min(max(offset, 0), maxOffset)
     }
 
     /// nil = not decided yet. With nothing to scroll the drag is always a

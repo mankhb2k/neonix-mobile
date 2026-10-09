@@ -89,12 +89,10 @@ final class TimelineZoomTests: XCTestCase {
 
     // MARK: LaneScroll
 
-    func testLaneScrollRangeIsContentMinusViewportNeverNegative() {
+    func testLaneScrollRangeIsTheOverflowAndZeroWhenItFits() {
         XCTAssertEqual(LaneScroll.maxOffset(contentHeight: 200, viewportHeight: 80), 120)
         XCTAssertEqual(LaneScroll.maxOffset(contentHeight: 50, viewportHeight: 80), 0)
-        XCTAssertEqual(LaneScroll.clamped(-30, maxOffset: 120), 0)
-        XCTAssertEqual(LaneScroll.clamped(500, maxOffset: 120), 120)
-        XCTAssertEqual(LaneScroll.clamped(40, maxOffset: 120), 40)
+        XCTAssertEqual(LaneScroll.maxOffset(contentHeight: 80, viewportHeight: 80), 0, "nothing scrolls when everything fits")
     }
 
     func testDragIsAlwaysAScrubWhenLanesCannotScroll() {

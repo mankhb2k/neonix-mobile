@@ -70,7 +70,8 @@ final class TimelineZoomUITests: XCTestCase {
 
 
 /// Vertical lane scrolling: the main (video) lane stays pinned while the lanes
-/// below it scroll, and a vertical drag must not move the playhead.
+/// below it scroll (a native `ScrollView`), a vertical drag must not move the
+/// playhead, and a horizontal drag over the lanes must still scrub.
 final class TimelineLaneScrollUITests: XCTestCase {
     func testVerticalDragScrollsLowerLanesWithoutScrubbing() throws {
         continueAfterFailure = false
@@ -88,23 +89,41 @@ final class TimelineLaneScrollUITests: XCTestCase {
             guard let dir = ProcessInfo.processInfo.environment["ZOOM_SHOTS_DIR"] else { return }
             try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
         }
-        shot("lanes_0_top")
-        let main = app.otherElements["lane-main"]
-        let lanes = app.otherElements["lane-scroll"]
+        let main = app.descendants(matching: .any)["lane-main"].firstMatch
+        let firstLane = app.descendants(matching: .any)["lane-1"].firstMatch
         XCTAssertTrue(main.waitForExistence(timeout: 5), "the main lane should be identifiable")
-        XCTAssertTrue(lanes.exists, "the lanes below the main lane should sit in a scroll container")
-        XCTAssertEqual(lanes.value as? String, "0")
-        let mainFrameBefore = main.frame
+        XCTAssertTrue(firstLane.exists, "the first scrolling lane should be identifiable")
+        shot("lanes_0_top")
+        let mainBefore = main.frame.minY
+        let laneBefore = firstLane.frame.minY
+        let timeBefore = timeline.label
         let scaleBefore = timeline.value as? String
+
         let start = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.85))
         let end = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.45))
         start.press(forDuration: 0.05, thenDragTo: end)
-        // Read the scroll value first: the query waits for the app to go idle, so the
-        // screenshot below shows the settled state.
-        let scrolled = Double(lanes.value as? String ?? "") ?? 0
+        let moved = laneBefore - firstLane.frame.minY
         shot("lanes_1_scrolled")
-        XCTAssertGreaterThan(scrolled, 40, "dragging up ~40% of the panel must scroll the lower lanes well past 40 pt (got \(scrolled))")
-        XCTAssertEqual(main.frame.minY, mainFrameBefore.minY, accuracy: 0.5, "the main lane must stay pinned")
+        XCTAssertGreaterThan(moved, 40, "dragging up must scroll the lower lanes (they moved \(moved) pt)")
+        XCTAssertEqual(main.frame.minY, mainBefore, accuracy: 0.5, "the main lane must stay pinned")
         XCTAssertEqual(timeline.value as? String, scaleBefore, "a vertical drag must not change the zoom")
+        XCTAssertEqual(timeline.label, timeBefore, "a vertical drag over the lanes must not scrub the playhead")
+
+        // Scroll to the very end: once it settles the last lane sits flush with the
+        // bottom of the scroll area — no blank space (that only shows while overscrolling).
+        for _ in 0..<3 { start.press(forDuration: 0.05, thenDragTo: end) }
+        Thread.sleep(forTimeInterval: 2)
+        shot("lanes_2_end")
+        let scrollArea = app.descendants(matching: .any)["lane-scroll"].firstMatch
+        let lastTrack = app.descendants(matching: .any)["audio-track-track-1"].firstMatch
+        XCTAssertTrue(scrollArea.exists && lastTrack.exists)
+        XCTAssertEqual(lastTrack.frame.maxY, scrollArea.frame.maxY, accuracy: 1.5,
+                       "after scrolling to the end the last lane must sit at the bottom with no gap")
+
+        // A horizontal drag over the lanes must still scrub (the ScrollView must not swallow it).
+        let from = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.7))
+        let to = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.7))
+        from.press(forDuration: 0.05, thenDragTo: to)
+        XCTAssertNotEqual(timeline.label, timeBefore, "a horizontal drag over the lanes must scrub")
     }
 }

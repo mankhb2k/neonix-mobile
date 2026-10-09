@@ -83,9 +83,7 @@ struct TimelineView: View {
     @State private var dragRebaseX: CGFloat = 0
     /// Only fed while a metrics run is recording; see `ReleaseVelocityEstimator`.
     @State private var releaseEstimator = ReleaseVelocityEstimator()
-    /// Vertical scroll of the lanes below the main lane (see `LaneScroll`).
-    @State private var laneScrollY: CGFloat = 0
-    @State private var laneScrollStartY: CGFloat = 0
+    /// Axis the current one-finger drag locked to (see `LaneScroll`).
     @State private var dragAxis: LaneScroll.Axis?
     /// Only the main (primary video) lane uses this height — every other
     /// lane, including every standalone audio track, uses the smaller
@@ -185,19 +183,26 @@ struct TimelineView: View {
                 let pinnedHeight: CGFloat = mainOrder == nil ? 0 : rowHeight + rowSpacing
                 let scrollViewportHeight = max(geo.size.height - rulerHeight - rowsTopPadding - pinnedHeight, 0)
                 let maxLaneScroll = LaneScroll.maxOffset(contentHeight: scrollContentHeight, viewportHeight: scrollViewportHeight)
-                let laneOffsetY = LaneScroll.clamped(laneScrollY, maxOffset: maxLaneScroll)
 
                 ZStack(alignment: .topLeading) {
-                    VStack(alignment: .leading, spacing: rowsTopPadding) {
-                        TimeRulerView(pxPerMs: pxPerMs, fps: fps, maxDurationMs: maxDurationMs, contentWidth: contentWidth, windowMs: windowMs)
-                            .frame(height: rulerHeight)
-
-                        VStack(alignment: .leading, spacing: rowSpacing) {
+                    VStack(alignment: .leading, spacing: mainOrder == nil ? rowsTopPadding : rowSpacing) {
+                        // Ruler + the pinned main lane slide horizontally with the playhead.
+                        VStack(alignment: .leading, spacing: rowsTopPadding) {
+                            TimeRulerView(pxPerMs: pxPerMs, fps: fps, maxDurationMs: maxDurationMs, contentWidth: contentWidth, windowMs: windowMs)
+                                .frame(height: rulerHeight)
                             if let mainOrder {
                                 laneRow(order: mainOrder, centerX: centerX, windowMs: windowMs)
                             }
+                        }
+                        .offset(x: contentOffsetX)
+                        .frame(width: geo.size.width, alignment: .topLeading)
+                        .clipped()
 
-                            if scrollContentHeight > 0 {
+                        // Every other lane + the audio tracks: a native vertical
+                        // `ScrollView` (system momentum and bounce). The horizontal
+                        // slide is applied *inside* it so its bounds stay one screen wide.
+                        if scrollContentHeight > 0 {
+                            ScrollView(.vertical, showsIndicators: false) {
                                 VStack(alignment: .leading, spacing: rowSpacing) {
                                     ForEach(laneOrders.filter { $0 != mainOrder }, id: \.self) { order in
                                         laneRow(order: order, centerX: centerX, windowMs: windowMs)
@@ -215,18 +220,19 @@ struct TimelineView: View {
                                                 selectedLayerId = nil
                                             }
                                         )
+                                        .accessibilityElement(children: .contain)
+                                        .accessibilityIdentifier("audio-track-\(track.id)")
                                     }
                                 }
-                                .offset(y: -laneOffsetY)
-                                .frame(height: min(scrollContentHeight, scrollViewportHeight), alignment: .topLeading)
-                                .clipped()
-                                .accessibilityElement(children: .contain)
-                                .accessibilityIdentifier("lane-scroll")
-                                .accessibilityValue(String(format: "%.0f", laneOffsetY))
+                                .offset(x: contentOffsetX)
+                                .frame(width: geo.size.width, alignment: .topLeading)
                             }
+                            .scrollBounceBehavior(.basedOnSize)
+                            .frame(width: geo.size.width, height: min(scrollContentHeight, scrollViewportHeight), alignment: .topLeading)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("lane-scroll")
                         }
                     }
-                    .offset(x: contentOffsetX)
                     .frame(width: geo.size.width, height: min(panelHeight, geo.size.height), alignment: .topLeading)
                     .clipped()
 
@@ -251,6 +257,9 @@ struct TimelineView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("timeline")
                 .accessibilityValue(String(format: "%.4f", pxPerMs))
+                #if DEBUG
+                .accessibilityLabel(String(format: "%.0f", currentTimeMs))
+                #endif
                 .simultaneousGesture(
                     MagnifyGesture()
                         .onChanged { value in
@@ -271,7 +280,8 @@ struct TimelineView: View {
                             pinchBaseScale = nil
                         }
                 )
-                .gesture(
+                // Simultaneous so the lanes' `ScrollView` still gets vertical drags.
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
                             if isPinching {
@@ -280,13 +290,10 @@ struct TimelineView: View {
                             }
                             if dragAxis == nil {
                                 dragAxis = LaneScroll.axis(forTranslation: value.translation, canScrollVertically: maxLaneScroll > 0)
-                                if dragAxis == .vertical { laneScrollStartY = laneOffsetY }
                             }
-                            guard let axis = dragAxis else { return }
-                            if axis == .vertical {
-                                laneScrollY = LaneScroll.clamped(laneScrollStartY - value.translation.height, maxOffset: maxLaneScroll)
-                                return
-                            }
+                            // A vertical drag belongs to the lanes' `ScrollView`; only a
+                            // horizontal one scrubs.
+                            guard dragAxis == .horizontal else { return }
                             if dragNeedsRebase {
                                 dragRebaseX = value.translation.width
                                 dragNeedsRebase = false

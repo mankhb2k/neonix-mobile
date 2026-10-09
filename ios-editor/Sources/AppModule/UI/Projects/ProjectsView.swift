@@ -128,6 +128,37 @@ struct ProjectsView: View {
             return copy
         }
 
+        // Photo overlays — four stickers-style images, each on its own lane (they
+        // overlap in time), so the sample has enough lanes to try the timeline's
+        // vertical scrolling. Compiled through the real pipeline like the text.
+        let overlaySpots: [(x: Double, y: Double, start: Double)] = [
+            (-90, -170, 500), (90, -170, 1500), (-90, 170, 2500), (90, 170, 3500),
+        ]
+        let overlayProject = compile(EditorDocument(
+            id: "trip-to-paris-overlays",
+            composition: videoProject.composition,
+            assets: [SampleMedia.photo.asset],
+            layers: overlaySpots.indices.map { index in
+                EditorLayer(
+                    id: "overlay-photo-\(index)", kind: "image",
+                    assetId: SampleMedia.photo.asset.id,
+                    fill: nil,
+                    frame: V2Frame(width: 140, height: 210),
+                    timing: V2Timing(start: overlaySpots[index].start, duration: 8000)
+                )
+            }
+        ))
+        let overlayLayers: [V2Layer] = overlayProject.layers.enumerated().map { index, layer in
+            var copy = layer
+            copy.order = 2 + index
+            let t = layer.transform
+            copy.transform = V2Transform(
+                translate: V2Vec3(x: overlaySpots[index].x, y: overlaySpots[index].y, z: 0),
+                scale: t.scale, rotate: t.rotate, skew: t.skew, anchor: t.anchor, perspective: t.perspective
+            )
+            return copy
+        }
+
         // Debug/UI tests: `EDITOR_EXTRA_LANES=N` stacks N more copies of the text
         // lane (one lane each) so the timeline's vertical scrolling can be exercised.
         var extraLayers: [V2Layer] = []
@@ -136,7 +167,7 @@ struct ProjectsView: View {
         for n in 0..<max(extraLanes, 0) {
             for var copy in textLayers {
                 copy.id = "\(copy.id)-extra-\(n)"
-                copy.order = 2 + n
+                copy.order = 2 + overlayLayers.count + n
                 extraLayers.append(copy)
             }
         }
@@ -159,9 +190,9 @@ struct ProjectsView: View {
 
         return V2Project(
             composition: videoProject.composition,
-            assets: videoProject.assets + [audioAsset],
+            assets: videoProject.assets + overlayProject.assets + [audioAsset],
             filters: videoProject.filters,
-            layers: videoLayers + textLayers + extraLayers,
+            layers: videoLayers + textLayers + overlayLayers + extraLayers,
             audio: V2AudioDomain(sampleRate: 48000, tracks: [audioTrack])
         )
     }
