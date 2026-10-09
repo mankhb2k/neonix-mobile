@@ -76,6 +76,10 @@ struct ProjectsView: View {
     /// untouched (still just the plain compiled video). See `CLAUDE.md`'s
     /// audio design note and "Timeline lanes" note for the model this
     /// follows.
+    /// `13792197_1080_1920_30fps.mp4` — the same value `SampleProjectBuilder`
+    /// declares for the asset.
+    private static let sampleClipDurationMs = SampleClipOverride.current?.durationMs ?? 31_200.0
+
     private static func openEditorProject(for project: ProjectSample) -> V2Project {
         let videoProject = compile(SampleProjectBuilder.makeDocument(
             media: .videoPortrait, inOption: .none, outOption: .none,
@@ -85,12 +89,13 @@ struct ProjectsView: View {
         ))
         guard project.name == "Trip to Paris" else { return videoProject }
 
-        // Stretched from the demo's own default 2500ms so there's enough
-        // room to see the text lane and audio lane overlap/diverge from
-        // the main video lane.
+        // The sample clip's own full length (31.2 s) instead of the demo's
+        // default 2500 ms: 8 s was short enough that a hard flick hit the end
+        // of the timeline within half a second (measured: 36% of coasts
+        // ended at an edge), and there was no room to try zoom.
         var videoLayers = videoProject.layers
         for index in videoLayers.indices {
-            videoLayers[index].timing = V2Timing(start: videoLayers[index].timing.start, duration: 8000)
+            videoLayers[index].timing = V2Timing(start: videoLayers[index].timing.start, duration: Self.sampleClipDurationMs)
         }
 
         // A text lane — compiled separately (its own `EditorDocument`,
@@ -131,7 +136,7 @@ struct ProjectsView: View {
             clips: [
                 V2AudioClip(
                     id: "audio-clip-1", assetId: "audio-demo",
-                    timing: V2AudioClipTiming(start: 0, duration: 8000),
+                    timing: V2AudioClipTiming(start: 0, duration: Self.sampleClipDurationMs),
                     trim: V2AudioClipTrim(start: 0, end: nil),
                     playbackRate: 1
                 ),

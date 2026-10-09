@@ -37,6 +37,10 @@ final class PlaybackMetrics: @unchecked Sendable {
         case layerBodyEvals = "layer_body_evals"
         case timelineBodyEvals = "timeline_body_evals"
         case shellBodyEvals = "shell_body_evals"
+        case coastEndedFriction = "coast_ended_friction"
+        case coastEndedEdge = "coast_ended_edge"
+        case coastInterrupted = "coast_interrupted"
+        case pinchEvents = "pinch_events"
     }
 
     /// Durations in milliseconds; each second reports p50 / p95 / max.
@@ -45,25 +49,51 @@ final class PlaybackMetrics: @unchecked Sendable {
         case seekServiceMs = "seek_service_ms"
         case seekEndToEndMs = "seek_e2e_ms"
         case seekHopMs = "seek_hop_ms"
+        case seekLandingErrorMs = "seek_landing_error_ms"
         case displayAgeMs = "display_age_ms"
         case settleMs = "settle_ms"
         case frameGapMs = "frame_gap_ms"
         case sampleLayerMs = "sample_layer_ms"
         case metalDrawMs = "metal_draw_ms"
+        /// Not milliseconds: timeline ms per second at release.
+        case coastReleaseSpeed = "coast_release_speed"
+        case coastDurationMs = "coast_duration_ms"
+        /// Timeline milliseconds travelled by one coast.
+        case coastDistanceMs = "coast_distance_ms"
+        /// Not milliseconds: finger speed in points/sec at lift, as
+        /// `DragGesture.Value.velocity` reports it — zoom-independent, so a
+        /// simulator mouse flick and a real finger flick compare directly.
+        case releaseFingerPxPerSecond = "release_finger_px_s"
+        /// Same quantity re-derived from the last ~100 ms of drag samples, to
+        /// catch `.velocity` over/under-reporting. Points/sec, not ms.
+        case releaseEstimatedPxPerSecond = "release_est_px_s"
+        /// Time from the last drag event to the lift. A long hold means the
+        /// finger paused first, so a low release speed is the user's, not ours.
+        case releaseHoldMs = "release_hold_ms"
+        /// Wall-clock gap between momentum ticks: the refresh rate and any
+        /// main-thread stall the coast actually ran at.
+        case coastTickMs = "coast_tick_ms"
     }
 
     /// Point-in-time values, last one of the second wins.
     enum Gauge: String, CaseIterable {
         case unserved = "unserved"
         case playerSessions = "player_sessions"
-        case sourcesOnProxy = "sources_on_proxy"
         case sourcesTotal = "sources_total"
-        case proxyEncoding = "proxy_encoding"
         case memoryMB = "memory_mb"
         case cpuPercent = "cpu_percent"
         case thermalState = "thermal_state"
         case enginesAlive = "engines_alive"
         case sessionsAlive = "sessions_alive"
+        case timelineScale = "timeline_px_per_ms"
+        /// The time ruler's tick spacing at the current zoom — "which ruler
+        /// level are we at", the unit the zoom-aware policy is defined in.
+        case rulerMinorMs = "ruler_minor_ms"
+        /// Timeline panel width in points, to express a coast as screen widths.
+        case timelineViewportPx = "timeline_viewport_px"
+        /// `CoastTuning` in force, so a CSV says which arm it is.
+        case coastGain = "coast_gain"
+        case coastFriction = "coast_friction"
     }
 
     /// Objects whose live count must stay flat. Tallied always (not only while
@@ -86,6 +116,8 @@ final class PlaybackMetrics: @unchecked Sendable {
         Scenario(id: "T5", title: "T5 Play across a cut"),
         Scenario(id: "T6", title: "T6 = T3 with a filter (Metal path)"),
         Scenario(id: "T7", title: "T7 = T3 in fullscreen"),
+        Scenario(id: "T8", title: "T8 zoomed IN (ruler <= 3 frames), slow scrub back and forth"),
+        Scenario(id: "T9", title: "T9 zoomed OUT (ruler >= 2 s), fast flicks across the project"),
     ]
 
     /// What the engine reports once per display tick. Provided by
@@ -97,9 +129,7 @@ final class PlaybackMetrics: @unchecked Sendable {
         var displayAgeMs: Double?
         var hasUnserved = false
         var playerSessions = 0
-        var sourcesOnProxy = 0
         var sourcesTotal = 0
-        var proxyEncoding = false
     }
 
     struct Row: Identifiable {
@@ -148,6 +178,12 @@ final class PlaybackMetrics: @unchecked Sendable {
         lock.unlock()
     }
 
+    func liveCount(_ object: LiveObject) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return liveCounts[object, default: 0]
+    }
+
     func gauge(_ gauge: Gauge, _ value: Double) {
         guard isRecording else { return }
         lock.lock()
@@ -170,6 +206,9 @@ final class PlaybackMetrics: @unchecked Sendable {
 
     @MainActor private var startedAt: CFTimeInterval = 0
     @MainActor private var scenario = scenarios[0]
+    /// Scenario id plus the optional `PLAYBACK_METRICS_TAG` (Debug) that
+    /// labels an A/B arm, e.g. `T3:adaptive`.
+    @MainActor private var scenarioLabel = "T0"
     @MainActor private var rows: [Row] = []
     @MainActor private var displayLink: CADisplayLink?
     @MainActor private var linkTarget: MetricsLinkTarget?
@@ -187,6 +226,27 @@ final class PlaybackMetrics: @unchecked Sendable {
         }
         names += Gauge.allCases.map(\.rawValue)
         return names
+    }()
+
+    /// Constant per run: which hardware produced these numbers, so a
+    /// simulator CSV and a device CSV are told apart by the file itself.
+    private static let environmentCells: [String] = {
+        var machine = utsname()
+        uname(&machine)
+        let raw = withUnsafeBytes(of: &machine.machine) { buffer in
+            String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        let env = ProcessInfo.processInfo.environment
+        #if targetEnvironment(simulator)
+        let model = env["SIMULATOR_MODEL_IDENTIFIER"] ?? raw
+        let isSimulator = "1"
+        #else
+        let model = raw
+        let isSimulator = "0"
+        #endif
+        let hz = MainActor.assumeIsolated { UIScreen.main.maximumFramesPerSecond }
+        // Model ids look like "iPhone14,5" — a comma would split the CSV cell.
+        return [model.replacingOccurrences(of: ",", with: "-"), isSimulator, String(hz)]
     }()
 
     private static let trendKeys: [(String, String)] = [
@@ -216,10 +276,15 @@ final class PlaybackMetrics: @unchecked Sendable {
         gauges = [:]
         lock.unlock()
 
+        var tag: String?
+        #if DEBUG
+        tag = ProcessInfo.processInfo.environment["PLAYBACK_METRICS_TAG"]
+        #endif
+        scenarioLabel = tag.map { "\(scenario.id):\($0)" } ?? scenario.id
         let stamp = Self.fileStamp()
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("playback-\(scenario.id)-\(stamp).csv")
-        let header = (["t", "scenario", "mode"] + Self.columns).joined(separator: ",") + "\n"
+            .appendingPathComponent("playback-\(scenario.id)\(tag.map { "-\($0)" } ?? "")-\(stamp).csv")
+        let header = (["t", "scenario", "mode", "device", "sim", "hz"] + Self.columns).joined(separator: ",") + "\n"
         try? header.data(using: .utf8)?.write(to: url)
         fileHandle = try? FileHandle(forWritingTo: url)
         _ = try? fileHandle?.seekToEnd()
@@ -258,6 +323,43 @@ final class PlaybackMetrics: @unchecked Sendable {
         PlaybackMetricsHUDModel.shared.ended()
     }
 
+    // MARK: Unattended runs (Debug builds)
+
+    #if DEBUG
+    @MainActor private var autoRunConsumed = false
+
+    /// Lets a run be driven from outside the app so the person testing only
+    /// has to do the gesture: launch with
+    /// `PLAYBACK_METRICS_SCENARIO=T3` (+ optional `PLAYBACK_METRICS_LEADIN`
+    /// seconds, default 5, and `PLAYBACK_METRICS_SECONDS`, default 180). Once
+    /// the editor opens it counts down, records, and stops by itself. One run
+    /// per process launch.
+    @MainActor
+    func autoRunIfRequested() async {
+        let env = ProcessInfo.processInfo.environment
+        guard !autoRunConsumed, !isRecording,
+              let id = env["PLAYBACK_METRICS_SCENARIO"],
+              let scenario = Self.scenarios.first(where: { $0.id == id })
+        else { return }
+        autoRunConsumed = true
+        let leadIn = Int(env["PLAYBACK_METRICS_LEADIN"] ?? "") ?? 5
+        let seconds = Int(env["PLAYBACK_METRICS_SECONDS"] ?? "") ?? 180
+        UserDefaults.standard.set(true, forKey: "playbackMetricsArmed")
+
+        for remaining in stride(from: leadIn, to: 0, by: -1) {
+            PlaybackMetricsHUDModel.shared.setCountdown(scenario: scenario, seconds: remaining)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        PlaybackMetricsHUDModel.shared.setCountdown(scenario: scenario, seconds: nil)
+        start(scenario: scenario)
+        defer { if isRecording { stop() } }
+        for _ in 0..<seconds {
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    }
+    #endif
+
     // MARK: Per display tick (main actor)
 
     @MainActor
@@ -291,9 +393,7 @@ final class PlaybackMetrics: @unchecked Sendable {
         if let age = probe.displayAgeMs { record(.displayAgeMs, ms: age) }
         gauge(.unserved, probe.hasUnserved ? 1 : 0)
         gauge(.playerSessions, Double(probe.playerSessions))
-        gauge(.sourcesOnProxy, Double(probe.sourcesOnProxy))
         gauge(.sourcesTotal, Double(probe.sourcesTotal))
-        gauge(.proxyEncoding, probe.proxyEncoding ? 1 : 0)
     }
 
     // MARK: Once per second (main actor)
@@ -333,7 +433,7 @@ final class PlaybackMetrics: @unchecked Sendable {
         let row = Row(id: rows.count, t: t, mode: previousMode, values: values)
         rows.append(row)
 
-        let cells = [String(format: "%.1f", t), scenario.id, previousMode]
+        let cells = [String(format: "%.1f", t), scenarioLabel, previousMode] + Self.environmentCells
             + Self.columns.map { key in values[key].map { String(format: "%.2f", $0) } ?? "" }
         if let data = (cells.joined(separator: ",") + "\n").data(using: .utf8) {
             try? fileHandle?.write(contentsOf: data)
@@ -424,7 +524,16 @@ final class PlaybackMetricsHUDModel {
     private(set) var trend: [PlaybackMetrics.TrendLine] = []
     private(set) var isRecording = false
     private(set) var fileURL: URL?
-    var scenario = PlaybackMetrics.scenarios[0]
+    /// Seconds until an unattended run starts recording (nil = none pending).
+    private(set) var countdown: Int?
+    /// Defaults to T3, the case that matters most — not T0, which is easy to
+    /// start by accident and mislabel a real scrubbing run.
+    var scenario = PlaybackMetrics.scenarios.first { $0.id == "T3" } ?? PlaybackMetrics.scenarios[0]
+
+    fileprivate func setCountdown(scenario: PlaybackMetrics.Scenario, seconds: Int?) {
+        self.scenario = scenario
+        countdown = seconds
+    }
 
     fileprivate func began(scenario: PlaybackMetrics.Scenario, fileURL: URL) {
         self.scenario = scenario

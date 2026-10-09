@@ -29,14 +29,19 @@ final class PlayerSeekCoordinator {
     /// For `PlaybackMetrics` only. The display shows the frame of the last
     /// seek that completed; while anything is still unserved, that frame's
     /// request time tells how stale the picture is.
-    private var lastRequestAt: CFTimeInterval?
     private var lastDisplayedRequestAt: CFTimeInterval?
+    /// When the current stretch of unserved seeks began. Age is measured from
+    /// here (or from the last seek that landed inside the stretch), never from
+    /// a seek that landed before an idle gap — the first version of this
+    /// metric did, and reported the length of the idle gap as "staleness".
+    private var unservedSince: CFTimeInterval?
 
     var hasUnserved: Bool { isSeekInProgress || pending != nil }
 
     func displayAgeMs(now: CFTimeInterval) -> Double? {
         guard hasUnserved else { return 0 }
-        guard let reference = lastDisplayedRequestAt ?? lastRequestAt else { return nil }
+        let reference = max(lastDisplayedRequestAt ?? 0, unservedSince ?? 0)
+        guard reference > 0 else { return nil }
         return max(0, (now - reference) * 1000)
     }
 
@@ -61,7 +66,7 @@ final class PlayerSeekCoordinator {
             completion: completion,
             requestedAt: CACurrentMediaTime()
         )
-        lastRequestAt = request.requestedAt
+        if !hasUnserved { unservedSince = request.requestedAt }
         PlaybackMetrics.shared.count(.seekRequested)
 
         guard !isSeekInProgress else {
@@ -92,6 +97,7 @@ final class PlayerSeekCoordinator {
     /// is ignored by the active request ID check.
     func cancelPendingSeeks() {
         if hasUnserved { PlaybackMetrics.shared.count(.seekCancelled) }
+        unservedSince = nil
         pending = nil
         activeID = nil
         isSeekInProgress = false
@@ -117,6 +123,12 @@ final class PlayerSeekCoordinator {
                 metrics.record(.seekEndToEndMs, ms: (finishedAt - request.requestedAt) * 1000)
                 metrics.record(.seekHopMs, ms: (CACurrentMediaTime() - finishedAt) * 1000)
                 self.lastDisplayedRequestAt = request.requestedAt
+                if finished {
+                    let landed = self.player.currentTime().seconds
+                    if landed.isFinite {
+                        metrics.record(.seekLandingErrorMs, ms: abs(landed - request.time.seconds) * 1000)
+                    }
+                }
 
                 self.activeID = nil
                 self.isSeekInProgress = false
@@ -125,6 +137,7 @@ final class PlayerSeekCoordinator {
                     self.pending = nil
                     self.perform(next)
                 } else {
+                    self.unservedSince = nil
                     request.completion?(finished)
                 }
             }

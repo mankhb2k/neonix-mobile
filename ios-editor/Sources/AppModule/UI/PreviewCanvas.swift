@@ -48,12 +48,8 @@ struct PreviewCanvas: View {
     /// every other optional Protocol V2 feature this renderer reads.
     var filters: [V2Filter] = []
     let atMs: Double
-    /// Optional native player owner supplied by the editor. Keeping this
-    /// optional leaves previews and the frame-server fallback unchanged.
-    var playerEngine: EditorPlaybackEngine? = nil
-    /// `true` while the playhead is at rest: video layers then swap their
-    /// decoded preview frame for an exact full-quality one.
-    var refinesStills: Bool = true
+    /// Owns one `AVPlayer` per video layer; video layers draw from it.
+    let playerEngine: EditorPlaybackEngine
 
     /// Scales the fixed `composition.width`/`height` coordinate space to fit
     /// whatever box the caller gives this view. `.clipped()` keeps drawing
@@ -82,7 +78,6 @@ struct PreviewCanvas: View {
                     atMs: atMs,
                     assets: assets,
                     filters: filters,
-                    refinesStills: refinesStills,
                     playerEngine: playerEngine
                 )
             }
@@ -99,8 +94,7 @@ private struct LayerNodeView: View {
     let atMs: Double
     let assets: [V2Asset]
     let filters: [V2Filter]
-    let refinesStills: Bool
-    let playerEngine: EditorPlaybackEngine?
+    let playerEngine: EditorPlaybackEngine
 
     var body: some View {
         let _ = PlaybackMetrics.shared.count(.layerBodyEvals)
@@ -114,7 +108,6 @@ private struct LayerNodeView: View {
                             atMs: atMs,
                             assets: assets,
                             filters: filters,
-                            refinesStills: refinesStills,
                             playerEngine: playerEngine
                         )
                     }
@@ -124,7 +117,6 @@ private struct LayerNodeView: View {
                     layerId: node.layer.id,
                     frame: frame, asset: assets.first { $0.id == frame.assetId },
                     filter: node.layer.filter.flatMap { id in filters.first { $0.id == id } },
-                    refinesStills: refinesStills,
                     playerEngine: playerEngine
                 )
                 .frame(width: frame.frameWidth, height: frame.frameHeight)
@@ -183,8 +175,7 @@ private struct LayerNodeView: View {
 
 /// Renders one layer's own content (before the shared transform/opacity
 /// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
-/// still for an image, and an AVPlayer-backed frame for video. `VideoFrameView`
-/// remains only as a no-engine compatibility fallback.
+/// still for an image, and an AVPlayer-backed frame for video.
 private struct LayerContentView: View {
     let layerId: String
     let frame: ResolvedLayerFrame
@@ -193,8 +184,7 @@ private struct LayerContentView: View {
     /// layer that hasn't had a filter applied (the overwhelming common
     /// case), in which case `FilteredImageView` is a pure pass-through.
     let filter: V2Filter?
-    let refinesStills: Bool
-    let playerEngine: EditorPlaybackEngine?
+    let playerEngine: EditorPlaybackEngine
 
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
@@ -206,31 +196,23 @@ private struct LayerContentView: View {
                 Color.gray
             }
         case "video":
-            if let asset, let url = bundledURL(filename: asset.uri) {
-                let playbackURL = playerEngine?.previewURL(for: layerId) ?? url
-                if let player = playerEngine?.player(for: layerId) {
-                    if let filter {
-                        FilteredPlayerView(
-                            player: player,
-                            filter: filter,
-                            previewContentMode: contentMode,
-                            requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
-                        )
-                    } else {
-                        StagePlayerLayerView(player: player, contentMode: contentMode)
-                    }
-                } else {
-                    VideoFrameView(
-                        assetId: asset.id,
-                        url: playbackURL,
-                        atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
-                        contentMode: contentMode,
-                        refines: refinesStills,
-                        filter: filter
+            if asset == nil {
+                Color.gray
+            } else if let player = playerEngine.player(for: layerId) {
+                if let filter {
+                    FilteredPlayerView(
+                        player: player,
+                        filter: filter,
+                        previewContentMode: contentMode,
+                        requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
                     )
+                } else {
+                    StagePlayerLayerView(player: player, contentMode: contentMode)
                 }
             } else {
-                Color.gray
+                // The engine has not created this layer's player yet (it does
+                // on `prepare()`, right after the editor appears).
+                Color.clear
             }
         case "text":
             // `.fixedSize()` lets each line report its true (possibly
@@ -448,84 +430,18 @@ private final class FilteredPlayerMetalView: MTKView {
     }
 }
 
-/// Compatibility renderer for a software-decoded video's pixels. The editor
-/// engine normally uses `AVPlayerLayer` or `FilteredPlayerMetalView`; this
-/// view remains for previews created without an engine and for older callers.
-/// `EditorPlaybackEngine` keeps software frames decoded ahead; this view only
-/// reads them. When `refines` (playhead at rest) and it has held still for
-/// `settleNanoseconds`, an exact full-quality frame replaces the downscaled
-/// preview frame.
-///
-/// Never draws nothing once it has drawn something: when the server has no
-/// frame for this asset (a playhead jump evicted the old region and the new
-/// reader is still walking from the previous keyframe — up to ~2 s for the
-/// long-GOP sample files on the simulator), the last frame shown stays up
-/// until a new one arrives. An empty Stage there was a real bug.
-private struct VideoFrameView: View {
-    let assetId: String
-    let url: URL
-    let atSeconds: Double
-    let contentMode: ContentMode
-    let refines: Bool
-    /// Tuỳ chỉnh — only actually applied while `refines` (playhead at rest);
-    /// see `FilteredImageView`'s own doc comment for why live Play doesn't
-    /// grade yet.
-    var filter: V2Filter?
-
-    @State private var sharpFrame: (seconds: Double, image: CGImage)?
-    /// Reference box on purpose: remembering what was drawn mustn't itself
-    /// trigger another render.
-    @State private var lastShown = LastShownFrame()
-
-    private static let settleNanoseconds: UInt64 = 150_000_000
-
-    private struct RefineKey: Equatable {
-        let atSeconds: Double
-        let refines: Bool
-    }
-
-    var body: some View {
-        let sharp = refines ? sharpFrame.flatMap { $0.seconds == atSeconds ? $0.image : nil } : nil
-        let image = sharp ?? VideoFrameServer.shared.image(assetId: assetId, atSeconds: atSeconds) ?? lastShown.image
-        let _ = lastShown.image = image
-        Group {
-            if let image {
-                FilteredImageView(sourceKey: "\(assetId)-\(atSeconds)", source: image, filter: refines ? filter : nil, contentMode: contentMode)
-            } else {
-                Color.clear
-            }
-        }
-        .task(id: RefineKey(atSeconds: atSeconds, refines: refines)) {
-            guard refines, sharpFrame?.seconds != atSeconds else { return }
-            try? await Task.sleep(nanoseconds: Self.settleNanoseconds)
-            guard !Task.isCancelled else { return }
-            let target = atSeconds
-            guard let image = await SharpFrameLoader.shared.image(assetId: assetId, url: url, atSeconds: target),
-                  !Task.isCancelled
-            else { return }
-            sharpFrame = (target, image)
-        }
-    }
-}
-
-private final class LastShownFrame {
-    var image: CGImage?
-}
-
 /// Tuỳ chỉnh's one display-side entry point: given a raw decoded/cached
 /// `CGImage` and an optional `V2Filter`, runs it through `FilterRenderer`
 /// asynchronously and draws whichever is freshest — the newly filtered
 /// result once it's ready, the previous filtered result while a new one is
 /// computing, or the unfiltered `source` if there's no filter (or none has
 /// resolved yet). Never renders `Color.clear`/nothing once `source` exists,
-/// same "never show nothing" discipline as `VideoFrameView`'s own
-/// `lastShown`, and never runs `FilterRenderer` synchronously from `body`
+/// same "never show nothing" discipline, and never runs `FilterRenderer` synchronously from `body`
 /// (see CLAUDE.md's "Scrubbing must never re-decode media inline from
 /// `body`" rule — filtering is exactly that same category of work).
 ///
-/// Used by both the `"image"` layer case and `VideoFrameView` — the one
-/// place this app draws a `CGImage` onto the Stage, now the one place it
-/// gets filtered too.
+/// Used by the `"image"` layer case — the one place this app draws a `CGImage`
+/// onto the Stage; video draws through `AVPlayerLayer`/Metal instead.
 private struct FilteredImageView: View {
     /// Identifies *which* image `source` is (a bundled image's own
     /// filename, or `"<assetId>-<atSeconds>"` for a video frame) — needed

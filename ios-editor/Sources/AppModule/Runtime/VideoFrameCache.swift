@@ -97,18 +97,20 @@ final class VideoFrameCache {
                 indexByKey["\(time.value):\(time.timescale)"] = index
             }
             let remaining = FilmstripRemainingCount(times.count)
+            // A batch the caller abandoned (window moved, pinch changed the tile
+            // count) must stop decoding: left running it keeps the hardware
+            // decoder busy for thumbnails nobody will see.
+            continuation.onTermination = { _ in generator.cancelAllCGImageGeneration() }
             generator.generateCGImagesAsynchronously(forTimes: requestTimes.map { NSValue(time: $0) }) { requestedTime, cgImage, _, result, _ in
                 guard let index = indexByKey["\(requestedTime.value):\(requestedTime.timescale)"] else { return }
                 let image = result == .succeeded ? cgImage.map(UIImage.init(cgImage:)) : nil
+                // Not written to `cache`: nothing reads filmstrip thumbnails back
+                // from it (only the cover image's `frame(...)` uses it), and an
+                // unbounded dictionary of every thumbnail ever fetched grew the
+                // app from 29 MB to 316 MB in a 115 s measured run on a phone
+                // (T3, real footage, zoom + scrub). `FilmstripClipView` keeps the
+                // tiles of the window it is showing.
                 continuation.yield((index, image))
-                if let image {
-                    // `self` here is `VideoFrameCache.shared`, a singleton —
-                    // no retain-cycle risk from capturing it strongly.
-                    Task { @MainActor in
-                        let bucket = Self.scrubBucket(forMs: times[index] * 1000)
-                        self.cache["\(assetId):\(bucket)"] = image
-                    }
-                }
                 if remaining.decrementAndIsDone() {
                     continuation.finish()
                 }
@@ -121,6 +123,10 @@ final class VideoFrameCache {
         let asset = AVURLAsset(url: url)
         let created = AVAssetImageGenerator(asset: asset)
         created.appliesPreferredTrackTransform = true
+        // Thumbnails only: a filmstrip tile is ~54 pt, so decoding every one
+        // at the source's 1080×1920 held ~8 MB per tile — fine for 34 tiles,
+        // not for the hundreds a zoomed-in timeline asks for.
+        created.maximumSize = CGSize(width: 320, height: 320)
         // Exact-frame tolerance (`.zero`) forces a slow precise seek on
         // every request; a tolerance matching one scrub bucket lets
         // AVFoundation return the nearest already-decoded frame instead,

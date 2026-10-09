@@ -6,9 +6,9 @@ import AVFoundation
 /// decoded `CGImage` frames, not an `AVPlayer`, and no `AVAudioEngine`/
 /// `AVAudioPlayerNode` existed anywhere.
 ///
-/// Mirrors the `VideoFrameServer` split: this owns decode + mixing,
-/// `EditorPlaybackEngine` stays the one clock and tells this *when* to be at
-/// a given `currentTimeMs`, the same way it already tells `VideoFrameServer`
+/// This owns decode + mixing; `EditorPlaybackEngine` stays the one clock and
+/// tells this *when* to be at a given `currentTimeMs`, the same way it
+/// already tells the video players
 /// when to have frames ready.
 ///
 /// **Sync model, deliberately simple for this pass**: audio only ever plays

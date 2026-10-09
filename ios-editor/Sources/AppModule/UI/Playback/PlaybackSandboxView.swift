@@ -4,7 +4,7 @@ import SwiftUI
 /// A playback test bed that answers one question in isolation: does scrub +
 /// Play feel right using nothing but stock `AVPlayer`/`AVPlayerLayer`, with
 /// no `V2Project`, no Runtime (`KeyframeSampler`), no `EditorPlaybackEngine`,
-/// no `VideoFrameServer`/`AVAssetReader`, no `AudioMixEngine`?
+/// no `AudioMixEngine`?
 ///
 /// This exists because debugging the real Editor's playback pipeline kept
 /// conflating variables: a stuck black Stage could be the custom decoder,
@@ -19,19 +19,7 @@ import SwiftUI
 /// Deliberately not reusing any of `Playback/` or `Runtime/` — if those
 /// have a bug, this view must not inherit it.
 struct PlaybackSandboxView: View {
-    private enum SampleClip: String, CaseIterable, Identifiable {
-        case portrait = "13792197_1080_1920_30fps.mp4"
-        case landscape = "12253998_1920_1080_30fps.mp4"
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .portrait: return "Portrait (9:16)"
-            case .landscape: return "Landscape (16:9)"
-            }
-        }
-    }
-
-    @State private var clip: SampleClip = .portrait
+    @State private var footageMissing = false
     @State private var player = AVPlayer()
     @State private var isPlaying = false
     @State private var durationSeconds: Double = 1
@@ -45,14 +33,12 @@ struct PlaybackSandboxView: View {
     var body: some View {
         ScrollView {
         VStack(spacing: 16) {
-            Picker("Clip", selection: $clip) {
-                ForEach(SampleClip.allCases) { clip in
-                    Text(clip.label).tag(clip)
-                }
+            if footageMissing {
+                Text(TestFootage.missingMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal)
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .onChange(of: clip) { _, newValue in load(newValue) }
 
             PlayerLayerView(player: player)
                 .background(Color.black)
@@ -121,7 +107,7 @@ struct PlaybackSandboxView: View {
         .padding(.top)
         }
         .navigationTitle("Playback Sandbox")
-        .onAppear { load(clip) }
+        .onAppear { load() }
         .onDisappear {
             removeTimeObserver()
             audioHarness.stop()
@@ -200,11 +186,15 @@ struct PlaybackSandboxView: View {
         )
     }
 
-    private func load(_ clip: SampleClip) {
+    private func load() {
         removeTimeObserver()
         isPlaying = false
         seekCoordinator?.cancelPendingSeeks()
-        guard let url = bundledURL(filename: clip.rawValue) else { return }
+        guard let url = TestFootage.url else {
+            footageMissing = true
+            return
+        }
+        footageMissing = false
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         seekCoordinator = PlayerSeekCoordinator(player: player)

@@ -29,9 +29,9 @@ struct PlaybackMetricsHUD: View {
         } label: {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(model.isRecording ? Color.red : Color.gray)
+                    .fill(model.isRecording ? Color.red : (model.countdown != nil ? Color.orange : Color.gray))
                     .frame(width: 8, height: 8)
-                Text(model.isRecording ? "REC \(model.scenario.id) \(Int(model.latest?.t ?? 0))s" : "metrics")
+                Text(pillText)
                     .font(.caption2.monospacedDigit())
             }
             .padding(.horizontal, 10)
@@ -39,6 +39,12 @@ struct PlaybackMetricsHUD: View {
             .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    private var pillText: String {
+        if let countdown = model.countdown { return "\(model.scenario.id) starts in \(countdown)s - get ready" }
+        if model.isRecording { return "REC \(model.scenario.id) \(Int(model.latest?.t ?? 0))s" }
+        return "metrics"
     }
 
     private var panel: some View {
@@ -80,7 +86,7 @@ struct PlaybackMetricsHUD: View {
                 Text(model.scenario.id + " v")
                     .font(.caption.monospaced())
             }
-            .disabled(model.isRecording)
+            .disabled(model.isRecording || model.countdown != nil)
 
             Button(model.isRecording ? "Stop" : "Start") {
                 if model.isRecording {
@@ -92,6 +98,7 @@ struct PlaybackMetricsHUD: View {
             .font(.caption.bold())
             .buttonStyle(.borderedProminent)
             .controlSize(.mini)
+            .disabled(model.countdown != nil)
 
             if let url = model.fileURL {
                 ShareLink(item: url) {
@@ -124,12 +131,16 @@ struct PlaybackMetricsHUD: View {
                 service ms \(p("seek_service_ms"))
                 e2e ms     \(p("seek_e2e_ms"))
                 main-hop ms \(p("seek_hop_ms", "%.1f"))
+                landing err ms \(p("seek_landing_error_ms"))
         DISPLAY age ms \(p("display_age_ms"))  settle ms \(p("settle_ms"))
         PRESENT metal draws/s \(v("metal_draws")) empty/s \(v("metal_empty_buffers")) draw ms \(p("metal_draw_ms", "%.1f"))
         UI      frame gap ms \(p("frame_gap_ms", "%.1f")) dropped/s \(v("dropped_frames"))
                 body/s shell \(v("shell_body_evals")) timeline \(v("timeline_body_evals")) layer \(v("layer_body_evals"))
                 sampleLayer ms \(p("sample_layer_ms", "%.2f"))
-        SOURCE  sessions \(v("player_sessions")) proxy \(v("sources_on_proxy"))/\(v("sources_total")) encoding \(v("proxy_encoding"))
+        ZOOM    px/ms \(v("timeline_px_per_ms", "%.3f")) ruler tick \(v("ruler_minor_ms")) ms pinch/s \(v("pinch_events"))
+        COAST   release ms/s \(p("coast_release_speed")) dur ms \(p("coast_duration_ms")) dist ms \(p("coast_distance_ms"))
+                ended: friction \(v("coast_ended_friction")) edge \(v("coast_ended_edge")) interrupted \(v("coast_interrupted"))
+        SOURCE  sessions \(v("player_sessions")) of \(v("sources_total")) layers
         SYSTEM  mem \(v("memory_mb")) MB  cpu \(v("cpu_percent"))%  thermal \(v("thermal_state"))
         (a/b/c = p50/p95/max over the last second)
         """

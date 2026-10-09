@@ -28,6 +28,9 @@ enum SampleMedia: String, CaseIterable, Identifiable {
         case .photo:
             return .image(V2ImageAsset(id: "photo", uri: "pexels-followingnyc-38428141.jpg", width: 3648, height: 5472))
         case .videoPortrait:
+            if let override = SampleClipOverride.current {
+                return .video(V2VideoAsset(id: "video-a", uri: override.uri, width: override.width, height: override.height, duration: override.durationMs))
+            }
             return .video(V2VideoAsset(id: "video-a", uri: "13792197_1080_1920_30fps.mp4", width: 1080, height: 1920, duration: 31200))
         case .videoLandscape:
             return .video(V2VideoAsset(id: "video-b", uri: "12253998_1920_1080_30fps.mp4", width: 1920, height: 1080, duration: 12345))

@@ -9,10 +9,10 @@ import Observation
 ///
 /// Play and scrub are the same timeline state machine. Every video layer owns
 /// a persistent AVPlayer session; raw layers render through AVPlayerLayer and
-/// filtered layers pull CVPixelBuffers into the Metal preview. The old
-/// AVAssetReader/CGImage path remains only as a compatibility fallback for
-/// previews without an engine. During playback, the player itself is the
-/// decode clock rather than a SwiftUI/CGImage frame loop.
+/// filtered layers pull CVPixelBuffers into the Metal preview. There is no
+/// other decode path (the old `AVAssetReader`/`CGImage` frame server was
+/// removed 2026-10-09: it was dead code in the editor). During playback, the
+/// player itself is the decode clock.
 ///
 /// ```
 /// idle ──play──▶ playing ──pause / reached end──▶ idle
@@ -43,50 +43,49 @@ final class EditorPlaybackEngine {
     private struct VideoSource {
         let layerId: String
         let assetId: String
-        let originalURL: URL
-        var url: URL
+        let url: URL
         let mapping: VideoTimeMapping
-        let usesNativePlayer: Bool
     }
 
     @ObservationIgnored private var videoSources: [VideoSource] = []
+    /// `init` only reads the project; the `AVPlayer`s and the audio mix are
+    /// created by `prepare()`. `EditorShellView.init` builds an engine every
+    /// time the view struct is re-created and SwiftUI keeps only the first, so
+    /// an `init` that created players made a second, unused `AVPlayer` per
+    /// editor (measured: `sessions_alive` = 2 for one video layer).
+    @ObservationIgnored private var isPrepared = false
+    @ObservationIgnored private var latestProject: V2Project?
     private(set) var mediaGeneration = 0
     @ObservationIgnored private var stageSessions: [String: StagePlayerSession] = [:]
     @ObservationIgnored private var nativeMasterLayerId: String?
     @ObservationIgnored private var nativeStartGeneration = 0
-    /// True while `prepare()` is awaiting a proxy encode — reported to
-    /// `PlaybackMetrics` because the encoder competes with scrub for CPU.
-    @ObservationIgnored private var isEncodingProxy = false
     @ObservationIgnored private var scrubStartTimeMs: Double = 0
-    @ObservationIgnored private var coastVelocityMsPerSecond: Double = 0
-    @ObservationIgnored private var stalledSeconds: Double = 0
+    /// State of the coast in flight (see `MomentumDecay`): position is
+    /// computed from these and the elapsed time, never integrated per frame.
+    @ObservationIgnored private var coastInitialVelocity: Double = 0
+    @ObservationIgnored private var coastStartTimeMs: Double = 0
+    @ObservationIgnored private var coastElapsedSeconds: Double = 0
     @ObservationIgnored private let clock = DisplayLinkClock()
     /// Real sound — see `AudioMixEngine`'s own doc comment for the sync
     /// model. Only ever told to play from `playbackTick`/`play()`, never
     /// from scrubbing/coasting.
-    @ObservationIgnored private let audioMixEngine = AudioMixEngine()
-    /// Test seam: decides whether every video frame needed at a timeline time
-    /// is available. Native AVPlayer-backed layers are always considered ready;
-    /// the callback is used only by the compatibility frame-server path.
-    @ObservationIgnored private let frameReadiness: ((Double) -> Bool)?
+    @ObservationIgnored private lazy var audioMixEngine = AudioMixEngine()
 
+    /// How far from the requested time a scrub seek may land, in seconds.
+    /// Anything up to a keyframe's distance saves the decoder a walk; 0.2 s
+    /// is half the keyframe spacing of camera footage (0.5 s). A speed-adaptive
+    /// tolerance was tried and removed (device: no faster, twice the error —
+    /// `PLAYBACK_PIPELINE.md` § 9, H10). At rest the seek is exact (0).
+    private static let scrubToleranceSeconds = 0.2
     /// A flick slower than this just stops; faster starts a coast.
     private static let minimumCoastMsPerSecond = 40.0
-    /// Fraction of velocity *remaining* after one second of coasting — 0.04
-    /// coasts a fast flick for roughly half a second before settling.
-    private static let coastFrictionPerSecond = 0.04
-    private static let coastStopMsPerSecond = 15.0
-    /// How close a decoded frame must be to count as "the frame for now".
-    private static let frameToleranceSeconds = 0.05
-    /// Upper bound on holding the clock for frames, so a file that never
-    /// decodes can't freeze playback forever.
-    private static let maxStallSeconds = 2.0
-    /// Clips starting within this window ahead of the playhead are already
-    /// prefetched, so crossing a cut doesn't wait for a reader to spin up.
-    private static let upcomingClipLookaheadMs = 1000.0
+    /// Native scroll-view curve, retuned for glide distance — see `CoastTuning`.
+    private let coastTuning = CoastTuning()
+    /// The coast ends once it is crawling slower than this (10 px/s at the
+    /// timeline's 0.2 px/ms, i.e. ~0.17 px per frame — imperceptible).
+    private static let coastStopMsPerSecond = 50.0
 
-    init(project: V2Project, frameReadiness: ((Double) -> Bool)? = nil) {
-        self.frameReadiness = frameReadiness
+    init(project: V2Project) {
         PlaybackMetrics.shared.track(.engine, 1)
         update(project: project)
     }
@@ -97,6 +96,7 @@ final class EditorPlaybackEngine {
 
     /// Call whenever the project changes (edit, undo/redo, live trim drag).
     func update(project: V2Project) {
+        latestProject = project
         videoSources = project.layers.compactMap { layer in
             guard case .video(let payload) = layer.payload,
                   let mapping = VideoTimeMapping(layer: layer),
@@ -104,68 +104,34 @@ final class EditorPlaybackEngine {
                   case .video(let videoAsset) = asset,
                   let url = bundledURL(filename: videoAsset.uri)
             else { return nil }
-            let previewURL = VideoProxyService.proxyURLIfPresent(assetId: payload.assetId, sourceURL: url) ?? url
             return VideoSource(
                 layerId: layer.id,
                 assetId: payload.assetId,
-                originalURL: url,
-                url: previewURL,
-                mapping: mapping,
-                usesNativePlayer: true
+                url: url,
+                mapping: mapping
             )
         }
-        reconcileStageSessions()
+        if isPrepared { reconcileStageSessions() }
         mediaGeneration &+= 1
         let layerEnds = project.layers.map { $0.timing.start + $0.timing.duration }
         let audioEnds = project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }
         maxDurationMs = max((layerEnds + audioEnds).max() ?? 1, 1)
-        prefetchFrames()
-        audioMixEngine.update(project: project)
+        if isPrepared { audioMixEngine.update(project: project) }
     }
 
-    /// Starts decoding around the current time — call once when the editor
-    /// appears so the first frame is ready before anything moves.
-    func prepare() async {
+    /// Creates the players and the audio mix and positions them at the current
+    /// time — call once when the editor appears, so the first frame is ready
+    /// before anything moves.
+    func prepare() {
         // Registered here, not in `init`: `EditorShellView.init` builds a
         // throwaway engine every time the view struct is re-created, and
         // only the one SwiftUI keeps ever gets `prepare()` called.
         PlaybackMetrics.shared.probe = { [weak self] in self?.metricsProbe() ?? PlaybackMetrics.Probe() }
-        // Keep a stable snapshot while proxy encoding suspends this actor. A
-        // project edit can arrive during that await; writing by an old array
-        // index would then attach the proxy to the wrong clip or trap.
-        let sources = videoSources
-        for source in sources {
-            let existingProxy = VideoProxyService.proxyURLIfPresent(
-                assetId: source.assetId,
-                sourceURL: source.originalURL
-            )
-            let proxy: URL?
-            if let existingProxy {
-                proxy = existingProxy
-            } else {
-                isEncodingProxy = true
-                proxy = await VideoProxyService.makeProxy(
-                    assetId: source.assetId,
-                    sourceURL: source.originalURL
-                )
-                isEncodingProxy = false
-            }
-            guard let proxy,
-                  let index = videoSources.firstIndex(where: {
-                      $0.layerId == source.layerId && $0.originalURL == source.originalURL
-                  })
-            else { continue }
-            videoSources[index].url = proxy
-        }
+        isPrepared = true
+        if let latestProject { audioMixEngine.update(project: latestProject) }
         reconcileStageSessions()
         mediaGeneration &+= 1
-        seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0) { [weak self] finished in
-            guard let self, finished, self.mode == .playing else { return }
-            // Proxy generation may finish after the user has pressed Play.
-            // Re-arm the replacement session without starting playback from
-            // a background prepare when the editor is still idle.
-            self.playNativeSessions(atMs: self.currentTimeMs)
-        }
+        seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0)
     }
 
     // MARK: Transport
@@ -174,9 +140,8 @@ final class EditorPlaybackEngine {
         guard mode != .playing else { return }
         clock.stop()
         mode = .playing
-        stalledSeconds = 0
 
-        if usesNativePlayerAtCurrentTime {
+        if hasVideoAtCurrentTime {
             nativeStartGeneration &+= 1
             let generation = nativeStartGeneration
             nativeMasterLayerId = sourceCovering(timeMs: currentTimeMs)?.layerId
@@ -217,6 +182,7 @@ final class EditorPlaybackEngine {
     /// every drag tick — only the first one in a gesture does anything.
     func beginScrub() {
         guard mode != .scrubbing else { return }
+        if mode == .coasting { recordCoastEnd(.interrupted) }
         clock.stop()
         nativeStartGeneration &+= 1
         pauseNativeSessions()
@@ -248,7 +214,12 @@ final class EditorPlaybackEngine {
             return
         }
         mode = .coasting
-        coastVelocityMsPerSecond = velocityMsPerSecond
+        coastInitialVelocity = velocityMsPerSecond * coastTuning.velocityGain
+        coastStartTimeMs = currentTimeMs
+        coastElapsedSeconds = 0
+        PlaybackMetrics.shared.record(.coastReleaseSpeed, ms: abs(velocityMsPerSecond))
+        PlaybackMetrics.shared.gauge(.coastGain, coastTuning.velocityGain)
+        PlaybackMetrics.shared.gauge(.coastFriction, coastTuning.frictionScale)
         clock.start { [weak self] dt in self?.coastTick(dt) }
     }
 
@@ -256,21 +227,39 @@ final class EditorPlaybackEngine {
 
     private func coastTick(_ dt: Double) {
         guard mode == .coasting else { return }
-        coastVelocityMsPerSecond *= pow(Self.coastFrictionPerSecond, dt)
-        let next = currentTimeMs + coastVelocityMsPerSecond * dt
-        let bounded = clamped(next)
+        PlaybackMetrics.shared.record(.coastTickMs, ms: dt * 1000)
+        coastElapsedSeconds += dt
+        let decay = coastTuning.decay
+        let target = coastStartTimeMs + decay.distance(initial: coastInitialVelocity, after: coastElapsedSeconds)
+        let bounded = clamped(target)
         setTime(bounded)
-        if bounded != next || abs(coastVelocityMsPerSecond) < Self.coastStopMsPerSecond {
+        let speed = abs(decay.velocity(initial: coastInitialVelocity, after: coastElapsedSeconds))
+        let hitEdge = bounded != target
+        if hitEdge || speed < Self.coastStopMsPerSecond {
+            recordCoastEnd(hitEdge ? .edge : .friction)
             clock.stop()
             mode = .idle
             settleNativeAtCurrentTime()
         }
     }
 
+    private enum CoastEnd { case friction, edge, interrupted }
+
+    private func recordCoastEnd(_ reason: CoastEnd) {
+        let metrics = PlaybackMetrics.shared
+        switch reason {
+        case .friction: metrics.count(.coastEndedFriction)
+        case .edge: metrics.count(.coastEndedEdge)
+        case .interrupted: metrics.count(.coastInterrupted)
+        }
+        metrics.record(.coastDurationMs, ms: coastElapsedSeconds * 1000)
+        metrics.record(.coastDistanceMs, ms: abs(currentTimeMs - coastStartTimeMs))
+    }
+
     private func playbackTick(_ dt: Double) {
         guard mode == .playing else { return }
 
-        if usesNativePlayerAtCurrentTime {
+        if hasVideoAtCurrentTime {
             guard let source = sourceCovering(timeMs: currentTimeMs) ?? nativeMasterSource() else {
                 let next = currentTimeMs + dt * 1000
                 if next >= maxDurationMs {
@@ -313,14 +302,6 @@ final class EditorPlaybackEngine {
             pause()
             return
         }
-        if !framesReady(atMs: next), stalledSeconds < Self.maxStallSeconds {
-            stalledSeconds += dt
-            // Holds audio too, so it never runs ahead of a frozen Stage —
-            // the next successful tick's `advance(toMs:)` resumes it fresh.
-            audioMixEngine.pause()
-            return
-        }
-        stalledSeconds = 0
         setTime(next)
         audioMixEngine.advance(toMs: next)
     }
@@ -331,12 +312,8 @@ final class EditorPlaybackEngine {
     private func setTime(_ ms: Double) {
         PlaybackMetrics.shared.count(.setTimeCalls)
         currentTimeMs = clamped(ms)
-        if usesNativePlayerAtCurrentTime {
-            if mode == .scrubbing || mode == .coasting {
-                seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0.2)
-            }
-        } else {
-            prefetchFrames()
+        if hasVideoAtCurrentTime, mode == .scrubbing || mode == .coasting {
+            seekStageSessions(atMs: currentTimeMs, toleranceSeconds: Self.scrubToleranceSeconds)
         }
     }
 
@@ -346,48 +323,6 @@ final class EditorPlaybackEngine {
 
     private func clamped(_ ms: Double) -> Double {
         min(max(ms, 0), maxDurationMs)
-    }
-
-    /// Every video clip covering the playhead (or starting just ahead of it)
-    /// gets its frames positioned around its own source time.
-    private func prefetchFrames() {
-        let covering = videoSources.first {
-            currentTimeMs >= $0.mapping.layerStartMs && currentTimeMs < $0.mapping.layerStartMs + $0.mapping.durationMs
-        }
-        for source in videoSources {
-            guard !source.usesNativePlayer else { continue }
-            let start = source.mapping.layerStartMs
-            let end = start + source.mapping.durationMs
-            guard currentTimeMs >= start - Self.upcomingClipLookaheadMs, currentTimeMs < end else { continue }
-            // An upcoming clip that's really just the covering clip's own
-            // continuation (e.g. a split's second half) shares one
-            // continuous source stream with it — the covering clip's own
-            // forward decode is already heading toward this clip's starting
-            // point. Prefetching it separately would send `VideoFrameServer`
-            // two different target times for the same asset's one reader on
-            // every tick of this lookahead window, fighting over it right
-            // until the cut arrives.
-            if let covering, covering.layerId != source.layerId, covering.assetId == source.assetId,
-               source.mapping.isContinuous(with: covering.mapping) {
-                continue
-            }
-            let sourceSeconds = source.mapping.sourceMs(atTimelineMs: currentTimeMs) / 1000
-            VideoFrameServer.shared.prefetch(assetId: source.assetId, url: source.url, atSeconds: sourceSeconds)
-        }
-    }
-
-    private func framesReady(atMs ms: Double) -> Bool {
-        if usesNativePlayerAtTime(ms) { return true }
-        if let frameReadiness { return frameReadiness(ms) }
-        for source in videoSources {
-            let start = source.mapping.layerStartMs
-            guard ms >= start, ms < start + source.mapping.durationMs else { continue }
-            let sourceSeconds = source.mapping.sourceMs(atTimelineMs: ms) / 1000
-            if !VideoFrameServer.shared.hasFrame(assetId: source.assetId, near: sourceSeconds, tolerance: Self.frameToleranceSeconds) {
-                return false
-            }
-        }
-        return true
     }
 
     // MARK: Metrics
@@ -412,22 +347,15 @@ final class EditorPlaybackEngine {
         probe.displayAgeMs = worstAge
         probe.playerSessions = stageSessions.count
         probe.sourcesTotal = videoSources.count
-        probe.sourcesOnProxy = videoSources.filter { $0.url != $0.originalURL }.count
-        probe.proxyEncoding = isEncodingProxy
         return probe
     }
 
     // MARK: Native player path
 
-    private var usesNativePlayerAtCurrentTime: Bool {
-        usesNativePlayerAtTime(currentTimeMs)
-    }
-
-    private func usesNativePlayerAtTime(_ ms: Double) -> Bool {
+    private var hasVideoAtCurrentTime: Bool {
         videoSources.contains {
-            $0.usesNativePlayer
-                && ms >= $0.mapping.layerStartMs
-                && ms < $0.mapping.layerStartMs + $0.mapping.durationMs
+            currentTimeMs >= $0.mapping.layerStartMs
+                && currentTimeMs < $0.mapping.layerStartMs + $0.mapping.durationMs
         }
     }
 
@@ -436,16 +364,8 @@ final class EditorPlaybackEngine {
         return stageSessions[layerId]?.player
     }
 
-    /// URL currently used by the preview. It is the short-GOP proxy after
-    /// `prepare()` completes, and the original asset while the proxy is being
-    /// generated.
-    func previewURL(for layerId: String) -> URL? {
-        _ = mediaGeneration
-        return videoSources.first(where: { $0.layerId == layerId })?.url
-    }
-
     private func reconcileStageSessions() {
-        let wanted = Dictionary(uniqueKeysWithValues: videoSources.filter(\.usesNativePlayer).map { ($0.layerId, $0) })
+        let wanted = Dictionary(uniqueKeysWithValues: videoSources.map { ($0.layerId, $0) })
         for (layerId, session) in stageSessions {
             if let source = videoSources.first(where: { $0.layerId == layerId }),
                wanted[layerId] != nil,
@@ -458,7 +378,7 @@ final class EditorPlaybackEngine {
         }
 
         var next: [String: StagePlayerSession] = [:]
-        for source in videoSources where source.usesNativePlayer {
+        for source in videoSources {
             if let existing = stageSessions[source.layerId],
                existing.assetId == source.assetId,
                existing.url == source.url {
@@ -516,8 +436,6 @@ final class EditorPlaybackEngine {
         completion: ((Bool) -> Void)? = nil
     ) {
         let targets = videoSources.filter {
-            $0.usesNativePlayer
-                &&
             ms >= $0.mapping.layerStartMs
                 && ms < $0.mapping.layerStartMs + $0.mapping.durationMs
         }
@@ -559,7 +477,7 @@ final class EditorPlaybackEngine {
     }
 
     private func settleNativeAtCurrentTime() {
-        guard usesNativePlayerAtCurrentTime else { return }
+        guard hasVideoAtCurrentTime else { return }
         seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0)
     }
 }

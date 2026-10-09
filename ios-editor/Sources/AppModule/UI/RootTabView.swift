@@ -44,14 +44,6 @@ struct RootTabView: View {
             }
             .tabItem { Label("Video Raw", systemImage: "play.tv") }
             .tag(4)
-
-            // Measures the proxy-transcode idea instead of just discussing
-            // it — see `ProxyTranscoder`'s own doc comment.
-            NavigationStack {
-                ProxyTranscodeView()
-            }
-            .tabItem { Label("Proxy Test", systemImage: "wand.and.stars") }
-            .tag(5)
         }
     }
 }

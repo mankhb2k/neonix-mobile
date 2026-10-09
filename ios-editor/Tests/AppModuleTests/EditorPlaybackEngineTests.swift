@@ -132,40 +132,45 @@ final class EditorPlaybackEngineTests: XCTestCase {
         engine.pause()
     }
 
-    func testPlaybackHoldsTheClockUntilFramesAreDecoded() async throws {
-        final class Readiness { var ready = false }
-        let readiness = Readiness()
-        let layer = V2Layer(
-            id: "g",
-            order: 0,
-            frame: V2Frame(width: 100, height: 100),
-            transform: .identity,
-            timing: V2Timing(start: 0, duration: 60_000),
-            payload: .group(render3d: nil)
-        )
-        let project = V2Project(
-            composition: V2Composition(width: 360, height: 640, fps: 30, background: "#000000"),
-            assets: [],
-            layers: [layer]
-        )
-        let engine = EditorPlaybackEngine(project: project, frameReadiness: { _ in readiness.ready })
-
-        engine.play()
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertTrue(engine.isPlaying)
-        XCTAssertEqual(engine.currentTimeMs, 0, "clock must hold while the next frame isn't decoded")
-
-        readiness.ready = true
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertGreaterThan(engine.currentTimeMs, 50)
-        engine.pause()
-    }
-
     func testReachingTheEndResetsToZeroAndStops() async throws {
         let engine = makeEngine(durationMs: 100)
         engine.play()
         try await Task.sleep(nanoseconds: 400_000_000)
         XCTAssertEqual(engine.mode, .idle)
         XCTAssertEqual(engine.currentTimeMs, 0)
+    }
+
+    /// `EditorShellView.init` builds an engine every time the view struct is
+    /// re-created and SwiftUI keeps only the first — so constructing one must
+    /// not create an `AVPlayer`; `prepare()` does.
+    func testInitCreatesNoPlayersUntilPrepare() {
+        let project = videoProject()
+        let before = PlaybackMetrics.shared.liveCount(.stageSession)
+        let engine = EditorPlaybackEngine(project: project)
+        XCTAssertNil(engine.player(for: "clip"))
+        XCTAssertEqual(PlaybackMetrics.shared.liveCount(.stageSession), before, "init must not create a StagePlayerSession")
+
+        engine.prepare()
+        XCTAssertNotNil(engine.player(for: "clip"))
+        XCTAssertEqual(PlaybackMetrics.shared.liveCount(.stageSession), before + 1)
+
+        // An edit after prepare keeps the same session (same asset + url).
+        let session = engine.player(for: "clip")
+        engine.update(project: project)
+        XCTAssertTrue(engine.player(for: "clip") === session)
+    }
+
+    private func videoProject() -> V2Project {
+        let layer = V2Layer(
+            id: "clip", order: 0,
+            frame: V2Frame(width: 100, height: 100), transform: .identity,
+            timing: V2Timing(start: 0, duration: 4000),
+            payload: .video(V2VideoPayload(assetId: "v", fit: nil, trimStart: nil, trimEnd: nil, playbackRate: nil, audio: nil))
+        )
+        return V2Project(
+            composition: V2Composition(width: 360, height: 640, fps: 30, background: "#000000"),
+            assets: [.video(V2VideoAsset(id: "v", uri: "13792197_1080_1920_30fps.mp4", width: 1080, height: 1920, duration: 31200))],
+            layers: [layer]
+        )
     }
 }

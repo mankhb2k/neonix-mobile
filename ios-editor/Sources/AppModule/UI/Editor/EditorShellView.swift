@@ -204,7 +204,7 @@ struct EditorShellView: View {
             guard newValue > 0 else { return }
             titlebarHeight = newValue
         }
-        .task { await engine.prepare() }
+        .task { engine.prepare() }
         .onDisappear { engine.pause() }
     }
 
@@ -247,7 +247,8 @@ struct EditorShellView: View {
                         selectedAudioClipId: $selectedAudioClipId,
                         onTrimBegin: beginTrim,
                         onTrimUpdate: updateTrim,
-                        onTrimEnd: endTrim
+                        onTrimEnd: endTrim,
+                        fps: project.composition.fps
                     )
                     .frame(height: timelineHeight)
                     .clipped()
@@ -614,8 +615,7 @@ private struct StagePreview: View {
             layers: layers,
             filters: filters,
             atMs: engine.currentTimeMs,
-            playerEngine: engine,
-            refinesStills: engine.mode == .idle
+            playerEngine: engine
         )
         // Load-bearing — see ui-design-note.md (PreviewCanvas has no
         // interactive content of its own; without this, its GeometryReader

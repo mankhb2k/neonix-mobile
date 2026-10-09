@@ -66,8 +66,23 @@ struct TimelineView: View {
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
     let onTrimEnd: () -> Void
+    /// Composition frame rate — the finest zoom step is one frame.
+    var fps: Double = 30
 
-    private let pxPerMs: Double = 0.2
+    /// Pinch-to-zoom scale. The playhead is pinned to the centre of the
+    /// panel and the content slides under it (`contentOffsetX`), so changing
+    /// this zooms around the playhead with no extra anchoring maths.
+    @State private var pxPerMs: Double = TimelineZoom.defaultPxPerMs
+    @State private var pinchBaseScale: Double?
+    @State private var isPinching = false
+    /// While two fingers are down the drag recogniser also reports the
+    /// fingers' centroid moving; those events must not scrub, and when the
+    /// pinch ends with one finger still down, the drag's translation (which
+    /// kept growing) is re-based so the playhead doesn't jump.
+    @State private var dragNeedsRebase = false
+    @State private var dragRebaseX: CGFloat = 0
+    /// Only fed while a metrics run is recording; see `ReleaseVelocityEstimator`.
+    @State private var releaseEstimator = ReleaseVelocityEstimator()
     /// Only the main (primary video) lane uses this height — every other
     /// lane, including every standalone audio track, uses the smaller
     /// `otherRowHeight` instead. Confirmed with the user 2026-10-08: the
@@ -148,10 +163,18 @@ struct TimelineView: View {
                 let _ = PlaybackMetrics.shared.count(.timelineBodyEvals)
                 let centerX = geo.size.width / 2
                 let contentOffsetX = centerX - CGFloat(currentTimeMs) * pxPerMs
+                // Zoom level for the metrics log (cheap early-out when not recording).
+                let _ = {
+                    guard PlaybackMetrics.shared.isRecording else { return }
+                    PlaybackMetrics.shared.gauge(.timelineScale, pxPerMs)
+                    PlaybackMetrics.shared.gauge(.timelineViewportPx, Double(geo.size.width))
+                    PlaybackMetrics.shared.gauge(.rulerMinorMs, TimelineZoom.rulerIntervals(pxPerMs: pxPerMs, fps: fps).minorMs)
+                }()
+                let windowMs = TimelineZoom.visibleWindowMs(currentTimeMs: currentTimeMs, viewportWidth: Double(geo.size.width), pxPerMs: pxPerMs)
 
                 ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: rowsTopPadding) {
-                        TimeRulerView(pxPerMs: pxPerMs, maxDurationMs: maxDurationMs, contentWidth: contentWidth)
+                        TimeRulerView(pxPerMs: pxPerMs, fps: fps, maxDurationMs: maxDurationMs, contentWidth: contentWidth, windowMs: windowMs)
                             .frame(height: rulerHeight)
 
                         VStack(alignment: .leading, spacing: rowSpacing) {
@@ -160,6 +183,7 @@ struct TimelineView: View {
                                 LaneRowView(
                                     clips: lane(for: order),
                                     pxPerMs: pxPerMs,
+                                    windowMs: windowMs,
                                     rowHeight: isMainLane ? rowHeight : otherRowHeight,
                                     centerX: centerX,
                                     showsCoverAndMute: isMainLane,
@@ -216,16 +240,69 @@ struct TimelineView: View {
                 // anywhere in the timeline, not just exactly on the track.
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("timeline")
+                .accessibilityValue(String(format: "%.4f", pxPerMs))
+                .simultaneousGesture(
+                    MagnifyGesture()
+                        .onChanged { value in
+                            if !isPinching {
+                                isPinching = true
+                                pinchBaseScale = pxPerMs
+                                // A scrub that was already under way ends here;
+                                // the pinch owns the gesture from now on.
+                                if engine.mode == .scrubbing { engine.endScrub(velocityMsPerSecond: 0) }
+                            }
+                            let base = pinchBaseScale ?? pxPerMs
+                            pxPerMs = TimelineZoom.clamped(base * Double(value.magnification), fps: fps)
+                            PlaybackMetrics.shared.count(.pinchEvents)
+                            PlaybackMetrics.shared.gauge(.timelineScale, pxPerMs)
+                        }
+                        .onEnded { _ in
+                            isPinching = false
+                            pinchBaseScale = nil
+                        }
+                )
                 .gesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
+                            if isPinching {
+                                dragNeedsRebase = true
+                                return
+                            }
+                            if dragNeedsRebase {
+                                dragRebaseX = value.translation.width
+                                dragNeedsRebase = false
+                            }
                             PlaybackMetrics.shared.count(.dragEvents)
+                            if PlaybackMetrics.shared.isRecording {
+                                // `value.time` is the touch's own timestamp; the
+                                // handler's wall clock is useless here because
+                                // SwiftUI delivers several touch events in one
+                                // pass (their handler times differ by microseconds).
+                                releaseEstimator.add(time: value.time.timeIntervalSinceReferenceDate,
+                                                     x: Double(value.translation.width))
+                            }
                             PlaybackMetrics.shared.measure(.inputHandlerMs) {
                                 engine.beginScrub()
-                                engine.scrub(deltaMs: -Double(value.translation.width) / pxPerMs)
+                                engine.scrub(deltaMs: -Double(value.translation.width - dragRebaseX) / pxPerMs)
                             }
                         }
                         .onEnded { value in
+                            dragNeedsRebase = false
+                            dragRebaseX = 0
+                            guard !isPinching else { return }
+                            let metrics = PlaybackMetrics.shared
+                            if metrics.isRecording {
+                                metrics.record(.releaseFingerPxPerSecond, ms: abs(Double(value.velocity.width)))
+                                if let estimate = releaseEstimator.pointsPerSecond {
+                                    metrics.record(.releaseEstimatedPxPerSecond, ms: abs(estimate))
+                                }
+                                if let hold = releaseEstimator.holdSeconds(now: value.time.timeIntervalSinceReferenceDate) {
+                                    metrics.record(.releaseHoldMs, ms: hold * 1000)
+                                }
+                            }
+                            releaseEstimator.reset()
                             // `.velocity` is points/sec (iOS 17+); negated and
                             // converted the same way as translation, so a
                             // release continues the direction/speed the
@@ -336,6 +413,9 @@ private struct PlayheadOverlay: View {
 private struct LaneRowView: View {
     let clips: [V2Layer]
     let pxPerMs: Double
+    /// The slice of the timeline that is actually built (see
+    /// `TimelineZoom.visibleWindowMs`); filmstrips only create tiles in it.
+    let windowMs: ClosedRange<Double>
     let rowHeight: CGFloat
     /// Half the viewport's own width — a per-geometry layout constant (from
     /// `GeometryReader`'s `geo.size.width / 2`, recomputed only when the
@@ -410,6 +490,7 @@ private struct LaneRowView: View {
                         assetURL: resolved.url,
                         audioURL: resolveAudioURL(layer),
                         pxPerMs: pxPerMs,
+                        windowMs: windowMs,
                         rowHeight: rowHeight,
                         isSelected: isSelected,
                         onTrimBegin: onTrimBegin,
@@ -498,7 +579,7 @@ private struct AudioClipView: View {
                 // visible half keeps the *same proportions* it always
                 // had — half the row's height, not stretched to fill the
                 // whole row — bottom-aligned within the full row.
-                WaveformStripView(audioURL: audioURL, pointCount: max(Int(clipWidth / 8), 1), color: .cyan.opacity(0.8))
+                WaveformStripView(audioURL: audioURL, pointCount: min(max(Int(clipWidth / 8), 1), 1500), color: .cyan.opacity(0.8))
                     .frame(width: clipWidth, height: rowHeight / 2)
                     .frame(width: clipWidth, height: rowHeight, alignment: .bottom)
             }
@@ -567,43 +648,51 @@ private struct CoverCell: View {
 /// matching the reference CapCut screenshot's spacing.
 private struct TimeRulerView: View {
     let pxPerMs: Double
+    let fps: Double
     let maxDurationMs: Double
     let contentWidth: CGFloat
-
-    private let minorIntervalMs: Double = 1000
-    private let majorIntervalMs: Double = 2000
+    /// Only ticks inside this slice are drawn — at full zoom-in the ruler is
+    /// ~45 000 pt wide, far past what a single `Canvas` layer should be.
+    let windowMs: ClosedRange<Double>
 
     var body: some View {
-        Canvas { context, size in
-            var ms: Double = 0
-            while ms <= maxDurationMs {
-                let x = CGFloat(ms) * pxPerMs
-                let isMajor = Int(ms) % Int(majorIntervalMs) == 0
-                let tickHeight: CGFloat = isMajor ? 7 : 4
-                context.stroke(
-                    Path { path in
-                        path.move(to: CGPoint(x: x, y: size.height - tickHeight))
-                        path.addLine(to: CGPoint(x: x, y: size.height))
-                    },
-                    with: .color(.secondary),
-                    lineWidth: 1
-                )
-                if isMajor {
-                    context.draw(
-                        Text(formattedTime(ms)).font(.caption2).foregroundColor(.secondary),
-                        at: CGPoint(x: x + 2, y: size.height / 2 - 6),
-                        anchor: .leading
+        let intervals = TimelineZoom.rulerIntervals(pxPerMs: pxPerMs, fps: fps)
+        let majorEvery = max(Int((intervals.majorMs / intervals.minorMs).rounded()), 1)
+        let firstMs = max(windowMs.lowerBound, 0)
+        let lastMs = min(windowMs.upperBound, maxDurationMs)
+        let originX = CGFloat(firstMs) * pxPerMs
+        let width = max(CGFloat(lastMs - firstMs) * pxPerMs, 1)
+        ZStack(alignment: .topLeading) {
+            Canvas { context, size in
+                var index = max(Int((firstMs / intervals.minorMs).rounded(.down)), 0)
+                var ms = Double(index) * intervals.minorMs
+                while ms <= lastMs {
+                    let x = CGFloat(ms) * pxPerMs - originX
+                    let isMajor = index % majorEvery == 0
+                    let tickHeight: CGFloat = isMajor ? 7 : 4
+                    context.stroke(
+                        Path { path in
+                            path.move(to: CGPoint(x: x, y: size.height - tickHeight))
+                            path.addLine(to: CGPoint(x: x, y: size.height))
+                        },
+                        with: .color(.secondary),
+                        lineWidth: 1
                     )
+                    if isMajor {
+                        context.draw(
+                            Text(TimelineZoom.rulerLabel(ms: ms, majorMs: intervals.majorMs, fps: fps)).font(.caption2).foregroundColor(.secondary),
+                            at: CGPoint(x: x + 2, y: size.height / 2 - 6),
+                            anchor: .leading
+                        )
+                    }
+                    index += 1
+                    ms = Double(index) * intervals.minorMs
                 }
-                ms += minorIntervalMs
             }
+            .frame(width: width)
+            .offset(x: originX)
         }
-        .frame(width: contentWidth)
-    }
-
-    private func formattedTime(_ ms: Double) -> String {
-        let totalSeconds = Int(ms / 1000)
-        return String(format: "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
+        .frame(width: contentWidth, alignment: .topLeading)
     }
 }
 
@@ -634,6 +723,7 @@ private struct FilmstripClipView: View {
     let assetURL: URL?
     let audioURL: URL?
     let pxPerMs: Double
+    let windowMs: ClosedRange<Double>
     let rowHeight: CGFloat
     let isSelected: Bool
     let onTrimBegin: () -> Void
@@ -658,7 +748,12 @@ private struct FilmstripClipView: View {
     /// `VideoFrameCache.filmstripImages`) rather than per-tile — keyed by
     /// tile index, matching the order `tileSeconds(_:)` produces.
     @State private var tileImages: [Int: UIImage] = [:]
+    /// Which layout (`tileCount`/trim/rate) `tileImages` belongs to — an
+    /// index means a different moment once any of those change.
+    @State private var imagesLayout: FilmstripBatchKey?
     private let minDurationMs: Double = 200
+    /// Thumbnails kept beyond the window, in tiles, before they are dropped.
+    private let tileRetention = 24
 
     private var clipWidth: CGFloat {
         max(CGFloat(layer.timing.duration) * pxPerMs, 28)
@@ -668,18 +763,32 @@ private struct FilmstripClipView: View {
         max(Int((clipWidth / rowHeight).rounded(.up)), 1)
     }
 
+    /// The tiles that fall inside `windowMs`; `nil` when the clip is entirely
+    /// outside it. At full zoom-in a clip is hundreds of tiles wide, and only
+    /// these are ever created or fetched.
+    private var visibleTiles: ClosedRange<Int>? {
+        let tileMs = Double(rowHeight) / pxPerMs
+        let start = layer.timing.start
+        let first = max(Int(((windowMs.lowerBound - start) / tileMs).rounded(.down)), 0)
+        let last = min(Int(((windowMs.upperBound - start) / tileMs).rounded(.up)), tileCount - 1)
+        return first <= last ? first...last : nil
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
-                ForEach(0..<tileCount, id: \.self) { index in
-                    FilmstripTileView(image: tileImages[index])
-                        .frame(width: tileWidth(index), height: rowHeight)
-                        .clipped()
+                if let tiles = visibleTiles {
+                    Color.clear.frame(width: CGFloat(tiles.lowerBound) * rowHeight, height: rowHeight)
+                    ForEach(tiles, id: \.self) { index in
+                        FilmstripTileView(image: tileImages[index])
+                            .frame(width: tileWidth(index), height: rowHeight)
+                            .clipped()
+                    }
                 }
             }
 
             if let audioURL {
-                WaveformStripView(audioURL: audioURL, pointCount: max(Int(clipWidth / 8), 1))
+                WaveformStripView(audioURL: audioURL, pointCount: min(max(Int(clipWidth / 8), 1), 1500))
                     .frame(height: 16)
                     .background(Color.black.opacity(0.4))
             }
@@ -719,11 +828,24 @@ private struct FilmstripClipView: View {
         // don't re-trigger it. Consumes the stream tile-by-tile (not one
         // final collected dictionary) so tiles fill in as each decode
         // actually finishes, not all at once after the whole batch settles.
-        .task(id: FilmstripBatchKey(assetId: assetId, tileCount: tileCount, trimStartMs: VideoTimeMapping(layer: layer)?.trimStartMs, rate: VideoTimeMapping(layer: layer)?.rate)) {
-            guard let assetId, let assetURL else { return }
-            let times = (0..<tileCount).map(tileSeconds)
-            for await (index, image) in VideoFrameCache.shared.filmstripImages(assetId: assetId, url: assetURL, times: times) {
-                if let image { tileImages[index] = image }
+        .task(id: FilmstripWindowKey(layout: batchKey, tiles: visibleTiles)) {
+            guard let assetId, let assetURL, let tiles = visibleTiles else { return }
+            // Debounced: while a pinch is in progress `tileCount` changes on
+            // every frame, and each change restarts this task — only the
+            // value the zoom settles on should trigger a thumbnail batch.
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            if imagesLayout != batchKey {
+                tileImages = [:]
+                imagesLayout = batchKey
+            }
+            let keep = (tiles.lowerBound - tileRetention)...(tiles.upperBound + tileRetention)
+            tileImages = tileImages.filter { keep.contains($0.key) }
+            let missing = tiles.filter { tileImages[$0] == nil }
+            guard !missing.isEmpty else { return }
+            let times = missing.map(tileSeconds)
+            for await (offset, image) in VideoFrameCache.shared.filmstripImages(assetId: assetId, url: assetURL, times: times) {
+                if let image { tileImages[missing[offset]] = image }
             }
         }
     }
@@ -827,6 +949,11 @@ private struct FilmstripClipView: View {
                 dragStartLayer = nil
                 onTrimEnd()
             }
+    }
+
+    private var batchKey: FilmstripBatchKey {
+        let mapping = VideoTimeMapping(layer: layer)
+        return FilmstripBatchKey(assetId: assetId, tileCount: tileCount, trimStartMs: mapping?.trimStartMs, rate: mapping?.rate)
     }
 
     private func tileWidth(_ index: Int) -> CGFloat {
@@ -1023,6 +1150,13 @@ private struct FilmstripBatchKey: Equatable {
     let tileCount: Int
     let trimStartMs: Double?
     let rate: Double?
+}
+
+/// `FilmstripClipView`'s fetch key: the layout plus which tiles are in the
+/// window, so scrolling re-fetches only when the window actually moves.
+private struct FilmstripWindowKey: Equatable {
+    let layout: FilmstripBatchKey
+    let tiles: ClosedRange<Int>?
 }
 
 /// Loads a file's full-waveform envelope (`WaveformCache`, decoded once per

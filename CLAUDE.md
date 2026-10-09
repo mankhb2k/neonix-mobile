@@ -3,6 +3,57 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Momentum glide is retuned, by feel — `CoastTuning` (gain 2.0, friction ×0.7)
+
+Changed 2026-10-09 at the user's request after a simulator-vs-iPhone log
+comparison (`PLAYBACK_PIPELINE.md` § 9): the native `UIScrollView` curve was
+already in use, but a real finger lifts at ~900 pt/s (a simulator mouse
+flick ~3200 pt/s), so on the phone a flick glided only ~1.2 screens.
+`Playback/MomentumDecay.swift`'s `CoastTuning` multiplies the lift speed by 2
+and the decay constant by 0.7 (≈3.3 screens for the median flick). **These
+two numbers were chosen by the user's feel on the device, not by a benchmark**
+— there is no published figure for timeline glide distance; don't "correct"
+them toward the native curve without asking. Known, unmeasured side effects:
+gain 2 makes content jump to twice the finger's speed at lift, and the video
+seeks must keep up with twice the content speed.
+
+## Timeline zoom — pinch with two fingers, limits defined by what the ruler shows
+
+Added 2026-10-09 at the user's request. `TimelineView.pxPerMs` is now `@State`
+(0.2 px/ms default), changed by a `MagnifyGesture` that runs *simultaneously*
+with the scrub `DragGesture`. The playhead is pinned to the panel's centre and
+the content slides under it, so zooming anchors on the playhead for free.
+**Limits (user-specified): fully zoomed out the ruler's minor ticks are 5 s
+apart; fully zoomed in they are exactly one frame apart**, both at the same
+48 pt minimum tick spacing → `TimelineZoom.minPxPerMs = 0.0096`,
+`maxPxPerMs(fps:) = 1.44` at 30 fps (`UI/Editor/TimelineZoom.swift`, pure and
+unit-tested, as is the ruler's tick ladder: 1/2/5 frames, then 0.5 s … 5 min;
+labels switch to `mm:ss:ff` below one second). At full zoom-in the 31 s sample
+is ~45 000 pt wide, so the ruler (`Canvas`) and the filmstrip only build a
+*window* around the playhead (`TimelineZoom.visibleWindowMs`: ±1 viewport,
+snapped to viewport-wide steps so it doesn't change per scrub tick), and
+filmstrip thumbnails are fetched per window with a 150 ms debounce (a pinch
+changes the tile count every frame). While two fingers are down the drag's
+events are ignored and re-based afterwards, so a pinch can't scrub or jump.
+The timeline exposes its scale as the accessibility value of the element
+identified `timeline`; `UITests/TimelineZoomUITests` drives real `pinch`
+gestures against it. Zoom also feeds the seek-tolerance experiment (H10 in
+`PLAYBACK_PIPELINE.md`): content speed = finger speed × ms-per-pixel.
+
+## Playback work is measurement-driven — read `PLAYBACK_PIPELINE.md` first
+
+Added 2026-10-09, at the user's explicit request, after a long run of
+patches (clock, hysteresis, proxy, Metal) made without any number saying
+whether a patch hit the real bottleneck. **No change to the playback
+pipeline without a measured number pointing at the stage being changed.**
+`PLAYBACK_PIPELINE.md` has the stage diagram, per-stage contracts, the metric
+catalogue, the T0–T7 test matrix, the symptom → stage table and the results/
+decision logs — consult it to choose the next step, and append to it after each
+run. The measurement layer is `Playback/PlaybackMetrics.swift` + the HUD
+(`UI/Editor/PlaybackMetricsHUD.swift`, switched on in Account > Developer);
+`scripts/playback_report.py` summarises a recorded CSV. Simulator numbers only
+validate the tooling — baselines are taken on a real iPhone.
+
 ## Curves — a real draggable tone-curve graph, replacing the parametrized stand-in
 
 Added 2026-10-09, right after the rest of the Tuỳ chỉnh slider list, at the

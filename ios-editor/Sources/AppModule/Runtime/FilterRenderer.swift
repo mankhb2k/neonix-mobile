@@ -13,9 +13,8 @@ import CoreGraphics
 /// never re-decode media inline from `body`" rule — the same discipline
 /// applies to filtering).
 enum FilterRenderer {
-    /// One shared context, matching the precedent at
-    /// `Playback/VideoFrameServer.swift`'s `previewCIContext` — a fresh
-    /// `CIContext` per call would be expensive and is never needed.
+    /// One shared context — a fresh `CIContext` per call would be expensive
+    /// and is never needed.
     ///
     /// `.workingColorSpace: NSNull()` deliberately turns off Core Image's
     /// automatic color management for the filter math itself. Left on,
