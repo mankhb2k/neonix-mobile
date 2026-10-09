@@ -95,9 +95,9 @@ final class MomentumDecayTests: XCTestCase {
         XCTAssertEqual(base.scalingFriction(by: 1), base)
     }
 
-    func testDefaultCoastTuningIsGainFourWithLighterFriction() {
+    func testDefaultCoastTuningIsGainThreePointFiveWithLighterFriction() {
         let tuning = CoastTuning()
-        XCTAssertEqual(tuning.velocityGain, 4)
+        XCTAssertEqual(tuning.velocityGain, 3.5)
         XCTAssertEqual(tuning.decay, MomentumDecay.iosNormal.scalingFriction(by: 0.7))
     }
 }

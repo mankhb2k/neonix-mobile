@@ -95,7 +95,7 @@ struct ReleaseVelocityEstimator {
     }
 }
 
-/// How far a release glides, tuned on a real iPhone (2026-10-09; gain raised 2 → 4
+/// How far a release glides, tuned on a real iPhone (2026-10-09; gain raised 2 → 4, then set to 3.5
 /// the same day at the user's request): with the
 /// plain `UIScrollView` curve a finger flick (~900 pt/s median) travelled only
 /// ~1.2 screen widths while a simulator mouse flick (~3200 pt/s) travelled ~4,
@@ -109,7 +109,7 @@ struct ReleaseVelocityEstimator {
 ///
 /// Distance travelled ≈ `velocityGain · v / (frictionScale · k)`.
 struct CoastTuning: Equatable {
-    var velocityGain = 4.0
+    var velocityGain = 3.5
     var frictionScale = 0.7
 
     var decay: MomentumDecay { MomentumDecay.iosNormal.scalingFriction(by: frictionScale) }
