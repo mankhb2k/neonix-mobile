@@ -104,6 +104,7 @@ private struct AdjustOptionsRow: View {
     let onEnd: () -> Void
 
     @State private var local = AdjustValues()
+    @State private var showingCurveEditor = false
 
     var body: some View {
         if let selectedLayer {
@@ -120,10 +121,14 @@ private struct AdjustOptionsRow: View {
                     adjustSlider("Temperature", value: $local.temperature, range: -1...1)
                     adjustSlider("Tint", value: $local.tint, range: -1...1)
                     Divider()
-                    adjustSlider("Blacks", value: $local.blacks, range: -1...1)
-                    adjustSlider("Shadows", value: $local.shadows, range: -1...1)
-                    adjustSlider("Highlights", value: $local.highlights, range: -1...1)
-                    adjustSlider("Whites", value: $local.whites, range: -1...1)
+                    Button {
+                        showingCurveEditor = true
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "chart.xyaxis.line").font(.title3)
+                            Text("Curves").font(.caption2)
+                        }
+                    }
                     Divider()
                     adjustSlider("Sharpen", value: $local.sharpen, range: 0...1)
                     adjustSlider("Clarity", value: $local.clarity, range: -1...1)
@@ -136,6 +141,11 @@ private struct AdjustOptionsRow: View {
             }
             .onAppear { local = values }
             .onChange(of: selectedLayer.id) { _, _ in local = values }
+            .sheet(isPresented: $showingCurveEditor) {
+                CurveEditorSheet(points: $local.curvePoints, onBegin: onBegin, onEnd: onEnd) {
+                    onChange(selectedLayer.id, local)
+                }
+            }
         } else {
             Text("Select a clip on the timeline to adjust")
                 .font(.caption)

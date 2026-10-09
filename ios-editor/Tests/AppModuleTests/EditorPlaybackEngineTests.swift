@@ -114,6 +114,24 @@ final class EditorPlaybackEngineTests: XCTestCase {
         XCTAssertEqual(engine.mode, .scrubbing)
     }
 
+    func testReleasingAScrubLeavesPlaybackPausedUntilPlayIsTapped() async throws {
+        let engine = makeEngine(durationMs: 60_000)
+        engine.play()
+        engine.beginScrub()
+        engine.scrub(toMs: 12_000)
+        engine.endScrub(velocityMsPerSecond: 0)
+
+        XCTAssertEqual(engine.mode, .idle)
+        XCTAssertFalse(engine.isPlaying)
+        let releasedAt = engine.currentTimeMs
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(engine.currentTimeMs, releasedAt, accuracy: 1)
+
+        engine.play()
+        XCTAssertTrue(engine.isPlaying)
+        engine.pause()
+    }
+
     func testPlaybackHoldsTheClockUntilFramesAreDecoded() async throws {
         final class Readiness { var ready = false }
         let readiness = Readiness()

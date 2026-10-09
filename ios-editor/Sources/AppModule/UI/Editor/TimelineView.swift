@@ -143,6 +143,9 @@ struct TimelineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
+                // Counted here, not in `body`: this closure is what re-runs
+                // on every playhead change (it reads `currentTimeMs`).
+                let _ = PlaybackMetrics.shared.count(.timelineBodyEvals)
                 let centerX = geo.size.width / 2
                 let contentOffsetX = centerX - CGFloat(currentTimeMs) * pxPerMs
 
@@ -216,8 +219,11 @@ struct TimelineView: View {
                 .gesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
-                            engine.beginScrub()
-                            engine.scrub(deltaMs: -Double(value.translation.width) / pxPerMs)
+                            PlaybackMetrics.shared.count(.dragEvents)
+                            PlaybackMetrics.shared.measure(.inputHandlerMs) {
+                                engine.beginScrub()
+                                engine.scrub(deltaMs: -Double(value.translation.width) / pxPerMs)
+                            }
                         }
                         .onEnded { value in
                             // `.velocity` is points/sec (iOS 17+); negated and

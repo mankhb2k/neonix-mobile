@@ -420,4 +420,25 @@ final class EditorCommandTests: XCTestCase {
         let comboResult = SetAdjustCommand(layerId: "clip1", values: combo).apply(to: project)
         XCTAssertEqual(comboResult.filters?.first?.primitives.count, 5)
     }
+
+    /// Curves — a non-identity `curvePoints` array (the real draggable
+    /// graph's own output, not a scalar slider) should be detected as
+    /// non-neutral and compile to exactly 1 `feComponentTransfer`
+    /// primitive, carrying the points array through verbatim.
+    func testSetAdjustCommandCompilesCurvePointsVerbatim() {
+        let project = makeProject().withLayers([makeVideoLayer()])
+        var curved = AdjustValues()
+        curved.curvePoints = [0, 0.3, 0.5, 0.6, 1]
+
+        let result = SetAdjustCommand(layerId: "clip1", values: curved).apply(to: project)
+
+        XCTAssertEqual(result.filters?.first?.primitives.count, 1)
+        guard case .feComponentTransfer(_, let functions) = result.filters?.first?.primitives.first else {
+            return XCTFail("expected a feComponentTransfer primitive")
+        }
+        guard case .table(let values) = functions.r else {
+            return XCTFail("expected a table transfer function")
+        }
+        XCTAssertEqual(values, [0, 0.3, 0.5, 0.6, 1])
+    }
 }

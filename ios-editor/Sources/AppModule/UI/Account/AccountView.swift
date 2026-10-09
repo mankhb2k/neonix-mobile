@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AccountView: View {
+    @AppStorage("playbackMetricsArmed") private var playbackMetricsArmed = false
+
     var body: some View {
         List {
             Section {
@@ -34,6 +36,14 @@ struct AccountView: View {
             Section("Support") {
                 Label("Help Center", systemImage: "questionmark.circle")
                 Label("Send feedback", systemImage: "envelope")
+            }
+
+            Section {
+                Toggle("Playback metrics HUD", isOn: $playbackMetricsArmed)
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("Shows a metrics pill in the editor. Start/stop a recorded run there and share the CSV. See PLAYBACK_PIPELINE.md.")
             }
         }
     }

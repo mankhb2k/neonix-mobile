@@ -410,13 +410,10 @@ struct AdjustValues: Equatable {
     // White balance.
     var temperature: Double = 0
     var tint: Double = 0
-    // Tone curve (Highlights/Shadows/Whites/Blacks — see
-    // `EffectPresetKind.toneCurve`'s own doc comment on why these 4
-    // sliders stand in for a real draggable curve graph this pass).
-    var blacks: Double = 0
-    var shadows: Double = 0
-    var highlights: Double = 0
-    var whites: Double = 0
+    // Curves — a real draggable tone-curve graph (`CurveGraphView`), 5
+    // output values at fixed x-positions `0, 0.25, 0.5, 0.75, 1`. The
+    // default is the identity curve (straight diagonal, no change).
+    var curvePoints: [Double] = [0, 0.25, 0.5, 0.75, 1]
     // Detail.
     var sharpen: Double = 0
     var clarity: Double = 0
@@ -473,9 +470,8 @@ struct SetAdjustCommand: EditorCommand {
             if values.temperature != neutral.temperature || values.tint != neutral.tint {
                 presets.append(.whiteBalance(temperature: values.temperature, tint: values.tint))
             }
-            if values.blacks != neutral.blacks || values.shadows != neutral.shadows
-                || values.highlights != neutral.highlights || values.whites != neutral.whites {
-                presets.append(.toneCurve(blacks: values.blacks, shadows: values.shadows, highlights: values.highlights, whites: values.whites))
+            if values.curvePoints != neutral.curvePoints {
+                presets.append(.toneCurve(points: values.curvePoints))
             }
             if values.sharpen != neutral.sharpen {
                 presets.append(.sharpen(amount: values.sharpen))

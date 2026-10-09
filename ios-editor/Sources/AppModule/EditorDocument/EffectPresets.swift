@@ -43,14 +43,13 @@ enum EffectPresetKind: Codable {
     /// locus computation), same spirit as `sepia`'s own fixed CSS-standard
     /// matrix.
     case whiteBalance(temperature: Double, tint: Double)
-    /// Tuỳ chỉnh — Highlights/Shadows/Whites/Blacks, 4 sliders sharing one
-    /// 5-point tone curve (`feComponentTransfer` `table`): `blacks`/`whites`
-    /// move the curve's 2 end points, `shadows`/`highlights` move the
-    /// quarter points, the midpoint stays fixed. The real interactive
-    /// curve-graph editor (drag-your-own control points) is explicitly
-    /// deferred — these 4 parametrized sliders were confirmed with the
-    /// user as the substitute for this pass.
-    case toneCurve(blacks: Double, shadows: Double, highlights: Double, whites: Double)
+    /// Tuỳ chỉnh — Curves: a real draggable tone-curve editor
+    /// (`UI/Editor/CurveGraphView.swift`), not a parametrized stand-in.
+    /// `points` is always exactly 5 output values at the fixed x-positions
+    /// `CIToneCurve` itself requires (`0, 0.25, 0.5, 0.75, 1`) — the graph
+    /// UI only ever lets the user drag a point's own y (output) value, x
+    /// stays fixed, so this is never any length but 5.
+    case toneCurve(points: [Double])
     /// Tuỳ chỉnh — Sharpen. A standard Laplacian unsharp 3×3 kernel scaled
     /// by `amount`, not a blur-based unsharp mask (that's `clarity`below).
     case sharpen(amount: Double)
@@ -69,7 +68,7 @@ enum EffectPresetKind: Codable {
     private enum CodingKeys: String, CodingKey {
         case kind, brightness, contrast, saturation, exposure, hueRotate, lightness, amount, radius
         case offset, blur, spread, color, inset, opacity, scale, seed
-        case temperature, tint, blacks, shadows, highlights, whites, intensity
+        case temperature, tint, points, intensity
     }
 
     init(from decoder: Decoder) throws {
@@ -104,10 +103,7 @@ enum EffectPresetKind: Codable {
         case "whiteBalance":
             self = .whiteBalance(temperature: try c.decode(Double.self, forKey: .temperature), tint: try c.decode(Double.self, forKey: .tint))
         case "toneCurve":
-            self = .toneCurve(
-                blacks: try c.decode(Double.self, forKey: .blacks), shadows: try c.decode(Double.self, forKey: .shadows),
-                highlights: try c.decode(Double.self, forKey: .highlights), whites: try c.decode(Double.self, forKey: .whites)
-            )
+            self = .toneCurve(points: try c.decode([Double].self, forKey: .points))
         case "sharpen": self = .sharpen(amount: try c.decode(Double.self, forKey: .amount))
         case "clarity": self = .clarity(amount: try c.decode(Double.self, forKey: .amount))
         case "vignette":
@@ -143,10 +139,8 @@ enum EffectPresetKind: Codable {
             try c.encode(scale, forKey: .scale); try c.encode(amount, forKey: .amount); try c.encode(opacity, forKey: .opacity); try c.encode(seed, forKey: .seed)
         case .whiteBalance(let temperature, let tint):
             try c.encode("whiteBalance", forKey: .kind); try c.encode(temperature, forKey: .temperature); try c.encode(tint, forKey: .tint)
-        case .toneCurve(let blacks, let shadows, let highlights, let whites):
-            try c.encode("toneCurve", forKey: .kind)
-            try c.encode(blacks, forKey: .blacks); try c.encode(shadows, forKey: .shadows)
-            try c.encode(highlights, forKey: .highlights); try c.encode(whites, forKey: .whites)
+        case .toneCurve(let points):
+            try c.encode("toneCurve", forKey: .kind); try c.encode(points, forKey: .points)
         case .sharpen(let amount): try c.encode("sharpen", forKey: .kind); try c.encode(amount, forKey: .amount)
         case .clarity(let amount): try c.encode("clarity", forKey: .kind); try c.encode(amount, forKey: .amount)
         case .vignette(let intensity, let radius):
@@ -248,23 +242,13 @@ func filterPrimitives(for kind: EffectPresetKind, idPrefix: String, input: Strin
         let b = base("whitebalance", in: input)
         return ([.feColorMatrix(b, kind: "matrix", values: values)], b.result!)
 
-    case .toneCurve(let blacks, let shadows, let highlights, let whites):
-        // One shared 5-point tone curve (`feComponentTransfer` `table`) —
-        // `blacks`/`whites` move the curve's own end points, `shadows`/
-        // `highlights` the quarter points, the midpoint stays fixed. See
-        // this case's own doc comment on `EffectPresetKind` for why this
-        // (not a real draggable curve graph) is this pass's Đồ thị
-        // substitute.
-        func clamp01(_ v: Double) -> Double { min(max(v, 0), 1) }
-        let values: [Double] = [
-            clamp01(0 + blacks * 0.25),
-            clamp01(0.25 + shadows * 0.25),
-            0.5,
-            clamp01(0.75 + highlights * 0.25),
-            clamp01(1 + whites * 0.25),
-        ]
+    case .toneCurve(let points):
+        // The graph UI's 5 output values, applied verbatim to every
+        // channel — `points` is already clamped/ordered by
+        // `CurveGraphView` itself (the UI only ever proposes valid values,
+        // same split every other command in this app uses).
         let functions = V2ComponentTransferFunctions(
-            r: .table(values: values), g: .table(values: values), b: .table(values: values), a: nil
+            r: .table(values: points), g: .table(values: points), b: .table(values: points), a: nil
         )
         let b = base("tonecurve", in: input)
         return ([.feComponentTransfer(b, functions: functions)], b.result!)

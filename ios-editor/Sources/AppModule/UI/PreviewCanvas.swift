@@ -1,4 +1,6 @@
 import AVFoundation
+import CoreImage
+import MetalKit
 import SwiftUI
 
 /// One node of the parent/child layer tree, built from the flat
@@ -46,6 +48,9 @@ struct PreviewCanvas: View {
     /// every other optional Protocol V2 feature this renderer reads.
     var filters: [V2Filter] = []
     let atMs: Double
+    /// Optional native player owner supplied by the editor. Keeping this
+    /// optional leaves previews and the frame-server fallback unchanged.
+    var playerEngine: EditorPlaybackEngine? = nil
     /// `true` while the playhead is at rest: video layers then swap their
     /// decoded preview frame for an exact full-quality one.
     var refinesStills: Bool = true
@@ -72,7 +77,14 @@ struct PreviewCanvas: View {
         return ZStack {
             Color(hex: composition.background)
             ForEach(tree, id: \.layer.id) { node in
-                LayerNodeView(node: node, atMs: atMs, assets: assets, filters: filters, refinesStills: refinesStills)
+                LayerNodeView(
+                    node: node,
+                    atMs: atMs,
+                    assets: assets,
+                    filters: filters,
+                    refinesStills: refinesStills,
+                    playerEngine: playerEngine
+                )
             }
         }
         .clipped()
@@ -88,21 +100,32 @@ private struct LayerNodeView: View {
     let assets: [V2Asset]
     let filters: [V2Filter]
     let refinesStills: Bool
+    let playerEngine: EditorPlaybackEngine?
 
     var body: some View {
-        let frame = sampleLayer(node.layer, atMs: atMs)
+        let _ = PlaybackMetrics.shared.count(.layerBodyEvals)
+        let frame = PlaybackMetrics.shared.measure(.sampleLayerMs) { sampleLayer(node.layer, atMs: atMs) }
         Group {
             if node.layer.type == "group" {
                 ZStack {
                     ForEach(node.children, id: \.layer.id) { child in
-                        LayerNodeView(node: child, atMs: atMs, assets: assets, filters: filters, refinesStills: refinesStills)
+                        LayerNodeView(
+                            node: child,
+                            atMs: atMs,
+                            assets: assets,
+                            filters: filters,
+                            refinesStills: refinesStills,
+                            playerEngine: playerEngine
+                        )
                     }
                 }
             } else {
                 LayerContentView(
+                    layerId: node.layer.id,
                     frame: frame, asset: assets.first { $0.id == frame.assetId },
                     filter: node.layer.filter.flatMap { id in filters.first { $0.id == id } },
-                    refinesStills: refinesStills
+                    refinesStills: refinesStills,
+                    playerEngine: playerEngine
                 )
                 .frame(width: frame.frameWidth, height: frame.frameHeight)
                 .clipped()
@@ -160,9 +183,10 @@ private struct LayerNodeView: View {
 
 /// Renders one layer's own content (before the shared transform/opacity
 /// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
-/// still for an image, and the decoded frame at the playhead for video
-/// (`VideoFrameView`).
+/// still for an image, and an AVPlayer-backed frame for video. `VideoFrameView`
+/// remains only as a no-engine compatibility fallback.
 private struct LayerContentView: View {
+    let layerId: String
     let frame: ResolvedLayerFrame
     let asset: V2Asset?
     /// Tuỳ chỉnh — see `FilteredImageView`/`FilterRenderer`. `nil` for every
@@ -170,6 +194,7 @@ private struct LayerContentView: View {
     /// case), in which case `FilteredImageView` is a pure pass-through.
     let filter: V2Filter?
     let refinesStills: Bool
+    let playerEngine: EditorPlaybackEngine?
 
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
@@ -182,14 +207,28 @@ private struct LayerContentView: View {
             }
         case "video":
             if let asset, let url = bundledURL(filename: asset.uri) {
-                VideoFrameView(
-                    assetId: asset.id,
-                    url: url,
-                    atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
-                    contentMode: contentMode,
-                    refines: refinesStills,
-                    filter: filter
-                )
+                let playbackURL = playerEngine?.previewURL(for: layerId) ?? url
+                if let player = playerEngine?.player(for: layerId) {
+                    if let filter {
+                        FilteredPlayerView(
+                            player: player,
+                            filter: filter,
+                            previewContentMode: contentMode,
+                            requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
+                        )
+                    } else {
+                        StagePlayerLayerView(player: player, contentMode: contentMode)
+                    }
+                } else {
+                    VideoFrameView(
+                        assetId: asset.id,
+                        url: playbackURL,
+                        atSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
+                        contentMode: contentMode,
+                        refines: refinesStills,
+                        filter: filter
+                    )
+                }
             } else {
                 Color.gray
             }
@@ -220,13 +259,202 @@ private struct LayerContentView: View {
     }
 }
 
-/// One video layer's pixels: always the frame at the playhead, read
-/// synchronously from `VideoFrameServer` — the same path while scrubbing,
-/// coasting and playing, so there is never a hand-off between two kinds of
-/// view to flash. `EditorPlaybackEngine` keeps the frames decoded ahead;
-/// this view only reads them. When `refines` (playhead at rest) and it has
-/// held still for `settleNanoseconds`, an exact full-quality frame replaces
-/// the downscaled preview frame.
+/// Attaches a persistent player to an AVPlayerLayer. SwiftUI updates only
+/// change the layer configuration; they never create a new player.
+private struct StagePlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+    let contentMode: ContentMode
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = contentMode == .fit ? .resizeAspect : .resizeAspectFill
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        uiView.playerLayer.player = player
+        uiView.playerLayer.videoGravity = contentMode == .fit ? .resizeAspect : .resizeAspectFill
+    }
+
+    final class PlayerContainerView: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+    }
+}
+
+/// Filtered video preview without a `CGImage` hop. `AVPlayerItemVideoOutput`
+/// supplies the player's decoded `CVPixelBuffer`; Core Image evaluates the
+/// filter graph lazily and `CIContext` renders the result directly into a
+/// Metal drawable. The view keeps the player paused during scrub and draws
+/// the newest decoded buffer on the next display tick.
+private struct FilteredPlayerView: UIViewRepresentable {
+    let player: AVPlayer
+    let filter: V2Filter
+    let previewContentMode: SwiftUI.ContentMode
+    let requestedSeconds: Double
+
+    func makeUIView(context: Context) -> FilteredPlayerMetalView {
+        FilteredPlayerMetalView(
+            player: player,
+            filter: filter,
+            previewContentMode: previewContentMode,
+            requestedSeconds: requestedSeconds
+        )
+    }
+
+    func updateUIView(_ uiView: FilteredPlayerMetalView, context: Context) {
+        uiView.rebind(
+            player: player,
+            filter: filter,
+            previewContentMode: previewContentMode,
+            requestedSeconds: requestedSeconds
+        )
+        uiView.setNeedsDisplay()
+    }
+}
+
+@MainActor
+private final class FilteredPlayerMetalView: MTKView {
+    private var player: AVPlayer
+    private var filter: V2Filter
+    private var previewContentMode: SwiftUI.ContentMode
+    private var requestedSeconds: Double
+    private var output: AVPlayerItemVideoOutput
+    private let commandQueue: MTLCommandQueue
+    private let ciContext: CIContext
+    private let outputColorSpace = CGColorSpaceCreateDeviceRGB()
+
+    init(player: AVPlayer, filter: V2Filter, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let commandQueue = device.makeCommandQueue()
+        else {
+            fatalError("Metal is required for filtered video preview")
+        }
+        self.player = player
+        self.filter = filter
+        self.previewContentMode = previewContentMode
+        self.requestedSeconds = requestedSeconds
+        self.output = Self.makeOutput()
+        self.commandQueue = commandQueue
+        self.ciContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
+        super.init(frame: .zero, device: device)
+        framebufferOnly = false
+        // Keep a display-synchronised draw loop alive while AVPlayerItemVideoOutput
+        // is waiting for the frame produced by an asynchronous seek. A single
+        // `setNeedsDisplay` can run before the decoder has published that buffer,
+        // which is exactly the blank/stale-frame flash seen after reverse scrubs.
+        enableSetNeedsDisplay = false
+        isPaused = false
+        colorPixelFormat = .bgra8Unorm
+        backgroundColor = .clear
+        player.currentItem?.add(output)
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func rebind(player: AVPlayer, filter: V2Filter, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
+        if self.player !== player {
+            self.player.currentItem?.remove(output)
+            self.output = Self.makeOutput()
+            self.player = player
+            self.player.currentItem?.add(output)
+        }
+        self.filter = filter
+        self.previewContentMode = previewContentMode
+        self.requestedSeconds = requestedSeconds
+    }
+
+    override func draw(_ rect: CGRect) {
+        let metrics = PlaybackMetrics.shared
+        let drawStart = CACurrentMediaTime()
+        metrics.count(.metalDraws)
+        defer { metrics.record(.metalDrawMs, ms: (CACurrentMediaTime() - drawStart) * 1000) }
+        guard let drawable = currentDrawable,
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let item = player.currentItem
+        else { return }
+
+        let time = CMTime(seconds: max(requestedSeconds, 0), preferredTimescale: 600)
+        guard let pixelBuffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else {
+            metrics.count(.metalEmptyBuffers)
+            commandBuffer.commit()
+            return
+        }
+
+        var image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
+        image = oriented(image, using: item)
+        image = FilterRenderer.apply(filter, to: image)
+        image = fitted(image, to: drawableSize)
+        ciContext.render(
+            image,
+            to: drawable.texture,
+            commandBuffer: commandBuffer,
+            bounds: image.extent,
+            colorSpace: outputColorSpace
+        )
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+
+    private static func makeOutput() -> AVPlayerItemVideoOutput {
+        AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferMetalCompatibilityKey as String: true
+        ])
+    }
+
+    private func oriented(_ image: CIImage, using item: AVPlayerItem) -> CIImage {
+        guard let track = item.asset.tracks(withMediaType: .video).first else { return image }
+        let transform = track.preferredTransform
+        let bounds = CGRect(origin: .zero, size: track.naturalSize).applying(transform)
+        return image.transformed(
+            by: transform.concatenating(
+                CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY)
+            )
+        )
+    }
+
+    private func fitted(_ image: CIImage, to size: CGSize) -> CIImage {
+        guard size.width > 0, size.height > 0,
+              image.extent.width > 0, image.extent.height > 0
+        else { return image }
+        let scale: CGFloat
+        switch previewContentMode {
+        case .fit:
+            scale = min(size.width / image.extent.width, size.height / image.extent.height)
+        case .fill:
+            scale = max(size.width / image.extent.width, size.height / image.extent.height)
+        @unknown default:
+            scale = min(size.width / image.extent.width, size.height / image.extent.height)
+        }
+        let width = image.extent.width * scale
+        let height = image.extent.height * scale
+        let x = (size.width - width) / 2 - image.extent.minX * scale
+        let y = (size.height - height) / 2 - image.extent.minY * scale
+        return image.transformed(by: CGAffineTransform(translationX: x, y: y).scaledBy(x: scale, y: scale))
+    }
+}
+
+/// Compatibility renderer for a software-decoded video's pixels. The editor
+/// engine normally uses `AVPlayerLayer` or `FilteredPlayerMetalView`; this
+/// view remains for previews created without an engine and for older callers.
+/// `EditorPlaybackEngine` keeps software frames decoded ahead; this view only
+/// reads them. When `refines` (playhead at rest) and it has held still for
+/// `settleNanoseconds`, an exact full-quality frame replaces the downscaled
+/// preview frame.
 ///
 /// Never draws nothing once it has drawn something: when the server has no
 /// frame for this asset (a playhead jump evicted the old region and the new

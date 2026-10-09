@@ -28,6 +28,14 @@ enum VideoFrameTuning {
     /// most this far past what it has produced — it will catch up faster
     /// than a restart (which re-walks from the previous keyframe) would.
     static let readerCatchUpSeconds = 1.0
+
+    /// A direction flip only takes effect once movement opposite to the
+    /// current direction accumulates past this much source time. Without
+    /// it, the small back-and-forth jitter inside an otherwise one-way drag
+    /// flips `movingBackward` on every single tick that disagrees, and each
+    /// flip changes `isServed`'s own criteria enough to force a reader
+    /// restart — turning a steady forward drag into a stream of restarts.
+    static let directionHysteresisSeconds = 0.12
 }
 
 /// The one source of video pixels for the Stage — the same path for
@@ -60,6 +68,9 @@ final class VideoFrameServer {
         var reader: Reader?
         var lastRequested: Double?
         var movingBackward = false
+        /// Source-time distance moved opposite to `movingBackward` since it
+        /// last flipped — see `VideoFrameTuning.directionHysteresisSeconds`.
+        var reverseAccumulator: Double = 0
     }
 
     private struct Reader {
@@ -94,8 +105,20 @@ final class VideoFrameServer {
     /// change.
     func prefetch(assetId: String, url: URL, atSeconds seconds: Double) {
         var store = stores[assetId] ?? Store()
-        if let last = store.lastRequested, seconds != last {
-            store.movingBackward = seconds < last
+        if let last = store.lastRequested {
+            let delta = seconds - last
+            if delta != 0 {
+                let movingBackwardNow = delta < 0
+                if movingBackwardNow == store.movingBackward {
+                    store.reverseAccumulator = 0
+                } else {
+                    store.reverseAccumulator += abs(delta)
+                    if store.reverseAccumulator >= VideoFrameTuning.directionHysteresisSeconds {
+                        store.movingBackward = movingBackwardNow
+                        store.reverseAccumulator = 0
+                    }
+                }
+            }
         }
         store.lastRequested = seconds
 

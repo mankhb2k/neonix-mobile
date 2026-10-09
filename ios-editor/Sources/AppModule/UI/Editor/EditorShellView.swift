@@ -187,6 +187,7 @@ struct EditorShellView: View {
     }
 
     var body: some View {
+        let _ = PlaybackMetrics.shared.count(.shellBodyEvals)
         Group {
             if isFullscreen {
                 fullscreenStage
@@ -194,13 +195,16 @@ struct EditorShellView: View {
                 windowedShell
             }
         }
+        // Developer-only, hidden unless switched on in Account > Developer.
+        // See PLAYBACK_PIPELINE.md.
+        .overlay(alignment: .top) { PlaybackMetricsHUD().padding(.top, 52) }
         // Ignore `0` — a transient artifact during the cover's presentation
         // animation, not a real measurement (see ui-design-note.md).
         .onPreferenceChange(TitlebarHeightKey.self) { newValue in
             guard newValue > 0 else { return }
             titlebarHeight = newValue
         }
-        .task { engine.prepare() }
+        .task { await engine.prepare() }
         .onDisappear { engine.pause() }
     }
 
@@ -218,16 +222,13 @@ struct EditorShellView: View {
                 let timelineHeight = max(geo.size.height - reservedHeight - (showsToolPanel ? 3 : 2), 0)
 
                 VStack(spacing: 0) {
-                    // `.allowsHitTesting(false)` is load-bearing — see ui-design-note.md.
-                    PreviewCanvas(
+                    StagePreview(
                         composition: project.composition,
                         assets: project.assets,
                         layers: project.layers,
                         filters: project.filters ?? [],
-                        atMs: currentTimeMs,
-                        refinesStills: engine.mode == .idle
+                        engine: engine
                     )
-                    .allowsHitTesting(false)
                     .frame(width: videoBoxSide, height: videoBoxSide)
                     .frame(width: squareSide, height: squareSide)
                     .background(Color(.systemBackground))
@@ -309,15 +310,13 @@ struct EditorShellView: View {
             ZStack(alignment: .bottom) {
                 Color.black.ignoresSafeArea()
 
-                PreviewCanvas(
+                StagePreview(
                     composition: project.composition,
                     assets: project.assets,
                     layers: project.layers,
                     filters: project.filters ?? [],
-                    atMs: currentTimeMs,
-                    refinesStills: engine.mode == .idle
+                    engine: engine
                 )
-                .allowsHitTesting(false)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 fullscreenControlBar(screenWidth: geo.size.width)
@@ -589,6 +588,39 @@ private struct FullscreenScrubber: View {
     private func seek(to x: CGFloat, trackWidth: CGFloat) {
         let fraction = min(max(x / trackWidth, 0), 1)
         engine.scrub(toMs: fraction * engine.maxDurationMs)
+    }
+}
+
+/// Wraps `PreviewCanvas`, reading `engine.currentTimeMs`/`engine.mode`
+/// itself instead of taking them as plain values from the caller. Observing
+/// `@Observable` state inside a view's own `body` ties *that* view's
+/// Observation dependency to the property, not the caller's — so by reading
+/// the playhead here instead of in `EditorShellView.windowedShell`/
+/// `fullscreenStage`, only this small view re-evaluates on every display
+/// tick during Play/scrub, not all of `EditorShellView.body` (toolbar,
+/// timeline, tool panel...). Same isolation `FullscreenScrubber` already
+/// used for the scrub track below.
+private struct StagePreview: View {
+    let composition: V2Composition
+    let assets: [V2Asset]
+    let layers: [V2Layer]
+    let filters: [V2Filter]
+    let engine: EditorPlaybackEngine
+
+    var body: some View {
+        PreviewCanvas(
+            composition: composition,
+            assets: assets,
+            layers: layers,
+            filters: filters,
+            atMs: engine.currentTimeMs,
+            playerEngine: engine,
+            refinesStills: engine.mode == .idle
+        )
+        // Load-bearing — see ui-design-note.md (PreviewCanvas has no
+        // interactive content of its own; without this, its GeometryReader
+        // + .scaleEffect silently absorbs taps meant for sibling buttons).
+        .allowsHitTesting(false)
     }
 }
 

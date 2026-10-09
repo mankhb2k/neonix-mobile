@@ -3,6 +3,51 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
+## Curves — a real draggable tone-curve graph, replacing the parametrized stand-in
+
+Added 2026-10-09, right after the rest of the Tuỳ chỉnh slider list, at the
+user's explicit request ("làm tiếp curves hãy dựng UI riêng" — build Curves
+with its own dedicated UI). The earlier note's Highlights/Shadows/Whites/
+Blacks sliders were always labeled a stand-in until a real curve editor
+existed; this replaces them rather than keeping both (keeping both would
+mean 2 different UIs silently fighting over the same compiled tone curve).
+
+- **`EffectPresetKind.toneCurve`** changed from 4 named scalars
+  (`blacks`/`shadows`/`highlights`/`whites`) to `points: [Double]` — the
+  graph's own 5 output values, applied verbatim (no more deriving them from
+  4 formulas). `AdjustValues.curvePoints: [Double] = [0, 0.25, 0.5, 0.75,
+  1]` (the identity curve) replaced the 4 scalar fields outright.
+- **`UI/Editor/CurveGraphView.swift`** (new) — exactly 5 draggable points at
+  **fixed** x-positions (`0, 0.25, 0.5, 0.75, 1`), matching `FilterRenderer`
+  's `CIToneCurve` mapping's own hard 5-point limit exactly — nothing to
+  resample, the dragged value *is* what reaches Core Image. Only y (output
+  level) is draggable; x never moves, so points can never cross/reorder,
+  meaning `EffectPresetKind.toneCurve` needs no clamping/validation of its
+  own (same "UI proposes only valid values" split every command here
+  already uses). The curve itself is a Catmull-Rom→Bezier smooth spline
+  through the 5 points — same technique as `TimelineView`'s own waveform
+  curve, duplicated rather than shared since that one is `private` to a
+  different file.
+- **`CurveEditorSheet`** (same file) — Curves gets a real **dedicated
+  sheet**, not a slider squeezed into the ~64pt-tall row every other Tuỳ
+  chỉnh control lives in. A 160–280pt-square graph genuinely doesn't fit
+  there; a tap-to-open sheet (with Reset + Done) was the natural answer
+  once "build it a real UI" was the explicit ask. `onBegin`/`onEnd` pass
+  straight through to `CurveGraphView`'s own per-handle `DragGesture` — one
+  undo step per individual point drag, sheet or no sheet, same bracketing
+  shape as every other Tuỳ chỉnh control.
+
+Verified: `EditorCommandTests.swift` gained a test confirming a non-identity
+`curvePoints` array compiles to exactly 1 `feComponentTransfer` primitive
+carrying the array through unchanged. Full 79-test suite green (no test
+referenced the old 4 scalar fields directly, so removing them broke
+nothing). Simulator screenshot (forced `showingCurveEditor = true` +
+`selectedLayerId`, same established method) confirms the sheet renders:
+grid, diagonal identity line, 5 draggable handles, Reset/Done. Actually
+dragging a handle needs a real device/simulator touch — `simctl` can't
+synthesize drags, same standing limitation as every other gesture in this
+app.
+
 ## Văn bản — "Thêm chữ", by reusing the real text-compile pipeline, not hand-built JSON
 
 Added 2026-10-09. `EditorTool.text` existed (bottom-nav scope decided back
@@ -522,7 +567,34 @@ root, same established pattern this file uses elsewhere) confirms the
 come out, is it in sync) needs the user's own ears on a real device — same
 documented limitation this file already has for scrub/momentum feel.
 
-## Play and scrub are one pipeline now — no `AVPlayer` on the Stage
+## Latest playback plan result — native Stage for raw video, explicit Play only
+
+Completed 2026-10-09 (sandbox → editor integration). `PlaybackSandboxView` is
+the isolated baseline: one long-lived `AVPlayer`/`AVPlayerLayer`, serialized
+latest-target seeks via `PlayerSeekCoordinator`, tolerant seeks while dragging,
+and one exact settle seek on release. Scrubbing always pauses and never resumes
+implicitly; the user must tap Play. The editor follows the same rule through
+`EditorPlaybackEngine.beginScrub`/`endScrub`.
+
+The real Stage now uses `StagePlayerSession` + `StagePlayerLayerView` for raw
+video and `AVPlayerItemVideoOutput` → `CVPixelBuffer` → Core Image → Metal for
+filtered video. Both paths avoid materializing a `CGImage` for video frames.
+`VideoProxyService` lazily creates a preview-only 720p H.264 proxy with a
+keyframe every 10 frames in `Caches/VideoProxies`; the original asset remains
+the export source.
+Native sessions are long-lived, reused across playhead updates, paused during
+scrub/coast, and only started from an explicit `play()` call. The engine keeps
+one seek in flight per player and replaces only its pending target, matching
+Apple's serialized-seek guidance. Their native audio output is muted because
+`AudioMixEngine` already plays the extracted video-audio derivative with the
+timeline's trim/gain/fade rules; allowing both would produce duplicate audio.
+
+Verified: device build and test compilation both succeed. Runtime smoothness,
+frame pacing, and the no-autoplay interaction still need a physical iPhone
+run; CoreSimulator is unavailable in this environment and no iPhone destination
+is connected.
+
+## Historical step — frame-server-only Play and scrub
 
 Changed 2026-10-09 (step 2 of the engine plan below), at the user's
 explicit request: "why do play and scroll use two different logics?"

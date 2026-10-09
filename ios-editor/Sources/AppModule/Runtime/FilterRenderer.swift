@@ -46,6 +46,14 @@ enum FilterRenderer {
         // this, the *input* image gets color-matched into Core Image's
         // working space before any primitive ever sees it.
         let source = CIImage(cgImage: image, options: [.colorSpace: NSNull()])
+        let output = apply(filter, to: source)
+        return context.createCGImage(output, from: source.extent, format: .RGBA8, colorSpace: outputColorSpace)
+    }
+
+    /// Evaluates a filter without materializing a `CGImage`. Video preview
+    /// uses this overload with a `CVPixelBuffer`-backed `CIImage` and sends
+    /// the result straight to a Metal drawable.
+    static func apply(_ filter: V2Filter, to source: CIImage) -> CIImage {
         var outputs: [String: CIImage] = ["SourceGraphic": source]
         var last = source
 
@@ -58,8 +66,7 @@ enum FilterRenderer {
             }
             last = output
         }
-
-        return context.createCGImage(last, from: source.extent, format: .RGBA8, colorSpace: outputColorSpace)
+        return last.cropped(to: source.extent)
     }
 
     /// One primitive's own evaluation. Implements exactly what the "Tuỳ
