@@ -6,11 +6,8 @@ import SwiftUI
 /// screen's nav), not CapCut's dark theme — confirmed with the user
 /// 2026-10-07 rather than assumed from the reference screenshot.
 ///
-/// No per-tool screen exists yet (see `EditorTool.swift`'s own doc comment
-/// on the 7-tool v1 scope) — tapping only toggles which tool is
-/// highlighted, nothing opens. Tapping the already-selected tool clears the
-/// selection, so "nothing selected" stays a reachable, honest resting state
-/// given there's no content to show either way.
+/// Tapping selects a tool (its `ToolOptionsPanel` appears above this row if
+/// it has one); tapping the selected tool again clears the selection.
 struct EditorToolbarView: View {
     @Binding var selectedTool: EditorTool?
 

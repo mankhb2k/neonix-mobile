@@ -769,8 +769,7 @@ liệu Ảnh* (nếu để "Tương thích nhất" iOS sẽ chuyển sang H.264/
 Lưu vào Tệp rồi AirDrop file.
 
 **Từ 2026-10-09 mọi màn hình test dùng đúng một clip:** `public/preview/video/iphone-footage.MOV` (HEVC 1080×1920 60 fps,
-keyframe 0.5 s, 89.8 s) — tab Playback Sandbox, tab Video Raw và dự án mẫu của editor đều đọc nó qua
-`UI/Playback/TestFootage.swift` / `SampleClipOverride` (không còn bộ chọn clip stock). File 190 MB nên **không bundle**:
+keyframe 0.5 s, 89.8 s) — dự án mẫu của editor đọc nó qua `SampleClipOverride` (hai tab Playback Sandbox / Video Raw đã được gỡ khỏi app sau khi xong việc) (không còn bộ chọn clip stock). File 190 MB nên **không bundle**:
 đẩy vào máy bằng lệnh `devicectl ... copy to` ở trên (hoặc chép vào `Documents/ImportedMedia` của simulator).
 
 **Bộ clip đề xuất** (mỗi clip 20–40 s, có chuyển động thật): (1) cảnh quay bình thường ở cài đặt mặc định của

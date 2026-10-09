@@ -223,7 +223,7 @@ final class PlaybackMetrics: @unchecked Sendable {
     @MainActor private var startedAt: CFTimeInterval = 0
     @MainActor private var scenario = scenarios[0]
     /// Scenario id plus the optional `PLAYBACK_METRICS_TAG` (Debug) that
-    /// labels an A/B arm, e.g. `T3:adaptive`.
+    /// labels an A/B arm, e.g. `T3:tol0.2`.
     @MainActor private var scenarioLabel = "T0"
     @MainActor private var rows: [Row] = []
     @MainActor private var displayLink: CADisplayLink?

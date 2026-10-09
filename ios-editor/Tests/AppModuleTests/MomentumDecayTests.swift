@@ -27,7 +27,7 @@ final class MomentumDecayTests: XCTestCase {
 
     func testDistanceApproachesTotalDistanceAndNeverOvershoots() {
         let initial = 8000.0
-        let total = decay.totalDistance(initial: initial)
+        let total = initial / decay.rate
         XCTAssertEqual(decay.distance(initial: initial, after: 30), total, accuracy: 1)
         for seconds in stride(from: 0.1, through: 10, by: 0.1) {
             XCTAssertLessThanOrEqual(decay.distance(initial: initial, after: seconds), total)
@@ -54,7 +54,7 @@ final class MomentumDecayTests: XCTestCase {
     func testTravelsFarFurtherThanTheOldBrakingCurve() {
         let oldRate = -log(0.04)
         let initial = 10_000.0
-        let ratio = decay.totalDistance(initial: initial) / (initial / oldRate)
+        let ratio = (initial / decay.rate) / (initial / oldRate)
         XCTAssertGreaterThan(ratio, 1.5)
     }
 
@@ -91,7 +91,7 @@ final class MomentumDecayTests: XCTestCase {
         let base = MomentumDecay.iosNormal
         let half = base.scalingFriction(by: 0.5)
         XCTAssertEqual(half.rate, base.rate * 0.5, accuracy: 1e-9)
-        XCTAssertEqual(half.totalDistance(initial: 1000), base.totalDistance(initial: 1000) * 2, accuracy: 1e-6)
+        XCTAssertEqual(1000 / half.rate, 1000 / base.rate * 2, accuracy: 1e-6)
         XCTAssertEqual(base.scalingFriction(by: 1), base)
     }
 

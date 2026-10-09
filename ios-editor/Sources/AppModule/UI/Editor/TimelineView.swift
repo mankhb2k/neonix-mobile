@@ -99,11 +99,8 @@ struct TimelineView: View {
 
     private var currentTimeMs: Double { engine.currentTimeMs }
     private var maxDurationMs: Double { engine.maxDurationMs }
-    /// Still a placeholder toggle — `AudioMixEngine` (see CLAUDE.md's audio
-    /// roadmap note) now plays real sound, including a video's embedded
-    /// audio derivative, but this button isn't wired to
-    /// `V2VideoPayload.audio.enabled` yet; tapping it only changes this
-    /// view's own local state today.
+    /// Placeholder: the mute button isn't wired to
+    /// `V2VideoPayload.audio.enabled`; it only flips this local state.
     @State private var isMuted = false
     @State private var coverImage: UIImage?
 

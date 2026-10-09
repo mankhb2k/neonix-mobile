@@ -23,9 +23,8 @@ struct EditorShellView: View {
     /// can react to it too (hide play/exit, show the time readout) — see
     /// ui-design-note.md.
     @State private var isScrubbing = false
-    /// Bottom tool row's own highlighted tool — no per-tool screen exists
-    /// yet (see `EditorTool.swift`), so this only drives which icon is
-    /// highlighted, nothing else.
+    /// The tool highlighted in the bottom row; also decides which
+    /// `ToolOptionsPanel` shows above it (none for tools without a panel).
     @State private var selectedTool: EditorTool?
     /// Phase 1 of the "Bottom nav tools" roadmap — see
     /// `EditorCommand.swift`/`EditorHistory.swift`. Every edit goes through
@@ -205,6 +204,10 @@ struct EditorShellView: View {
             titlebarHeight = newValue
         }
         .task { engine.prepare() }
+        #if DEBUG
+        // Env-driven unattended metrics run (`PLAYBACK_METRICS_SCENARIO`); no-op otherwise.
+        .task { await PlaybackMetrics.shared.autoRunIfRequested() }
+        #endif
         .onDisappear { engine.pause() }
     }
 

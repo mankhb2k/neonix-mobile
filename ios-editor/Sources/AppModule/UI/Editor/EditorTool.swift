@@ -9,13 +9,10 @@ import SwiftUI
 /// different tools in real CapCut (one is a LUT color-grade preset picker,
 /// the other is manual sliders), not two names for the same feature.
 ///
-/// **`filter` ("Bộ lọc") was added 2026-10-08, UI-only** — the
-/// `feColorLUT`/`V2LutAsset` Protocol V2 primitives it will eventually
-/// drive already exist (`Protocol/V2Filter.swift`/`V2Types.swift`, see
-/// CLAUDE.md), but nothing wires this tool to them yet: no LUT picker
-/// screen, no bundled `.cube` presets, no import flow. Tapping it only
-/// highlights it, identical to every other tool here — see
-/// `EditorToolbarView.swift`'s own doc comment.
+/// **`filter` ("Bộ lọc") is still a UI-only placeholder** — the
+/// `feColorLUT`/`V2LutAsset` primitives it will drive exist (see CLAUDE.md),
+/// but there is no LUT picker, bundled `.cube` preset or import flow yet, so
+/// tapping it only highlights it.
 ///
 /// Case order matches CapCut's own bottom nav order for the tools this app
 /// kept (confirmed with the user 2026-10-07 when the nav was redesigned).

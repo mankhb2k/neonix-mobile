@@ -16,11 +16,8 @@ import AVFoundation
 /// `EditorPlaybackEngine` only calls `play(atMs:)`/`advance(toMs:)` from its
 /// own `play()`/`playbackTick`. Every `play(atMs:)` call fully stops and
 /// reschedules every active node from scratch at the given time (no
-/// `AVAudioPlayerNode.pause()`/resume bookkeeping) — this also doubles as
-/// the resync point after a frame-decode stall (`EditorPlaybackEngine`
-/// pauses the mix engine for the stall's duration, then the next
-/// `advance(toMs:)` once frames catch up re-activates everything fresh at
-/// the resumed time). This bounds drift between the display-synced clock
+/// `AVAudioPlayerNode.pause()`/resume bookkeeping), which is also the resync
+/// point. This bounds drift between the video player's clock
 /// and the audio hardware clock to "however long one uninterrupted Play run
 /// has lasted since the last resync", not true sample-accurate master-clock
 /// sync — closing that further is the same deferred "real audio clock" work
@@ -111,9 +108,7 @@ final class AudioMixEngine {
         activate(atMs: atMs)
     }
 
-    /// Stops all sound immediately — Pause, end-of-timeline, and a frame
-    /// buffering stall (so audio never runs ahead of a frozen Stage) all
-    /// route through this.
+    /// Stops all sound immediately — Pause, scrub start and end-of-timeline.
     func pause() {
         for (id, node) in activeNodes { stopNode(node, id: id) }
     }

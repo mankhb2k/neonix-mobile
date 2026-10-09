@@ -1,11 +1,8 @@
 import SwiftUI
 
-/// Contextual options panel shown above the bottom nav when a tool that
-/// has real functionality is selected — see the "Bottom nav tools"
-/// roadmap plan for which tools are built vs. still placeholder. Only
-/// `.aspectRatio`/`.background` do anything today (Phase 1); every other
-/// tool still just highlights (`EditorToolbarView`'s own behavior,
-/// unchanged).
+/// Contextual options panel shown above the bottom nav for the selected
+/// tool. Every tool has one except `.filter` (Bộ lọc), which is still a
+/// placeholder — see `EditorTool.hasOptionsPanel`.
 struct ToolOptionsPanel: View {
     let tool: EditorTool
     let composition: V2Composition
@@ -87,9 +84,8 @@ extension EditorTool {
 
 /// Tuỳ chỉnh — every continuous slider this tool has, compiling straight
 /// into `EffectPresetKind`/`SetAdjustCommand` (see CLAUDE.md's "Tuỳ chỉnh"
-/// note): Light/color basics, HSL, white balance, tone curve (Highlights/
-/// Shadows/Whites/Blacks — the stand-in for a real draggable curve graph,
-/// confirmed with the user), and detail/effects. Unlike `AudioOptionsRow`'s
+/// note): Light/color basics, HSL, white balance, a tone curve (the
+/// draggable graph in `CurveEditorSheet`), and detail/effects. Unlike `AudioOptionsRow`'s
 /// volume slider (commit-on-release only), every tick calls `onChange`
 /// live — a grading tool is useless without real-time feedback — while
 /// `onBegin`/`onEnd` (driven by `Slider`'s own `onEditingChanged`) bracket

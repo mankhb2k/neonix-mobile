@@ -437,8 +437,8 @@ private final class FilteredPlayerMetalView: MTKView {
 /// computing, or the unfiltered `source` if there's no filter (or none has
 /// resolved yet). Never renders `Color.clear`/nothing once `source` exists,
 /// same "never show nothing" discipline, and never runs `FilterRenderer` synchronously from `body`
-/// (see CLAUDE.md's "Scrubbing must never re-decode media inline from
-/// `body`" rule — filtering is exactly that same category of work).
+/// (see CLAUDE.md's "Rendering notes": never decode media inline from a
+/// `body` — filtering is exactly that same category of work).
 ///
 /// Used by the `"image"` layer case — the one place this app draws a `CGImage`
 /// onto the Stage; video draws through `AVPlayerLayer`/Metal instead.

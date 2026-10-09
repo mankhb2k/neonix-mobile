@@ -45,11 +45,6 @@ struct MomentumDecay: Equatable {
         initial * (1 - exp(-rate * seconds)) / rate
     }
 
-    /// Where a release at `initial` would come to rest if nothing stopped it.
-    func totalDistance(initial: Double) -> Double {
-        initial / rate
-    }
-
     /// Seconds until the speed falls to `speed`; 0 if it starts at or below it.
     func duration(initial: Double, until speed: Double) -> Double {
         let start = abs(initial)
