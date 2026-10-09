@@ -847,13 +847,16 @@ private struct FilmstripClipView: View {
             }
         }
         .frame(width: clipWidth, height: rowHeight, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: isSelected ? 0 : 6, style: .continuous))
+        // Selected = square corners, so the clip, the frame and the two
+        // handles form one gapless dark band (rounded corners left a wedge
+        // of background next to each handle; user, 2026-10-10).
         // No default border — a plain color block/filmstrip is the resting
         // state (confirmed against a CapCut reference screenshot
         // 2026-10-08). Selection is communicated by the handles plus this
         // thin gray frame connecting them (iOS Photos trim style, added
         // 2026-10-08, replacing the earlier plain white wash).
-        .overlay(isSelected ? RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
+        .overlay(isSelected ? Rectangle().stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
         .overlay(alignment: .leading) {
             if isSelected {
                 TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag)
@@ -1038,15 +1041,12 @@ private struct TrimHandleView: View {
     /// clip (Photos' handles are flush/square against the selection body so
     /// the connecting top/bottom border reads as one continuous frame).
     let corners: UIRectCorner
-    /// Which edge of the clip this handle sits on — used to straddle the
-    /// clip's own boundary (half the hit area inside, half outside) instead
-    /// of sitting flush against it. `.overlay(alignment: .leading/.trailing)`
-    /// on its own anchors the handle's *own* edge to the clip's edge, which
-    /// leaves the whole handle sitting fully inside the clip body — not a
-    /// real bug in logic, but a real visual miss versus CapCut/Photos, where
-    /// the handle visibly grips the cut line itself (caught from a
-    /// screenshot 2026-10-08, fixed with this self-offset rather than
-    /// requiring every call site to remember it).
+    /// Which edge of the clip this handle sits on. The whole handle lies
+    /// *outside* the clip: its inner edge is flush with the clip's edge (the
+    /// time position) and it extends outward, like CapCut — so it never
+    /// covers footage, and at 00:00 the left handle sits left of the
+    /// playhead. (Centred on the border, then fully inside, were both
+    /// rejected by the user, 2026-10-10.)
     let edge: HorizontalEdge
     private let visibleWidth: CGFloat = 14
     private let hitWidth: CGFloat = 28
@@ -1062,9 +1062,9 @@ private struct TrimHandleView: View {
             .fill(Color(white: 0.2))
             .overlay(gripLine)
             .frame(width: visibleWidth, height: handleHeight)
-            .frame(width: hitWidth, height: handleHeight)
+            .frame(width: hitWidth, height: handleHeight, alignment: edge == .leading ? .trailing : .leading)
             .contentShape(Rectangle())
-            .offset(x: edge == .leading ? -hitWidth / 2 : hitWidth / 2)
+            .offset(x: edge == .leading ? -hitWidth : hitWidth)
     }
 
     private var gripLine: some View {
@@ -1326,7 +1326,7 @@ private struct TimelineClipView: View {
     private let minDurationMs: Double = 200
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6)
+        RoundedRectangle(cornerRadius: isSelected ? 0 : 6, style: .continuous)
             // A solid color block, not a translucent tint + stroke — matches
             // the reference CapCut screenshot's flat text/audio blocks
             // (confirmed with the user 2026-10-08, same change as removing
@@ -1334,7 +1334,7 @@ private struct TimelineClipView: View {
             // stroke anymore either; the type is communicated by the fill
             // + icon/label alone.
             .fill(color)
-            .overlay(isSelected ? RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
+            .overlay(isSelected ? Rectangle().stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
             .overlay(alignment: .leading) {
                 HStack(spacing: 4) {
                     Image(systemName: icon)
