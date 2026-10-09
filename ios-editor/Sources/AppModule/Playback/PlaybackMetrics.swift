@@ -73,6 +73,16 @@ final class PlaybackMetrics: @unchecked Sendable {
         /// Wall-clock gap between momentum ticks: the refresh rate and any
         /// main-thread stall the coast actually ran at.
         case coastTickMs = "coast_tick_ms"
+        /// Per display tick while scrubbing/coasting with video: how far (in
+        /// content ms) the frame on screen is from the playhead.
+        case displayErrorMs = "display_error_ms"
+        /// The same error divided by how fast the playhead moves — i.e. how
+        /// many *milliseconds of time* the picture trails the finger. This, not
+        /// the content error, is what touch-latency perception studies
+        /// (~25 ms) are about. Only sampled while the playhead moves > 100 ms/s.
+        case visualLagMs = "visual_lag_ms"
+        /// Not milliseconds: playhead speed in content ms per second, to bin the above.
+        case playheadSpeedMsPerSecond = "playhead_speed_msps"
     }
 
     /// Point-in-time values, last one of the second wins.
@@ -94,6 +104,8 @@ final class PlaybackMetrics: @unchecked Sendable {
         /// `CoastTuning` in force, so a CSV says which arm it is.
         case coastGain = "coast_gain"
         case coastFriction = "coast_friction"
+        /// Slack of the scrub seek most recently issued, in ms.
+        case scrubToleranceMs = "scrub_tolerance_ms"
     }
 
     /// Objects whose live count must stay flat. Tallied always (not only while
@@ -128,6 +140,10 @@ final class PlaybackMetrics: @unchecked Sendable {
         /// is unserved (0 when display and playhead agree). nil = no session.
         var displayAgeMs: Double?
         var hasUnserved = false
+        /// Content ms between the playhead and the frame on screen; nil when
+        /// not scrubbing/coasting or no video session covers the playhead.
+        var displayErrorMs: Double?
+        var playheadSpeedMsPerSecond = 0.0
         var playerSessions = 0
         var sourcesTotal = 0
     }
@@ -391,6 +407,13 @@ final class PlaybackMetrics: @unchecked Sendable {
             self.settleStart = nil
         }
         if let age = probe.displayAgeMs { record(.displayAgeMs, ms: age) }
+        if let error = probe.displayErrorMs {
+            record(.displayErrorMs, ms: error)
+            if probe.playheadSpeedMsPerSecond >= 100 {
+                record(.playheadSpeedMsPerSecond, ms: probe.playheadSpeedMsPerSecond)
+                record(.visualLagMs, ms: error / probe.playheadSpeedMsPerSecond * 1000)
+            }
+        }
         gauge(.unserved, probe.hasUnserved ? 1 : 0)
         gauge(.playerSessions, Double(probe.playerSessions))
         gauge(.sourcesTotal, Double(probe.sourcesTotal))

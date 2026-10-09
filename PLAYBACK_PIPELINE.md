@@ -635,6 +635,42 @@ Hai cột ước lượng của mình (`release_est_px_s`, `release_hold_ms`) l�
 nhiều sự kiện cảm ứng trong một lượt nên thời gian lúc xử lý cách nhau vài micro-giây. Đã đổi sang `value.time` (dấu thời gian
 của chính cú chạm), chưa đo lại.
 
+### 2026-10-09 · T3 · iPhone 13 thật · momentum gain 2.0 + ma sát ×0.7 (bản đã commit 952071b) · 64 s, zoom 0.03–0.46 px/ms
+Một lần chạy, người dùng tự vuốt (72 % coast bị tay ngắt). So với lần máy thật trước (gain 1, ma sát 1, 43 s):
+
+| số đo (khi coasting) | gain 1 | gain 2 · ma sát 0.7 |
+|---|---|---|
+| tốc độ lúc thả, `DragGesture` trung vị | 911 px/s | **1920 px/s** (vuốt mạnh hơn, và đang zoom gần hơn) |
+| quãng trôi trung vị | 347 px | **2138 px (5.5 màn hình)** |
+| coast tắt vì ma sát / chạm biên / bị ngắt | 5 / 5 / 90 % | 16 / 12 / 72 % |
+| seek service p95, seek/s | 26.7 ms, 59 | 27.4 ms, 59 |
+| display age p95, landing error p50 | 33, 73 ms | 30, 74 ms |
+| khung rớt / s | 0.06 | 0.13 (7 khung/64 s, 3 trong giây đầu lúc mở app) |
+
+Coast không bị ngắt ở zoom 0.38: trôi 2700–4500 px (7–12 màn hình) trong ~3.8–4.2 s — khớp mô hình (k = 1.40/s; dừng khi < 50 ms/s nội dung).
+**Gain 2 không làm đường video tệ đi** trong lần chạy này. `DragGesture.velocity` / ước lượng 100 ms cuối của mình: p10 0.33,
+trung vị **0.75**, p90 0.97 — `.velocity` thường thấp hơn tốc độ thật ở 100 ms cuối (chưa biết bên nào "đúng"; chưa chỉnh gì).
+Giới hạn: một lần chạy, zoom đổi liên tục, người vuốt mạnh hơn lần trước nên không so được từng cú một.
+
+### 2026-10-09 · T3 · iPhone 13 thật · dung sai cố định 0.2 s · lần đầu có `visual_lag` (80 s, zoom ~0.09 px/ms, không tag)
+Chỉ có **một** nhánh (dung sai 0.2 s mặc định); các nhánh `0` / `0.05` / `prop:1.5` chưa chạy. Hình trễ sau ngón tay theo tốc độ playhead:
+
+| tốc độ playhead | giây | trễ p50 | trễ p95 | lệch nội dung p50 |
+|---|---|---|---|---|
+| 0.1–0.3 s/s | 3 | **670 ms** | 754 | 115 ms |
+| 0.3–0.6 | 5 | **106 ms** | 611 | 79 ms |
+| 0.6–1.5 | 12 | **67 ms** | 285 | 83 ms |
+| 1.5–3 | 10 | **38 ms** | 167 | 99 ms |
+| 3–8 | 24 | 22 ms | 75 | 122 ms |
+| > 8 s/s | 19 | 10 ms | 39 | 146 ms |
+
+**Đọc:** lệch nội dung gần như không đổi (~80–150 ms, đúng bằng dung sai 0.2 s + trễ seek), nên trễ ∝ 1/tốc độ đúng như dự đoán:
+chỉ khi playhead ≥ ~3 s/s hình mới trễ ≤ 25 ms (p50). **Dưới 1.5 s/s — kéo chậm và cả lúc coast sắp dừng — hình trễ 40–670 ms**,
+tức nhảy từng bậc. Đây là chỗ cần cải thiện, và nó khớp với dung sai cố định, không phải với seek chậm (seek p95 7–35 ms).
+Ngân sách: trễ ≤ 25 ms ⇒ lệch nội dung ≤ 25 ms × tốc độ(s/s) — chính là `prop:1.5` (1.5 khung chuyển động playhead).
+`DragGesture.velocity` / ước lượng 100 ms cuối lần này trung vị **0.45** (lần trước 0.75): `.velocity` báo thấp hơn nhiều.
+Giới hạn: một nhánh, một lần chạy; ngón vuốt nhẹ hơn lần trước (760 px/s).
+
 ### Baseline trên máy thật — tiến độ
 - [ ] T0 · [ ] T1 · [ ] T2 · [~] **T3** (mới có bản coasting-heavy, 2026-10-09) · [ ] T4 · [ ] T5 · [ ] T6 · [ ] T7
 
@@ -692,6 +728,7 @@ của chính cú chạm), chưa đo lại.
 | 2026-10-09 | Thêm lớp đo + HUD + T0–T7 | cần số đo trước khi sửa | — | — | công cụ, không phải sửa. Lần đo đầu đã lộ `engines_alive`=2 (H3) |
 | 2026-10-09 | Đơn giản hoá pipeline (4 bước: bỏ proxy/VideoFrameServer/policy dung sai thích ứng, engine khởi tạo rẻ + `prepare()`) | footage iPhone cho thấy GOP thưa của clip stock mới là nguyên nhân gốc; dung sai thích ứng bị máy thật bác | xem bảng simplified ở §9 | seek p95 27 ms, 54.5 seek/s, bộ nhớ phẳng 41→43 MB, sessions 1, rớt 16 | video path khoẻ trên số; còn nghi dung sai 200 ms (landing error p50 75 ms) và độ dài coast — cần A/B đo, chưa sửa |
 | 2026-10-09 | **Momentum cho trôi xa hơn**: `CoastTuning` gain 2.0 + ma sát ×0.7 (k≈1.40/s thay vì 2.0/s), cố định trong code | iPhone thật: ngón tay thả ~911 px/s trôi ~1.2 màn hình, chuột trên sim ~3165 px/s trôi ~4 màn hình; người dùng thấy máy thật "chậm" | quãng trôi ≈ v/2.0 ≈ 455 px | ≈ gain·v/(0.7·2.0) ≈ 1300 px (~3.3 màn hình) | chọn **theo cảm giác người dùng** ("giá trị hiện tại rất tốt"), không có chuẩn benchmark; chưa đo seek/lệch hình ở tốc độ này trên máy thật. Cú "đá" lúc thả do gain 2 chưa đo |
+| 2026-10-09 | **Gain momentum 2.0 → 4.0** (ma sát ×0.7 giữ nguyên) | người dùng yêu cầu trôi xa hơn nữa ("tăng gain lên 4") | ≈ 1300 px cho cú vuốt 911 px/s | ≈ 2600 px (~6.7 màn hình) | chọn theo cảm giác; cú "đá" lúc thả gấp 4 lần tốc độ ngón chưa đo, video theo kịp 4× tốc độ nội dung chưa đo (dải >8 s/s trước đó trễ 10 ms nên khả quan) |
 
 ## 11. Backlog đo thêm (khi bảng §7 chỉ về một khoảng trống)
 
@@ -738,3 +775,28 @@ keyframe 0.5 s, 89.8 s) — tab Playback Sandbox, tab Video Raw và dự án m�
 **Bộ clip đề xuất** (mỗi clip 20–40 s, có chuyển động thật): (1) cảnh quay bình thường ở cài đặt mặc định của
 máy; (2) 4K 60 fps nếu bạn hay quay; (3) một clip HDR (Dolby Vision) nếu máy đang bật.
 
+
+## 13. Mục tiêu "hình trễ ≤ 25 ms" — đo đúng đại lượng trước khi sửa
+
+Người dùng đặt mục tiêu (2026-10-09): tìm hướng đưa độ trễ hình về ≤ 25 ms.
+
+**Sửa một so sánh sai ở các mục trên.** Ngưỡng ~11 ms (nhận ra) / ~25 ms (hiệu suất giảm) từ nghiên cứu cảm ứng
+(Deber, Jota) là **độ trễ theo thời gian** (ngón → hình). Còn `seek_landing_error_ms` là **sai lệch vị trí nội dung**
+(hình dừng cách vị trí tay bao nhiêu ms *nội dung*). Hai đại lượng liên hệ qua tốc độ: trễ (ms thời gian) = sai lệch nội
+dung ÷ tốc độ playhead. Cùng sai lệch 75 ms nội dung: ở 5 s/s chỉ là 15 ms trễ (không thấy), ở 0.3 s/s là 250 ms trễ
+(hình đứng hẳn rồi nhảy). Vì vậy việc đặt 75 ms cạnh 25 ms trước đây là so táo với cam.
+
+**Số có sẵn (thời gian thật, footage iPhone, máy thật, khi coasting):** seek end-to-end p50 5 ms / p95 29 ms,
+display age p95 30 ms — phần *độ trễ* của đường seek đã gần ngưỡng 25 ms. Chưa có số cho phần *sai lệch nội dung* ở tốc độ
+chậm: các lần chạy thật hầu như toàn coasting (nhanh).
+
+**Phép đo mới** (mỗi tick màn hình lúc scrubbing/coasting): `display_error_ms` (frame đang hiện cách playhead bao nhiêu ms
+nội dung; lấy từ `PlayerSeekCoordinator.lastLandedSeconds`, vì `AVPlayer.currentTime()` báo *đích* của seek đang chạy),
+`playhead_speed_msps`, và `visual_lag_ms` = sai lệch ÷ tốc độ (chỉ lấy mẫu khi playhead > 100 ms/s).
+`scripts/compare_runs.py` in `visual_lag` theo ba dải tốc độ (chậm 0.1–0.6 s/s, vừa, nhanh > 3 s/s).
+
+**A/B dung sai seek** (`ScrubTolerancePolicy`, biến môi trường `PLAYBACK_SCRUB_TOLERANCE`, chạy bằng
+`scripts/run_tolerance_arm.sh`): cố định `0.2` (hiện tại), `0` (luôn chính xác), `0.05`, và `prop:1.5` (slack = 1.5 khung của
+chuyển động playhead, trần 0.2 s). Tiêu chí: `visual_lag` p95 ≤ 25 ms ở dải chậm và vừa, **không** làm seek service p95 > 35 ms
+hay seek/s < 50. Lưu ý: lần thử dung sai thích ứng trước (H10) đánh giá bằng `landing_error` nội dung, không phải độ trễ
+theo thời gian, nên kết luận "tệ hơn" của nó cần xem lại bằng phép đo mới.

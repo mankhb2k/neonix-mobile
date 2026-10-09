@@ -174,3 +174,28 @@ final class EditorPlaybackEngineTests: XCTestCase {
         )
     }
 }
+
+
+final class ScrubTolerancePolicyTests: XCTestCase {
+    func testDefaultIsFixedTwoHundredMilliseconds() {
+        XCTAssertEqual(ScrubTolerancePolicy().seconds(forSpeedMsPerSecond: 5000), 0.2)
+        XCTAssertEqual(ScrubTolerancePolicy().seconds(forSpeedMsPerSecond: 0), 0.2)
+    }
+
+    func testParsingFixedAndProportionalAndRejectingGarbage() {
+        XCTAssertEqual(ScrubTolerancePolicy(parsing: "0")?.seconds(forSpeedMsPerSecond: 900), 0)
+        XCTAssertEqual(ScrubTolerancePolicy(parsing: "0.05")?.seconds(forSpeedMsPerSecond: 900), 0.05)
+        XCTAssertEqual(ScrubTolerancePolicy(parsing: "prop:1.5")?.kind, .proportional(frames: 1.5, capSeconds: 0.2))
+        XCTAssertNil(ScrubTolerancePolicy(parsing: "fast"))
+        XCTAssertNil(ScrubTolerancePolicy(parsing: "prop:x"))
+    }
+
+    func testProportionalSlackIsFramesOfMotionAndCapped() throws {
+        let policy = try XCTUnwrap(ScrubTolerancePolicy(parsing: "prop:1.5"))
+        // 600 ms/s = 10 ms per 60 Hz frame; 1.5 frames = 15 ms.
+        XCTAssertEqual(policy.seconds(forSpeedMsPerSecond: 600), 0.015, accuracy: 1e-9)
+        XCTAssertEqual(policy.seconds(forSpeedMsPerSecond: -600), 0.015, accuracy: 1e-9)
+        XCTAssertEqual(policy.seconds(forSpeedMsPerSecond: 0), 0)
+        XCTAssertEqual(policy.seconds(forSpeedMsPerSecond: 100_000), 0.2)
+    }
+}

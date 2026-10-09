@@ -96,6 +96,15 @@ def summarize(rows):
     out["seeks completed / s while coasting (median)"] = fmt(med(col(rows, "seek_completed", coasting)), 1)
     out["dropped frames / s while coasting (mean)"] = fmt(
         st.fmean(col(rows, "dropped_frames", coasting)) if col(rows, "dropped_frames", coasting) else None, 2)
+    # How far the picture trails the finger, in ms of time (display error / playhead speed), by playhead speed.
+    for lo, hi, label in ((100, 600, "slow drag 0.1-0.6 s/s"), (600, 3000, "medium 0.6-3 s/s"), (3000, 1e12, "fast > 3 s/s")):
+        sel = lambda r, lo=lo, hi=hi: (num(r, "playhead_speed_msps_p50") or 0) >= lo and (num(r, "playhead_speed_msps_p50") or 0) < hi
+        lag50 = col(rows, "visual_lag_ms_p50", sel)
+        lag95 = col(rows, "visual_lag_ms_p95", sel)
+        err50 = col(rows, "display_error_ms_p50", sel)
+        out[f"picture trails finger, {label}"] = (
+            f"{len(lag50)} s | lag p50 {fmt(med(lag50))} ms, p95 {fmt(med(lag95))} ms | content err p50 {fmt(med(err50))} ms")
+    out["scrub tolerance in force, ms (median)"] = fmt(med(col(rows, "scrub_tolerance_ms")), 1)
     out["timeline zoom, px/ms (median)"] = fmt(med([r["_zoom"] for r in rows]), 3)
     return out
 

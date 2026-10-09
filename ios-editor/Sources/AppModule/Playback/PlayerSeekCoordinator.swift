@@ -1,6 +1,55 @@
 import AVFoundation
 import QuartzCore
 
+/// How much slack a scrub seek may take around its target (the rest seek is
+/// always exact). A looser tolerance lets AVFoundation stop at a nearby
+/// keyframe (cheap, but the picture can be up to that far from the playhead).
+///
+/// Two policies exist so they can be A/B-tested on a device — see
+/// `PLAYBACK_PIPELINE.md` § 13. Default is the fixed 0.2 s used since the
+/// pipeline simplification. Debug builds read `PLAYBACK_SCRUB_TOLERANCE`:
+/// `"0.2"` (fixed seconds, `"0"` = always exact) or `"prop:1.5"` (slack equal
+/// to 1.5 display frames of playhead motion, capped at 0.2 s).
+struct ScrubTolerancePolicy: Equatable {
+    enum Kind: Equatable {
+        case fixed(seconds: Double)
+        case proportional(frames: Double, capSeconds: Double)
+    }
+
+    var kind = Kind.fixed(seconds: 0.2)
+
+    static var current: ScrubTolerancePolicy {
+        #if DEBUG
+        if let raw = ProcessInfo.processInfo.environment["PLAYBACK_SCRUB_TOLERANCE"] {
+            return ScrubTolerancePolicy(parsing: raw) ?? ScrubTolerancePolicy()
+        }
+        #endif
+        return ScrubTolerancePolicy()
+    }
+
+    init(kind: Kind = .fixed(seconds: 0.2)) { self.kind = kind }
+
+    init?(parsing raw: String) {
+        if raw.hasPrefix("prop:"), let frames = Double(raw.dropFirst(5)), frames >= 0 {
+            kind = .proportional(frames: frames, capSeconds: 0.2)
+        } else if let seconds = Double(raw), seconds >= 0 {
+            kind = .fixed(seconds: seconds)
+        } else {
+            return nil
+        }
+    }
+
+    /// `speedMsPerSecond` is how fast the playhead is moving in content time.
+    func seconds(forSpeedMsPerSecond speed: Double, refreshHz: Double = 60) -> Double {
+        switch kind {
+        case .fixed(let seconds):
+            return seconds
+        case .proportional(let frames, let cap):
+            return min(cap, frames * (abs(speed) / 1000) / refreshHz)
+        }
+    }
+}
+
 /// Serializes AVPlayer seeks while keeping only the newest requested target.
 ///
 /// A drag can generate many target times before AVFoundation finishes one
@@ -25,6 +74,12 @@ final class PlayerSeekCoordinator {
     private var pending: Request?
 
     private(set) var isSeekInProgress = false
+
+    /// Where the last completed seek actually put the player (source seconds).
+    /// `AVPlayer.currentTime()` already reports a seek's *target* while the
+    /// seek is still running, so metrics read this instead to know which frame
+    /// is really on screen.
+    private(set) var lastLandedSeconds: Double?
 
     /// For `PlaybackMetrics` only. The display shows the frame of the last
     /// seek that completed; while anything is still unserved, that frame's
@@ -126,6 +181,7 @@ final class PlayerSeekCoordinator {
                 if finished {
                     let landed = self.player.currentTime().seconds
                     if landed.isFinite {
+                        self.lastLandedSeconds = landed
                         metrics.record(.seekLandingErrorMs, ms: abs(landed - request.time.seconds) * 1000)
                     }
                 }

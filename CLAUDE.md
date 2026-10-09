@@ -3,19 +3,20 @@
 Working notes for Claude Code sessions in this repo. See `ARCHITECTURE.md`
 for the full picture; this file is the short, load-bearing rule list.
 
-## Momentum glide is retuned, by feel — `CoastTuning` (gain 2.0, friction ×0.7)
+## Momentum glide is retuned, by feel — `CoastTuning` (gain 4.0, friction ×0.7)
 
 Changed 2026-10-09 at the user's request after a simulator-vs-iPhone log
 comparison (`PLAYBACK_PIPELINE.md` § 9): the native `UIScrollView` curve was
 already in use, but a real finger lifts at ~900 pt/s (a simulator mouse
 flick ~3200 pt/s), so on the phone a flick glided only ~1.2 screens.
-`Playback/MomentumDecay.swift`'s `CoastTuning` multiplies the lift speed by 2
-and the decay constant by 0.7 (≈3.3 screens for the median flick). **These
+`Playback/MomentumDecay.swift`'s `CoastTuning` multiplies the lift speed by 4
+(2 at first, raised the same day) and the decay constant by 0.7 (≈6.5 screens
+for a 900 pt/s flick). **These
 two numbers were chosen by the user's feel on the device, not by a benchmark**
 — there is no published figure for timeline glide distance; don't "correct"
 them toward the native curve without asking. Known, unmeasured side effects:
-gain 2 makes content jump to twice the finger's speed at lift, and the video
-seeks must keep up with twice the content speed.
+gain 4 makes content jump to four times the finger's speed at lift, and the
+video seeks must keep up with four times the content speed.
 
 ## Timeline zoom — pinch with two fingers, limits defined by what the ruler shows
 

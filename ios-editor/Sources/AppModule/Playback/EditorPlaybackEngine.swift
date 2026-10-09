@@ -71,12 +71,11 @@ final class EditorPlaybackEngine {
     /// from scrubbing/coasting.
     @ObservationIgnored private lazy var audioMixEngine = AudioMixEngine()
 
-    /// How far from the requested time a scrub seek may land, in seconds.
-    /// Anything up to a keyframe's distance saves the decoder a walk; 0.2 s
-    /// is half the keyframe spacing of camera footage (0.5 s). A speed-adaptive
-    /// tolerance was tried and removed (device: no faster, twice the error —
-    /// `PLAYBACK_PIPELINE.md` § 9, H10). At rest the seek is exact (0).
-    private static let scrubToleranceSeconds = 0.2
+    /// How far from the requested time a scrub seek may land. Fixed 0.2 s (half
+    /// the 0.5 s keyframe spacing of camera footage) unless a Debug env var
+    /// selects another policy — see `ScrubTolerancePolicy` and
+    /// `PLAYBACK_PIPELINE.md` § 13. At rest the seek is exact (0).
+    private let scrubTolerance = ScrubTolerancePolicy.current
     /// A flick slower than this just stops; faster starts a coast.
     private static let minimumCoastMsPerSecond = 40.0
     /// Native scroll-view curve, retuned for glide distance — see `CoastTuning`.
@@ -312,10 +311,37 @@ final class EditorPlaybackEngine {
     private func setTime(_ ms: Double) {
         PlaybackMetrics.shared.count(.setTimeCalls)
         currentTimeMs = clamped(ms)
+        updatePlayheadSpeed()
         if hasVideoAtCurrentTime, mode == .scrubbing || mode == .coasting {
-            seekStageSessions(atMs: currentTimeMs, toleranceSeconds: Self.scrubToleranceSeconds)
+            let tolerance = scrubTolerance.seconds(forSpeedMsPerSecond: playheadSpeedMsPerSecond)
+            PlaybackMetrics.shared.gauge(.scrubToleranceMs, tolerance * 1000)
+            seekStageSessions(atMs: currentTimeMs, toleranceSeconds: tolerance)
         }
     }
+
+    /// Playhead speed in content ms/s, re-estimated over windows of at least
+    /// 40 ms so bursts of touch events (which arrive microseconds apart)
+    /// can't produce absurd instantaneous speeds. Reads as 0 once the playhead
+    /// has been still for 100 ms.
+    private var playheadSpeedMsPerSecond: Double {
+        CACurrentMediaTime() - speedUpdatedAt > 0.1 ? 0 : speedEstimate
+    }
+
+    private func updatePlayheadSpeed() {
+        let now = CACurrentMediaTime()
+        let elapsed = now - speedWindowStartAt
+        guard elapsed >= 0.04 else { return }
+        if elapsed < 0.25 {
+            speedEstimate = abs(currentTimeMs - speedWindowStartMs) / elapsed
+            speedUpdatedAt = now
+        }
+        speedWindowStartAt = now
+        speedWindowStartMs = currentTimeMs
+    }
+    @ObservationIgnored private var speedEstimate = 0.0
+    @ObservationIgnored private var speedUpdatedAt: CFTimeInterval = 0
+    @ObservationIgnored private var speedWindowStartAt: CFTimeInterval = 0
+    @ObservationIgnored private var speedWindowStartMs = 0.0
 
     private func setTimeFromNativeClock(_ ms: Double) {
         currentTimeMs = clamped(ms)
@@ -345,6 +371,19 @@ final class EditorPlaybackEngine {
             }
         }
         probe.displayAgeMs = worstAge
+        if mode == .scrubbing || mode == .coasting {
+            var worstError: Double?
+            for source in videoSources {
+                guard currentTimeMs >= source.mapping.layerStartMs,
+                      currentTimeMs < source.mapping.layerStartMs + source.mapping.durationMs,
+                      let landed = stageSessions[source.layerId]?.seekCoordinator.lastLandedSeconds
+                else { continue }
+                let shown = source.mapping.timelineMs(atSourceMs: landed * 1000)
+                worstError = max(worstError ?? 0, abs(currentTimeMs - shown))
+            }
+            probe.displayErrorMs = worstError
+            probe.playheadSpeedMsPerSecond = playheadSpeedMsPerSecond
+        }
         probe.playerSessions = stageSessions.count
         probe.sourcesTotal = videoSources.count
         return probe
