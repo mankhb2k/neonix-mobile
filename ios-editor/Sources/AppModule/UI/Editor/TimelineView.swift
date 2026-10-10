@@ -85,6 +85,11 @@ struct TimelineView: View {
     @State private var releaseEstimator = ReleaseVelocityEstimator()
     /// Axis the current one-finger drag locked to (see `LaneScroll`).
     @State private var dragAxis: LaneScroll.Axis?
+    /// A trim handle is being dragged. The scrub drag is simultaneous with the
+    /// handles' own drag, so without this it would scrub the playhead under the
+    /// finger while a clip is trimmed (`dragIsTrim` latches it per touch).
+    @State private var isTrimming = false
+    @State private var dragIsTrim = false
     /// Only the main (primary video) lane uses this height — every other
     /// lane, including every standalone audio track, uses the smaller
     /// `otherRowHeight` instead. Confirmed with the user 2026-10-08: the
@@ -242,7 +247,7 @@ struct TimelineView: View {
                     // separate always-on-top overlay. Spans the panel's full
                     // height (not just `panelHeight`), same as the drag
                     // surface below — see this file's own note on why.
-                    PlayheadOverlay(centerX: centerX, totalHeight: geo.size.height)
+                    PlayheadOverlay(centerX: centerX, topInset: rulerHeight - 2, totalHeight: geo.size.height)
                 }
                 // The drag/hit-test area covers the *entire* panel height
                 // handed to this view, not just the ruler+tracks' own
@@ -280,10 +285,18 @@ struct TimelineView: View {
                             pinchBaseScale = nil
                         }
                 )
+                // Touch-down on a gliding timeline brakes it. The scrub drag below only
+                // starts after 2 pt of movement, so a plain touch would not stop the coast.
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0)
+                        .onEnded { _ in engine.brake() }
+                )
                 // Simultaneous so the lanes' `ScrollView` still gets vertical drags.
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 2)
                         .onChanged { value in
+                            if isTrimming { dragIsTrim = true }
+                            guard !dragIsTrim else { return }
                             if isPinching {
                                 dragNeedsRebase = true
                                 return
@@ -314,10 +327,12 @@ struct TimelineView: View {
                         }
                         .onEnded { value in
                             let axis = dragAxis
+                            let wasTrim = dragIsTrim || isTrimming
+                            dragIsTrim = false
                             dragAxis = nil
                             dragNeedsRebase = false
                             dragRebaseX = 0
-                            guard !isPinching, axis == .horizontal else { return }
+                            guard !wasTrim, !isPinching, axis == .horizontal else { return }
                             let metrics = PlaybackMetrics.shared
                             if metrics.isRecording {
                                 metrics.record(.releaseFingerPxPerSecond, ms: abs(Double(value.velocity.width)))
@@ -345,7 +360,6 @@ struct TimelineView: View {
         // — a plain `VStack` with one fixed-height child centers it by
         // default once the parent gives it more height than it needs.
         .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, 10)
         .background(Color(.systemBackground))
         .task(id: coverAssetKey) {
             await loadCoverImage()
@@ -375,6 +389,12 @@ struct TimelineView: View {
             onTrimUpdate: onTrimUpdate,
             onTrimEnd: onTrimEnd
         )
+        // Touch-down on a handle (before any drag distance) so the scrub never gets a
+        // head start — it could otherwise move the playhead a few points first.
+        .environment(\.onTrimTouch) { touching in
+            isTrimming = touching
+            if touching, engine.mode == .scrubbing { engine.endScrub(velocityMsPerSecond: 0) }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(isMainLane ? "lane-main" : "lane-\(order)")
     }
@@ -438,18 +458,21 @@ struct TimelineView: View {
 /// underneath it to keep it visible everywhere along its height.
 private struct PlayheadOverlay: View {
     let centerX: CGFloat
+    /// The line starts below the ruler's labels so it never strikes through the
+    /// "00:00" centred on it (CapCut does the same).
+    let topInset: CGFloat
     let totalHeight: CGFloat
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(Color.black.opacity(0.25))
-                .frame(width: 4, height: totalHeight)
-                .offset(x: centerX - 2)
+                .frame(width: 4, height: max(totalHeight - topInset, 0))
+                .offset(x: centerX - 2, y: topInset)
             Rectangle()
                 .fill(Color.white)
-                .frame(width: 2, height: totalHeight)
-                .offset(x: centerX - 1)
+                .frame(width: 2, height: max(totalHeight - topInset, 0))
+                .offset(x: centerX - 1, y: topInset)
         }
     }
 }
@@ -715,50 +738,47 @@ private struct TimeRulerView: View {
         let lastMs = min(windowMs.upperBound, maxDurationMs)
         let originX = CGFloat(firstMs) * pxPerMs
         let width = max(CGFloat(lastMs - firstMs) * pxPerMs, 1)
+        // Labels are centred on their tick, so the canvas reaches `pad` past the
+        // ticks each side — otherwise the "00:00" at the start would be cut in half.
+        let pad: CGFloat = 40
         ZStack(alignment: .topLeading) {
             Canvas { context, size in
                 var index = max(Int((firstMs / intervals.minorMs).rounded(.down)), 0)
                 var ms = Double(index) * intervals.minorMs
                 while ms <= lastMs {
-                    let x = CGFloat(ms) * pxPerMs - originX
-                    let isMajor = index % majorEvery == 0
-                    let tickHeight: CGFloat = isMajor ? 7 : 4
-                    context.stroke(
-                        Path { path in
-                            path.move(to: CGPoint(x: x, y: size.height - tickHeight))
-                            path.addLine(to: CGPoint(x: x, y: size.height))
-                        },
-                        with: .color(.secondary),
-                        lineWidth: 1
-                    )
-                    if isMajor {
+                    let point = CGPoint(x: CGFloat(ms) * pxPerMs - originX + pad, y: size.height / 2)
+                    if index % majorEvery == 0 {
+                        // The label takes the dot's place, centred on it.
                         context.draw(
                             Text(TimelineZoom.rulerLabel(ms: ms, majorMs: intervals.majorMs, fps: fps)).font(.caption2).foregroundColor(.secondary),
-                            at: CGPoint(x: x + 2, y: size.height / 2 - 6),
-                            anchor: .leading
+                            at: point,
+                            anchor: .center
+                        )
+                    } else {
+                        context.fill(
+                            Path(ellipseIn: CGRect(x: point.x - 1.5, y: point.y - 1.5, width: 3, height: 3)),
+                            with: .color(.secondary)
                         )
                     }
                     index += 1
                     ms = Double(index) * intervals.minorMs
                 }
             }
-            .frame(width: width)
-            .offset(x: originX)
+            .frame(width: width + 2 * pad)
+            .offset(x: originX - pad)
         }
         .frame(width: contentWidth, alignment: .topLeading)
     }
 }
 
-/// A video track's clip, rendered as a real filmstrip — one square tile per
-/// `rowHeight`-wide slice of the clip, each showing the actual decoded
-/// frame at that point. Every tile's thumbnail is fetched in **one batch**
-/// (`VideoFrameCache.filmstripImages`, AVFoundation's own
-/// `generateCGImagesAsynchronously` API) when the clip appears or its width
-/// changes, rather than each tile firing its own independent decode —
-/// real editors build filmstrips this way (see CLAUDE.md's scrubbing-lag
-/// investigation, 2026-10-08). Not yet windowed to only on-screen tiles —
-/// fine for this app's short sample clips; a very long clip would want
-/// that back (see `VideoFrameCache.filmstripImages`'s own doc comment).
+/// A video track's clip, rendered as a window onto the **source video's**
+/// filmstrip. Tiles are `rowHeight` points wide and anchored to source time 0
+/// (see `FilmstripGrid`); the clip only crops that strip, so trimming moves the
+/// window and never slides, regenerates or blanks the thumbnails — extending a
+/// trim reveals frames that already exist. Thumbnails come from
+/// `VideoFrameCache`: a whole-video base grid (one per second, shared by every
+/// clip of the asset) plus window-only detail when zoomed in past it. See
+/// CLAUDE.md "Rendering notes".
 ///
 /// When `audioURL` is present (the video asset has an embedded-audio
 /// derivative — see `TimelineView.audioDerivativeURL(for:)`), a thin
@@ -797,48 +817,85 @@ private struct FilmstripClipView: View {
     /// means the drag does nothing past the known-safe range until the
     /// duration arrives, which is normally near-instant).
     @State private var assetDurationMs: Double?
-    /// Every tile's decoded thumbnail, fetched in one batch (see
-    /// `VideoFrameCache.filmstripImages`) rather than per-tile — keyed by
-    /// tile index, matching the order `tileSeconds(_:)` produces.
-    @State private var tileImages: [Int: UIImage] = [:]
-    /// Which layout (`tileCount`/trim/rate) `tileImages` belongs to — an
-    /// index means a different moment once any of those change.
-    @State private var imagesLayout: FilmstripBatchKey?
+    /// Detail thumbnails for the visible tiles, valid only for `detailImagesStepMs`
+    /// (index `j` = source time `j × step`). Zoom changes the step and drops them;
+    /// the base grid in `VideoFrameCache` covers the gap meanwhile.
+    @State private var detailImages: [Int: UIImage] = [:]
+    @State private var detailImagesStepMs: Double?
     private let minDurationMs: Double = 200
-    /// Thumbnails kept beyond the window, in tiles, before they are dropped.
+    /// Detail thumbnails kept beyond the window, in tiles.
     private let tileRetention = 24
+
+    private var mapping: VideoTimeMapping? { VideoTimeMapping(layer: layer) }
+    private var rate: Double { mapping?.rate ?? 1 }
 
     private var clipWidth: CGFloat {
         max(CGFloat(layer.timing.duration) * pxPerMs, 28)
     }
 
-    private var tileCount: Int {
-        max(Int((clipWidth / rowHeight).rounded(.up)), 1)
+    /// How far the strip is shifted left so the clip's `trimStart` sits at its left edge.
+    private var trimStartPx: Double {
+        (mapping?.trimStartMs ?? 0) * pxPerMs / rate
     }
 
-    /// The tiles that fall inside `windowMs`; `nil` when the clip is entirely
-    /// outside it. At full zoom-in a clip is hundreds of tiles wide, and only
-    /// these are ever created or fetched.
+    /// Source time one tile spans at this zoom.
+    private var tileSourceMs: Double {
+        Double(rowHeight) * rate / pxPerMs
+    }
+
+    private var baseStepMs: Double? {
+        assetDurationMs.map(FilmstripGrid.baseStepMs(durationMs:))
+    }
+
+    private var detailStepMs: Double? {
+        guard let baseStepMs else { return nil }
+        return FilmstripGrid.detailStepMs(baseStepMs: baseStepMs, tileSourceMs: tileSourceMs)
+    }
+
+    /// The tiles inside `windowMs` (clipped to the clip itself); `nil` when the clip
+    /// is entirely outside it. At full zoom-in a clip is hundreds of tiles wide, and
+    /// only these are ever created or fetched.
     private var visibleTiles: ClosedRange<Int>? {
-        let tileMs = Double(rowHeight) / pxPerMs
-        let start = layer.timing.start
-        let first = max(Int(((windowMs.lowerBound - start) / tileMs).rounded(.down)), 0)
-        let last = min(Int(((windowMs.upperBound - start) / tileMs).rounded(.up)), tileCount - 1)
-        return first <= last ? first...last : nil
+        let lower = max((windowMs.lowerBound - layer.timing.start) * pxPerMs, 0)
+        let upper = min((windowMs.upperBound - layer.timing.start) * pxPerMs, Double(clipWidth))
+        return FilmstripGrid.tiles(lower: lower, upper: upper, trimStartPx: trimStartPx, tileWidth: Double(rowHeight))
+    }
+
+    /// Detail index (`j`) of tile `k` at `step`, clamped to the video.
+    private func detailIndex(tile k: Int, step: Double) -> Int {
+        let maxIndex = Int((assetDurationMs ?? 0) / step)
+        return min(max(Int((Double(k) * tileSourceMs / step).rounded()), 0), maxIndex)
+    }
+
+    /// Best thumbnail already available for tile `k`: its detail frame, else the
+    /// nearest base frame (so a tile is never blank once any base frame exists).
+    private func image(forTile k: Int, base: [Int: UIImage]) -> UIImage? {
+        if let step = detailStepMs, detailImagesStepMs == step,
+           let image = detailImages[detailIndex(tile: k, step: step)] {
+            return image
+        }
+        guard let baseStepMs else { return nil }
+        let center = Int((Double(k) * tileSourceMs / baseStepMs).rounded())
+        for distance in 0...8 {
+            if let image = base[center - distance] ?? base[center + distance] { return image }
+        }
+        return nil
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        let base = assetId.flatMap { VideoFrameCache.shared.baseThumbs[$0] } ?? [:]
+        return ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 if let tiles = visibleTiles {
-                    Color.clear.frame(width: CGFloat(tiles.lowerBound) * rowHeight, height: rowHeight)
                     ForEach(tiles, id: \.self) { index in
-                        FilmstripTileView(image: tileImages[index])
-                            .frame(width: tileWidth(index), height: rowHeight)
+                        FilmstripTileView(image: image(forTile: index, base: base))
+                            .frame(width: rowHeight, height: rowHeight)
                             .clipped()
                     }
                 }
             }
+            .offset(x: CGFloat((visibleTiles?.lowerBound ?? 0)) * rowHeight - CGFloat(trimStartPx))
+            .frame(width: clipWidth, height: rowHeight, alignment: .leading)
 
             if let audioURL {
                 WaveformStripView(audioURL: audioURL, pointCount: min(max(Int(clipWidth / 8), 1), 1500))
@@ -859,12 +916,12 @@ private struct FilmstripClipView: View {
         .overlay(isSelected ? Rectangle().stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
         .overlay(alignment: .leading) {
             if isSelected {
-                TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag)
+                TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag).modifier(TrimTouchModifier())
             }
         }
         .overlay(alignment: .trailing) {
             if isSelected {
-                TrimHandleView(rowHeight: rowHeight, corners: [.topRight, .bottomRight], edge: .trailing).gesture(rightHandleDrag)
+                TrimHandleView(rowHeight: rowHeight, corners: [.topRight, .bottomRight], edge: .trailing).gesture(rightHandleDrag).modifier(TrimTouchModifier())
             }
         }
         .offset(x: CGFloat(layer.timing.start) * pxPerMs)
@@ -872,36 +929,35 @@ private struct FilmstripClipView: View {
         // clips in the shared lane ZStack so a drag never gets visually
         // occluded by the clip next door (2026-10-08 fix).
         .zIndex(isSelected ? 1 : 0)
-        .task(id: isSelected) {
-            guard isSelected, let assetURL else { return }
-            assetDurationMs = await AssetDurationCache.shared.durationMs(url: assetURL)
+        // The video's duration (also the right handle's clamp) and its whole-video
+        // base filmstrip, requested once per asset — nearest the clip's own
+        // footage first.
+        .task(id: assetId) {
+            guard let assetId, let assetURL else { return }
+            guard let duration = await AssetDurationCache.shared.durationMs(url: assetURL) else { return }
+            assetDurationMs = duration
+            let center = (mapping?.trimStartMs ?? 0) + layer.timing.duration * rate / 2
+            VideoFrameCache.shared.ensureBaseThumbnails(assetId: assetId, url: assetURL, durationMs: duration, priorityMs: center)
         }
-        // Batches every tile's thumbnail in one `generateCGImagesAsynchronously`
-        // call (see `VideoFrameCache.filmstripImages`) instead of each tile
-        // firing its own request — keyed on `assetId`/`tileCount` so a trim
-        // that changes the clip's own width re-fetches the (now different)
-        // tile times, but ordinary re-renders (e.g. selection toggling)
-        // don't re-trigger it. Consumes the stream tile-by-tile (not one
-        // final collected dictionary) so tiles fill in as each decode
-        // actually finishes, not all at once after the whole batch settles.
-        .task(id: FilmstripWindowKey(layout: batchKey, tiles: visibleTiles)) {
-            guard let assetId, let assetURL, let tiles = visibleTiles else { return }
-            // Debounced: while a pinch is in progress `tileCount` changes on
-            // every frame, and each change restarts this task — only the
-            // value the zoom settles on should trigger a thumbnail batch.
+        // Detail frames only when zoomed in past the base grid, for the visible tiles.
+        // Debounced: a pinch or a trim drag changes the key every frame, and only the
+        // value it settles on should start a decode. Until it lands the tile shows the
+        // nearest base frame.
+        .task(id: FilmstripDetailKey(assetId: assetId, stepMs: detailStepMs, tiles: visibleTiles)) {
+            guard let assetId, let assetURL, let step = detailStepMs, let tiles = visibleTiles else { return }
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
-            if imagesLayout != batchKey {
-                tileImages = [:]
-                imagesLayout = batchKey
+            if detailImagesStepMs != step {
+                detailImages = [:]
+                detailImagesStepMs = step
             }
-            let keep = (tiles.lowerBound - tileRetention)...(tiles.upperBound + tileRetention)
-            tileImages = tileImages.filter { keep.contains($0.key) }
-            let missing = tiles.filter { tileImages[$0] == nil }
-            guard !missing.isEmpty else { return }
-            let times = missing.map(tileSeconds)
+            let keep = detailIndex(tile: tiles.lowerBound - tileRetention, step: step)...detailIndex(tile: tiles.upperBound + tileRetention, step: step)
+            detailImages = detailImages.filter { keep.contains($0.key) }
+            let needed = Set(tiles.map { detailIndex(tile: $0, step: step) }).filter { detailImages[$0] == nil }.sorted()
+            guard !needed.isEmpty else { return }
+            let times = needed.map { Double($0) * step / 1000 }
             for await (offset, image) in VideoFrameCache.shared.filmstripImages(assetId: assetId, url: assetURL, times: times) {
-                if let image { tileImages[missing[offset]] = image }
+                if let image { detailImages[needed[offset]] = image }
             }
         }
     }
@@ -915,7 +971,7 @@ private struct FilmstripClipView: View {
     /// `trimStart`/`duration` are derived from the *resolved* start (the
     /// actual applied delta), not the raw requested one.
     private var leftHandleDrag: some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 if dragStartLayer == nil {
                     dragStartLayer = layer
@@ -968,7 +1024,7 @@ private struct FilmstripClipView: View {
     /// pushes every later clip in the lane later by the same amount);
     /// dragging left shrinks (and pulls every later clip back closer).
     private var rightHandleDrag: some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 if dragStartLayer == nil {
                     dragStartLayer = layer
@@ -1006,26 +1062,6 @@ private struct FilmstripClipView: View {
                 onTrimEnd()
             }
     }
-
-    private var batchKey: FilmstripBatchKey {
-        let mapping = VideoTimeMapping(layer: layer)
-        return FilmstripBatchKey(assetId: assetId, tileCount: tileCount, trimStartMs: mapping?.trimStartMs, rate: mapping?.rate)
-    }
-
-    private func tileWidth(_ index: Int) -> CGFloat {
-        let start = CGFloat(index) * rowHeight
-        return min(rowHeight, clipWidth - start)
-    }
-
-    /// Source time (inside the asset file) shown at this tile's left edge —
-    /// not timeline time, which ignored `trimStart` and showed the wrong
-    /// footage for trimmed clips or any clip not starting at source 0.
-    private func tileSeconds(_ index: Int) -> Double {
-        let localMs = Double(index) * Double(rowHeight) / pxPerMs
-        let timelineMs = layer.timing.start + localMs
-        return (VideoTimeMapping(layer: layer)?.sourceMs(atTimelineMs: timelineMs) ?? timelineMs) / 1000
-    }
-
 }
 
 /// Drag-to-trim handle — restyled 2026-10-08 to match the iOS Photos app's
@@ -1035,6 +1071,32 @@ private struct FilmstripClipView: View {
 /// a wider invisible tappable area (so a finger doesn't have to land
 /// pixel-perfectly on the visible block to grab it), used by both
 /// `FilmstripClipView` and `TimelineClipView` whenever a clip is selected.
+private struct TrimTouchKey: EnvironmentKey {
+    static let defaultValue: (Bool) -> Void = { _ in }
+}
+
+private extension EnvironmentValues {
+    /// Called with `true` when a finger lands on a trim handle, `false` when it lifts.
+    var onTrimTouch: (Bool) -> Void {
+        get { self[TrimTouchKey.self] }
+        set { self[TrimTouchKey.self] = newValue }
+    }
+}
+
+/// Reports touch-down/up on a trim handle. Attached beside the handle's own drag
+/// (same level, so both run) — inside the handle it would take priority over it.
+private struct TrimTouchModifier: ViewModifier {
+    @Environment(\.onTrimTouch) private var onTrimTouch
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                .onChanged { _ in onTrimTouch(true) }
+                .onEnded { _ in onTrimTouch(false) }
+        )
+    }
+}
+
 private struct TrimHandleView: View {
     let rowHeight: CGFloat
     /// Which outer corners get rounded — only the edge facing away from the
@@ -1065,6 +1127,7 @@ private struct TrimHandleView: View {
             .frame(width: hitWidth, height: handleHeight, alignment: edge == .leading ? .trailing : .leading)
             .contentShape(Rectangle())
             .offset(x: edge == .leading ? -hitWidth : hitWidth)
+            .accessibilityIdentifier(edge == .leading ? "trim-handle-leading" : "trim-handle-trailing")
     }
 
     private var gripLine: some View {
@@ -1192,23 +1255,11 @@ private struct FilmstripTileView: View {
     }
 }
 
-/// `.task(id:)` key for `FilmstripClipView`'s batch thumbnail fetch —
-/// re-fetches only when the tiles' *source* times change: a different
-/// asset, tile count (the clip got wider/narrower), `trimStart` (a left
-/// trim shifts which footage every tile shows) or rate. Deliberately not
-/// keyed on `timing.start`: a ripple push moves the clip on the timeline
-/// without changing what any tile shows.
-private struct FilmstripBatchKey: Equatable {
+/// `.task(id:)` key for `FilmstripClipView`'s detail fetch: a new asset, zoom step
+/// or visible tile range starts a new (debounced) request.
+private struct FilmstripDetailKey: Equatable {
     let assetId: String?
-    let tileCount: Int
-    let trimStartMs: Double?
-    let rate: Double?
-}
-
-/// `FilmstripClipView`'s fetch key: the layout plus which tiles are in the
-/// window, so scrolling re-fetches only when the window actually moves.
-private struct FilmstripWindowKey: Equatable {
-    let layout: FilmstripBatchKey
+    let stepMs: Double?
     let tiles: ClosedRange<Int>?
 }
 
@@ -1348,12 +1399,12 @@ private struct TimelineClipView: View {
             }
             .overlay(alignment: .leading) {
                 if isSelected {
-                    TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag)
+                    TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag).modifier(TrimTouchModifier())
                 }
             }
             .overlay(alignment: .trailing) {
                 if isSelected {
-                    TrimHandleView(rowHeight: rowHeight, corners: [.topRight, .bottomRight], edge: .trailing).gesture(rightHandleDrag)
+                    TrimHandleView(rowHeight: rowHeight, corners: [.topRight, .bottomRight], edge: .trailing).gesture(rightHandleDrag).modifier(TrimTouchModifier())
                 }
             }
             .frame(width: max(CGFloat(layer.timing.duration) * pxPerMs, 28), height: rowHeight)
@@ -1373,7 +1424,7 @@ private struct TimelineClipView: View {
     /// hard-clamps at whichever neighbor is in the way — nothing else ever
     /// moves.
     private var leftHandleDrag: some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 if dragStartLayer == nil {
                     dragStartLayer = layer
@@ -1411,7 +1462,7 @@ private struct TimelineClipView: View {
     }
 
     private var rightHandleDrag: some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 if dragStartLayer == nil {
                     dragStartLayer = layer

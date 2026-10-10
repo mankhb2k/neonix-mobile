@@ -102,10 +102,17 @@ struct ReleaseVelocityEstimator {
 /// - `frictionScale` multiplies the decay constant (0.7 = glides longer
 ///   without adding release speed).
 ///
+/// - `brakeFrictionScale` multiplies the *coasting* decay constant while a finger
+///   touches down on a coast: it keeps the current speed but loses it ~20× faster,
+///   so the glide stops in about 0.1–0.25 s (the time grows only with the log of the
+///   speed) instead of cutting dead. Also picked by feel.
+///
 /// Distance travelled ≈ `velocityGain · v / (frictionScale · k)`.
 struct CoastTuning: Equatable {
-    var velocityGain = 3.5
+    var velocityGain = 3.3
     var frictionScale = 0.7
+    var brakeFrictionScale = 20.0
 
     var decay: MomentumDecay { MomentumDecay.iosNormal.scalingFriction(by: frictionScale) }
+    var brakeDecay: MomentumDecay { decay.scalingFriction(by: brakeFrictionScale) }
 }

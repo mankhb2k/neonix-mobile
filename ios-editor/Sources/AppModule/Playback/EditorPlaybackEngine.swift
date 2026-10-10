@@ -65,6 +65,8 @@ final class EditorPlaybackEngine {
     @ObservationIgnored private var coastInitialVelocity: Double = 0
     @ObservationIgnored private var coastStartTimeMs: Double = 0
     @ObservationIgnored private var coastElapsedSeconds: Double = 0
+    /// A touch landed on the coast: same speed, much heavier friction (`brake()`).
+    @ObservationIgnored private var isBraking = false
     @ObservationIgnored private let clock = DisplayLinkClock()
     /// Real sound — see `AudioMixEngine`'s own doc comment for the sync
     /// model. Only ever told to play from `playbackTick`/`play()`, never
@@ -213,6 +215,7 @@ final class EditorPlaybackEngine {
             return
         }
         mode = .coasting
+        isBraking = false
         coastInitialVelocity = velocityMsPerSecond * coastTuning.velocityGain
         coastStartTimeMs = currentTimeMs
         coastElapsedSeconds = 0
@@ -222,13 +225,26 @@ final class EditorPlaybackEngine {
         clock.start { [weak self] dt in self?.coastTick(dt) }
     }
 
+    /// A finger touching down on a coast brakes it: the live speed is kept and the
+    /// friction is multiplied (`CoastTuning.brakeFrictionScale`), so the glide stops
+    /// in a fraction of a second. Call on touch-down, before any drag distance;
+    /// idempotent, and a no-op unless a coast is in flight. A drag that follows
+    /// takes over from the live position through `beginScrub()`.
+    func brake() {
+        guard mode == .coasting, !isBraking else { return }
+        coastInitialVelocity = coastTuning.decay.velocity(initial: coastInitialVelocity, after: coastElapsedSeconds)
+        coastStartTimeMs = currentTimeMs
+        coastElapsedSeconds = 0
+        isBraking = true
+    }
+
     // MARK: Ticks
 
     private func coastTick(_ dt: Double) {
         guard mode == .coasting else { return }
         PlaybackMetrics.shared.record(.coastTickMs, ms: dt * 1000)
         coastElapsedSeconds += dt
-        let decay = coastTuning.decay
+        let decay = isBraking ? coastTuning.brakeDecay : coastTuning.decay
         let target = coastStartTimeMs + decay.distance(initial: coastInitialVelocity, after: coastElapsedSeconds)
         let bounded = clamped(target)
         setTime(bounded)

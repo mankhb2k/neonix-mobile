@@ -1,23 +1,23 @@
 import Foundation
 
 /// Pure rules for the timeline's pinch-to-zoom: how far it may zoom, and how
-/// the ruler picks its tick spacing so it stays readable at any scale.
-/// `pxPerMs` is the one number everything in the timeline is laid out from
-/// (0.2 px/ms = 200 px per second was the fixed scale before zoom existed).
+/// the ruler picks its dot spacing so it stays readable at any scale.
+/// `pxPerMs` is the one number everything in the timeline is laid out from.
+/// Zoom is continuous; the ruler snaps to round times (it does not follow the
+/// filmstrip tiles — they may or may not line up with a dot, user 2026-10-10).
 ///
 /// The two zoom limits are defined by what the ruler shows there, as the user
 /// specified (2026-10-09):
-/// - **fully zoomed out:** minor ticks are **5 seconds** apart;
-/// - **fully zoomed in:** minor ticks are **one frame** apart.
-/// Both at the same minimum on-screen tick spacing (`minorSpacingPx`), so the
+/// - **fully zoomed out:** dots are **5 seconds** apart;
+/// - **fully zoomed in:** dots are **one frame** apart.
+/// Both at the same minimum on-screen dot spacing (`minorSpacingPx`), so the
 /// limits are `minorSpacingPx / 5000 ms` and `minorSpacingPx / one frame`.
 enum TimelineZoom {
-    static let defaultPxPerMs = 0.2
-    /// Closest two minor ticks may sit on screen.
+    /// Half a second per 48 pt — close to CapCut's default zoom.
+    static let defaultPxPerMs = minorSpacingPx / 500
+    /// Closest two dots may sit on screen.
     static let minorSpacingPx = 48.0
-    /// Closest two labelled ticks may sit (room for a `mm:ss:ff` label).
-    static let majorSpacingPx = 96.0
-    /// Minor tick spacing at the farthest zoom-out.
+    /// Dot spacing at the farthest zoom-out.
     static let farthestMinorMs = 5000.0
 
     static let minPxPerMs = minorSpacingPx / farthestMinorMs
@@ -47,39 +47,37 @@ enum TimelineZoom {
         let majorMs: Double
     }
 
-    /// Candidate tick intervals, finest first: 1/2/5 frames, then round times.
+    /// Candidate dot spacings, finest first. Dense (neighbours at most ~2.5× apart)
+    /// so dots stay about 48–120 pt apart at every zoom, and chosen so that twice
+    /// each one is a round label time (6f, 10f, 15f → 0.5 s, 1 s, 4 s, 10 s…).
     private static func ladder(fps: Double) -> [Double] {
         let frame = frameMs(fps: fps)
-        return [frame, frame * 2, frame * 5, 500, 1000, 2000, 5000, 10_000, 20_000, 30_000, 60_000, 120_000, 300_000]
+        // 10 frames only where it is shorter than 250 ms (60 fps): at 30 fps it would put
+        // labels on 20f/40f, which read badly.
+        let tenFrames = frame * 10 < 250 ? [frame * 10] : []
+        return Array(Set([frame, frame * 2, frame * 3, frame * 5, 250, 500, 1000, 2000, 5000] + tenFrames))
+            .filter { $0 <= farthestMinorMs }
+            .sorted()
     }
 
+    /// Exactly one dot between two labels, at every zoom: labels sit on every second dot.
     static func rulerIntervals(pxPerMs: Double, fps: Double) -> RulerIntervals {
-        let candidates = ladder(fps: fps)
-        let epsilon = 1e-9
-        let minor = candidates.first { $0 * pxPerMs >= minorSpacingPx - epsilon }
-            ?? candidates[candidates.count - 1]
-        func isMultiple(_ value: Double) -> Bool {
-            let ratio = value / minor
-            return abs(ratio - ratio.rounded()) < 1e-6
-        }
-        let major = candidates.first {
-            $0 >= minor * 2 - epsilon && $0 * pxPerMs >= majorSpacingPx - epsilon && isMultiple($0)
-        } ?? minor * max((majorSpacingPx / (minor * pxPerMs)).rounded(.up), 2)
-        return RulerIntervals(minorMs: minor, majorMs: major)
+        let minors = ladder(fps: fps)
+        let minor = minors.first { $0 * pxPerMs >= minorSpacingPx - 1e-9 } ?? minors[minors.count - 1]
+        return RulerIntervals(minorMs: minor, majorMs: minor * 2)
     }
 
-    /// `mm:ss` for whole-second labels; `mm:ss:ff` (frame within the second)
-    /// once the label interval is below a second.
+    /// `mm:ss` on a whole second, otherwise the frame within the second (`2f`, `15f`),
+    /// as CapCut labels the ruler once ticks are closer than a second.
     static func rulerLabel(ms: Double, majorMs: Double, fps: Double) -> String {
-        let totalSeconds = max(ms, 0) / 1000
-        let minutes = Int(totalSeconds) / 60
-        let seconds = Int(totalSeconds) % 60
-        if majorMs >= 1000 {
-            return String(format: "%02d:%02d", minutes, seconds)
+        let totalFrames = Int((max(ms, 0) / 1000 * fps).rounded())
+        let framesPerSecond = max(Int(fps.rounded()), 1)
+        let frame = totalFrames % framesPerSecond
+        if frame == 0 || majorMs >= 1000 {
+            let seconds = totalFrames / framesPerSecond
+            return String(format: "%02d:%02d", seconds / 60, seconds % 60)
         }
-        let fraction = totalSeconds - totalSeconds.rounded(.down)
-        let frame = min(Int((fraction * fps).rounded()), Int(fps.rounded()) - 1)
-        return String(format: "%02d:%02d:%02d", minutes, seconds, frame)
+        return "\(frame)f"
     }
 
     // MARK: Visible window

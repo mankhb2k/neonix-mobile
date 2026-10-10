@@ -44,12 +44,20 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   Scrubbing pauses and never resumes implicitly. `EditorPlaybackEngine.init` is cheap;
   players are created in `prepare()`.
 - **Momentum** (`MomentumDecay`, `CoastTuning`): `UIScrollView.DecelerationRate.normal`
-  curve in closed form (k≈2.0/s), retuned **by the user's feel on the device**: gain 3.5,
-  friction ×0.7. No benchmark exists for these two numbers — don't "correct" them
-  toward native. Unmeasured: the lift "kick" from gain, and video keeping up at that speed.
-- **Timeline zoom**: pinch (`MagnifyGesture`, simultaneous with the scrub drag), playhead
-  pinned to the panel centre. Limits set by the user: zoomed out ruler ticks 5 s apart,
-  zoomed in 1 frame apart (`TimelineZoom`, 0.0096…1.44 px/ms at 30 fps). Ruler and
+  curve in closed form (k≈2.0/s), retuned **by the user's feel on the device**: gain 3.3,
+  friction ×0.7. No benchmark exists for these numbers — don't "correct" them toward
+  native. A touch on a gliding timeline **brakes** it (`engine.brake()`, friction ×20 on
+  top, stops in ~0.1–0.25 s); the touch-down is a `LongPressGesture(minimumDuration: 0)` —
+  a `DragGesture(minimumDistance: 0)` there swallowed the clips' tap-to-select. Unmeasured:
+  the lift "kick" from gain, and video keeping up at that speed.
+- **Timeline zoom**: pinch (`MagnifyGesture`, simultaneous with the scrub drag), continuous,
+  playhead pinned to the panel centre; default 0.096 px/ms (0.5 s per 48 pt). Limits set by
+  the user: 5 s per dot zoomed out, 1 frame zoomed in (`TimelineZoom`, 0.0096…1.44 px/ms
+  at 30 fps). Ruler = dots on round times (dense ladder 1/2/3/5 frames, 0.25/0.5/1/2/5 s so
+  dots stay 48–120 pt apart), with a label on **every second dot** — exactly one dot between
+  two labels at every zoom (`mm:ss`, or `Nf` below a second; the ladder is chosen so each
+  label time is round). Filmstrip tiles are 48 pt and source-anchored — they do **not** have to line up
+  with dots (user decision; a stepped zoom that forced it was tried and dropped). Ruler and
   filmstrip build only a window around the playhead.
 - **Latency target**: judge by `visual_lag_ms` (display error ÷ playhead speed, ms of
   time), not `seek_landing_error_ms` (content ms). First real run: ≤ 25 ms only above
@@ -158,8 +166,13 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   video at 90 %, so no aspect ratio affects the layout. Add `.allowsHitTesting(false)` to
   `PreviewCanvas` wherever it's embedded — it swallowed taps meant for the buttons above.
 - Never decode media inline from a `body`: stills go through `BundledImageCache` /
-  async `.task`; filmstrip tiles are one batched `AVAssetImageGenerator` call per clip
-  (progressive `AsyncStream`), capped at 320×320.
+  async `.task`. **Filmstrip belongs to the source video, not the clip**
+  (`FilmstripGrid`, `VideoFrameCache`): tiles are 48 pt and anchored to *source* time 0, a
+  clip is just a window (`trimStart` shifts the strip), so trim never slides, regenerates or
+  blanks it. Base grid = one thumbnail/s for the whole video, generated once and shared by
+  every clip of the asset (`baseThumbs`, ≤ 240, step grows for long videos); window-only
+  detail (base step halved up to 5×) only when zoomed past it; a tile falls back to the
+  nearest base frame, never blank. One generator per tier, capped at 288×288.
 - **Core Image**: `.workingColorSpace: NSNull()` on the shared `CIContext` (otherwise
   matrices run in linear space and drift ~70/255), but pass an explicit
   `CGColorSpaceCreateDeviceRGB()` to `createCGImage` — a colorspace-less `CGImage`
@@ -188,7 +201,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   synthesize touches (`TimelineZoomUITests` does real pinches); `print` from the app
   under test doesn't reach `xcodebuild` — use `NSLog` + `simctl spawn … log show`.
   `EditorNavigationUITests` still use the old Vietnamese "Huỷ" label (stale).
-  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (105 passing).
+  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (117 passing).
 - No Node/pnpm in this sandbox: TS (`packages/motion-protocol`) can't be verified here.
 
 ## Key files

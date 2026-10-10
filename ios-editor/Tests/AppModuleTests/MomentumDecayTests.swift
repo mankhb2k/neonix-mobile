@@ -95,9 +95,17 @@ final class MomentumDecayTests: XCTestCase {
         XCTAssertEqual(base.scalingFriction(by: 1), base)
     }
 
-    func testDefaultCoastTuningIsGainThreePointFiveWithLighterFriction() {
+    func testBrakeDecaysTwentyTimesFasterAndStopsAFastGlideInAQuarterSecond() {
         let tuning = CoastTuning()
-        XCTAssertEqual(tuning.velocityGain, 3.5)
+        XCTAssertEqual(tuning.brakeDecay.rate, tuning.decay.rate * 20, accuracy: 1e-9)
+        // ~30 000 ms/s is a hard flick on the phone; it must be down to the 50 ms/s stop speed fast.
+        XCTAssertLessThan(tuning.brakeDecay.duration(initial: 30_000, until: 50), 0.25)
+        XCTAssertLessThan(tuning.brakeDecay.duration(initial: 3000, until: 50), 0.2)
+    }
+
+    func testDefaultCoastTuningIsGainThreePointThreeWithLighterFriction() {
+        let tuning = CoastTuning()
+        XCTAssertEqual(tuning.velocityGain, 3.3)
         XCTAssertEqual(tuning.decay, MomentumDecay.iosNormal.scalingFriction(by: 0.7))
     }
 }

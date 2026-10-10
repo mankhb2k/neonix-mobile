@@ -354,7 +354,7 @@ struct EditorShellView: View {
             if #available(iOS 26.0, *) {
                 GlassEffectContainer {
                     fullscreenControlBarContent
-                        .glassEffect(.regular.interactive(), in: barShape)
+                        .glassEffect(.regular, in: barShape)
                 }
             } else {
                 fullscreenControlBarContent
@@ -362,7 +362,10 @@ struct EditorShellView: View {
             }
         }
         .frame(width: barWidth)
-        .animation(.spring(response: 0.25, dampingFraction: 0.75), value: isScrubbing)
+        // Short ease-out, no spring and no `.interactive()` glass (no press-grow): the bar
+        // keeps its width and only gets taller (capsule → taller rectangle), while the
+        // progress track grows into the space the two icons leave (user, 2026-10-10).
+        .animation(.easeOut(duration: 0.15), value: isScrubbing)
     }
 
     /// While scrubbing, play/exit are removed from the layout (not just
@@ -375,18 +378,8 @@ struct EditorShellView: View {
     /// width — the pixel position is allowed to shift between states (it
     /// represents a %, not a frozen coordinate); only the underlying time
     /// value must stay unaffected by the resize, which it already is.
-    /// `.transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))`
-    /// on each button gives the "slides up while fading away" exit (and the
-    /// mirrored "drops down while fading in" entrance) — move and opacity
-    /// run *together*, same curve, same duration, not one finishing before
-    /// the other. The `.animation(_:)` wrapping the whole combined
-    /// transition (not just one half of it) is what keeps both in sync
-    /// while still making the *entire* exit quicker than the ambient
-    /// `.spring(response: 0.25, ...)` driving the rest of the bar — short
-    /// enough that both motion and fade are fully done before the icon
-    /// would reach the bar's own clipped edge near the time-label row,
-    /// instead of still being visible (and then abruptly clipped, not
-    /// faded) right as it gets there.
+    /// Each button fades out in place (`.transition(.opacity…)`, 0.18 s) — no slide:
+    /// a `.move` transition carried the icons out of the capsule while they faded.
     private var fullscreenControlBarContent: some View {
         VStack(spacing: 6) {
             if isScrubbing {
@@ -411,7 +404,8 @@ struct EditorShellView: View {
                             .foregroundColor(.white)
                             .frame(width: 28, height: 28)
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))
+                    .accessibilityIdentifier("fullscreen-play")
+                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
                 }
 
                 FullscreenScrubber(engine: engine, isDragging: $isScrubbing)
@@ -426,7 +420,7 @@ struct EditorShellView: View {
                             .foregroundColor(.white)
                             .frame(width: 28, height: 28)
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity).animation(.easeOut(duration: 0.18)))
+                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
                 }
             }
         }
@@ -502,6 +496,7 @@ struct EditorShellView: View {
                         .font(.headline)
                         .fontWeight(.regular)
                 }
+                .accessibilityIdentifier("enter-fullscreen")
 
                 Spacer()
 
@@ -534,16 +529,25 @@ struct EditorShellView: View {
 /// so `fullscreenControlBarContent` can react to it too (hide play/exit,
 /// show the time readout).
 ///
-/// Entering scrub mode requires a genuine **hold**, not just touching the
-/// track — `LongPressGesture(minimumDuration:).sequenced(before:
-/// DragGesture(minimumDistance: 0))`, not a plain `DragGesture`. A bare
-/// `DragGesture(minimumDistance: 0)` starts scrubbing on the very first
-/// touch-down, which is too eager (an incidental tap/brush would yank
-/// playback position); requiring a short hold first matches how the real
-/// Photos app behaves and avoids that.
+/// Relative scrubbing: the thumb never jumps to where the finger lands.
+/// Touch-down switches the bar to its scrubbing state at once
+/// (`DragGesture(minimumDistance: 0)`): the idle capsule is only a progress
+/// preview, and since scrubbing is relative, touching it never moves the time.
+/// It used to need a 0.2 s hold first
+/// (`LongPressGesture.sequenced(before:)`), which failed outright when the finger
+/// moved more than 10 pt during the hold — so grabbing the thumb and dragging
+/// straight away never seeked.
 private struct FullscreenScrubber: View {
     let engine: EditorPlaybackEngine
     @Binding var isDragging: Bool
+    /// True while a touch owns the gesture. Unlike `onEnded`, a `@GestureState`
+    /// also resets when the system cancels the gesture, so the bar can never stay
+    /// stuck in its scrubbing state (see `.onChange` below).
+    @GestureState private var touchActive = false
+    /// Playhead time when the current scrub began.
+    @State private var scrubStartMs = 0.0
+    /// The finger has left the dead zone at least once in this scrub.
+    @State private var scrubMoved = false
 
     private var fraction: Double {
         guard engine.maxDurationMs > 0 else { return 0 }
@@ -557,41 +561,65 @@ private struct FullscreenScrubber: View {
                 Capsule().fill(Color.white)
                     .frame(width: geo.size.width * fraction)
             }
+            // A fill narrower than the track's end cap is a thin bar that pokes out of
+            // the rounded end; clipping keeps it inside the track.
+            .clipShape(Capsule())
             .frame(height: isDragging ? 18 : 6)
             .frame(maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .gesture(
-                LongPressGesture(minimumDuration: 0.2)
-                    .sequenced(before: DragGesture(minimumDistance: 0))
-                    .onChanged { value in
-                        switch value {
-                        case .first(true), .second(true, nil):
-                            beginScrubbingIfNeeded()
-                        case .second(true, let drag?):
-                            beginScrubbingIfNeeded()
-                            seek(to: drag.location.x, trackWidth: geo.size.width)
-                        default:
-                            break
-                        }
+                // Global: the bar widens the instant it is touched, which would shift a local space.
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .updating($touchActive) { _, state, _ in state = true }
+                    .onChanged { drag in
+                        beginScrubbingIfNeeded()
+                        // Relative: the time starts where it was and moves by the finger's
+                        // travel (a full track width = the whole duration) — grabbing the
+                        // track in the middle never jumps there.
+                        seek(byTravel: drag.translation.width, trackWidth: geo.size.width)
                     }
-                    .onEnded { _ in
-                        isDragging = false
-                        engine.endScrub(velocityMsPerSecond: 0)
-                    }
+                    .onEnded { _ in endScrubbing() }
             )
         }
         .frame(height: 24)
+        .onChange(of: touchActive) { _, active in
+            if !active { endScrubbing() }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("fullscreen-scrubber")
+        #if DEBUG
+        .accessibilityValue(String(format: "%.0f", engine.currentTimeMs))
+        #endif
+    }
+
+    private func endScrubbing() {
+        guard isDragging else { return }
+        isDragging = false
+        engine.endScrub(velocityMsPerSecond: 0)
     }
 
     private func beginScrubbingIfNeeded() {
         guard !isDragging else { return }
         isDragging = true
+        scrubStartMs = engine.currentTimeMs
+        scrubMoved = false
         engine.beginScrub()
     }
 
-    private func seek(to x: CGFloat, trackWidth: CGFloat) {
-        let fraction = min(max(x / trackWidth, 0), 1)
-        engine.scrub(toMs: fraction * engine.maxDurationMs)
+    /// Finger travel that does not move the time: a touch always rolls 1–2 pt, and one
+    /// point is ~0.26 s of an 89 s video. The dead zone is subtracted, so the time still
+    /// starts from `t0` and moves continuously once the finger is past it.
+    static let deadZone: CGFloat = 4
+
+    private func seek(byTravel dx: CGFloat, trackWidth: CGFloat) {
+        guard trackWidth > 0 else { return }
+        let effective = dx.magnitude > Self.deadZone ? dx - Self.deadZone * (dx < 0 ? -1 : 1) : 0
+        // A touch that has not left the dead zone sends no seek at all: the scrub seek is
+        // coarse (0.2 s tolerance), so it would land the video on a frame before the exact
+        // one it is resting on, and the exact seek on release would then jump it back.
+        if effective == 0 && !scrubMoved { return }
+        scrubMoved = true
+        engine.scrub(toMs: min(max(scrubStartMs + Double(effective / trackWidth) * engine.maxDurationMs, 0), engine.maxDurationMs))
     }
 }
 

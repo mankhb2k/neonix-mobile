@@ -18,6 +18,7 @@ import UIKit
 /// `LayerContentView`, which keeps its last `cachedImage` on screen while a
 /// new one is still loading) until the new one is ready.
 @MainActor
+@Observable
 final class VideoFrameCache {
     static let shared = VideoFrameCache()
 
@@ -28,8 +29,15 @@ final class VideoFrameCache {
     /// (~15fps) scrub resolution from a continuous one anyway.
     static let scrubBucketMs: Double = 65
 
-    private var generators: [String: AVAssetImageGenerator] = [:]
-    private var cache: [String: UIImage] = [:]
+    @ObservationIgnored private var generators: [String: AVAssetImageGenerator] = [:]
+    @ObservationIgnored private var cache: [String: UIImage] = [:]
+
+    /// Base filmstrip thumbnails per source video: index `i` is the frame at source
+    /// time `i × FilmstripGrid.baseStepMs`. Belongs to the video, not to a clip, so
+    /// trimming, splitting or extending a clip never regenerates anything. Observed:
+    /// a clip view re-renders as thumbnails arrive.
+    private(set) var baseThumbs: [String: [Int: UIImage]] = [:]
+    @ObservationIgnored private var baseRequested: Set<String> = []
 
     /// Rounds a time to this cache's scrub resolution — also used by
     /// `PreviewCanvas.swift` as a SwiftUI `.task(id:)` key so a new decode
@@ -44,7 +52,7 @@ final class VideoFrameCache {
         let key = "\(assetId):\(bucket)"
         if let cached = cache[key] { return cached }
 
-        let generator = generator(for: assetId, url: url)
+        let generator = generator(for: assetId, url: url, tier: .stage)
         let time = CMTime(seconds: max(seconds, 0), preferredTimescale: 600)
         guard let result = try? await generator.image(at: time) else { return nil }
         let image = UIImage(cgImage: result.image)
@@ -52,45 +60,46 @@ final class VideoFrameCache {
         return image
     }
 
-    /// Batch filmstrip generation — one `generateCGImagesAsynchronously`
-    /// call for every tile a clip needs, instead of `FilmstripTileView`
-    /// firing its own independent `image(at:)` request per tile. This is
-    /// AVFoundation's own documented API for exactly this use case (a real
-    /// editor builds its filmstrip this way, not N separate single-frame
-    /// requests) — it lets the generator batch/order the underlying
-    /// decodes itself.
+    /// Starts (once per video) the whole-video base filmstrip: one thumbnail every
+    /// `FilmstripGrid.baseStepMs`, requested nearest-to-`priorityMs` first so the
+    /// part of the video a clip shows fills in before the rest. Results land in
+    /// `baseThumbs`. A video whose duration is unknown is skipped.
+    func ensureBaseThumbnails(assetId: String, url: URL, durationMs: Double, priorityMs: Double) {
+        guard durationMs > 0, !baseRequested.contains(assetId) else { return }
+        baseRequested.insert(assetId)
+        let step = FilmstripGrid.baseStepMs(durationMs: durationMs)
+        let indices = (0...Int(durationMs / step)).sorted {
+            abs(Double($0) * step - priorityMs) < abs(Double($1) * step - priorityMs)
+        }
+        Task {
+            let times = indices.map { Double($0) * step / 1000 }
+            for await (offset, image) in filmstripImages(assetId: assetId, url: url, times: times, tier: .filmstripBase) {
+                if let image { baseThumbs[assetId, default: [:]][indices[offset]] = image }
+            }
+        }
+    }
+
+    /// Batch thumbnail generation — one `generateCGImagesAsynchronously` call for
+    /// every time a caller needs (AVFoundation's own API for filmstrips), instead
+    /// of one independent `image(at:)` per tile.
     ///
-    /// Returns an `AsyncStream`, not a single collected result — a first
-    /// version awaited the *whole* batch before updating anything, which
-    /// for a ~30-tile clip meant the entire filmstrip sat blank for several
-    /// seconds and then populated all at once (caught on the simulator,
-    /// 2026-10-08: logs showed all 34/34 tiles decoding successfully, just
-    /// over ~3.7s, while the UI showed nothing the whole time). Streaming
-    /// each `(index, image)` the moment its own completion fires lets
-    /// `FilmstripClipView` fill tiles in as they individually finish,
-    /// matching the old per-tile behavior's progressive feel while still
-    /// using one batched underlying request.
+    /// Returns an `AsyncStream` so each `(index, image)` is delivered the moment its
+    /// own decode finishes — awaiting the whole batch left the filmstrip blank for
+    /// seconds (simulator, 2026-10-08). Keyed by the caller's array index; the
+    /// requested `CMTime` echoed back by AVFoundation maps a completion to its
+    /// index. Nothing is written to `cache` (an unbounded dictionary of every
+    /// thumbnail grew the app from 29 MB to 316 MB in a 115 s run on a phone);
+    /// callers keep only what they show.
     ///
-    /// Keyed by the caller's own array index (not the requested second,
-    /// which would need float-equality dictionary keys) — AVFoundation
-    /// echoes back the exact `CMTime` requested, so a `"value:timescale"`
-    /// string key maps each completion back to its index. Each image is
-    /// also written into the same per-bucket `cache`
-    /// `frame(assetId:url:atSeconds:)` reads, so a later single-frame
-    /// request for a time this batch already covered returns instantly.
-    ///
-    /// Not yet windowed to only currently-visible tiles — a clip's full
-    /// tile set is requested in one call regardless of scroll position,
-    /// a deliberate simplification that's fine for this app's current
-    /// (short, few-second) sample clips. A very long clip would want this
-    /// batched per visible window instead; not implemented yet.
-    func filmstripImages(assetId: String, url: URL, times: [Double]) -> AsyncStream<(index: Int, image: UIImage?)> {
+    /// Each tier has its own generator, so abandoning a detail batch
+    /// (`onTermination` cancels its generator) never cancels the base one.
+    func filmstripImages(assetId: String, url: URL, times: [Double], tier: GeneratorTier = .filmstripDetail) -> AsyncStream<(index: Int, image: UIImage?)> {
         AsyncStream { continuation in
             guard !times.isEmpty else {
                 continuation.finish()
                 return
             }
-            let generator = self.generator(for: assetId, url: url)
+            let generator = self.generator(for: assetId, url: url, tier: tier)
             let requestTimes = times.map { CMTime(seconds: max($0, 0), preferredTimescale: 600) }
             var indexByKey: [String: Int] = [:]
             for (index, time) in requestTimes.enumerated() {
@@ -118,25 +127,72 @@ final class VideoFrameCache {
         }
     }
 
-    private func generator(for assetId: String, url: URL) -> AVAssetImageGenerator {
-        if let cached = generators[assetId] { return cached }
+    enum GeneratorTier: String {
+        /// Cover and stage stills (`frame(...)`).
+        case stage
+        /// Whole-video base filmstrip: coarse, so a loose tolerance (nearest
+        /// keyframe) keeps it fast.
+        case filmstripBase
+        /// Window-only detail when zoomed in past the base spacing.
+        case filmstripDetail
+    }
+
+    private func generator(for assetId: String, url: URL, tier: GeneratorTier) -> AVAssetImageGenerator {
+        let key = "\(assetId)#\(tier.rawValue)"
+        if let cached = generators[key] { return cached }
         let asset = AVURLAsset(url: url)
         let created = AVAssetImageGenerator(asset: asset)
         created.appliesPreferredTrackTransform = true
-        // Thumbnails only: a filmstrip tile is ~54 pt, so decoding every one
-        // at the source's 1080×1920 held ~8 MB per tile — fine for 34 tiles,
-        // not for the hundreds a zoomed-in timeline asks for.
-        created.maximumSize = CGSize(width: 320, height: 320)
-        // Exact-frame tolerance (`.zero`) forces a slow precise seek on
-        // every request; a tolerance matching one scrub bucket lets
-        // AVFoundation return the nearest already-decoded frame instead,
-        // which is what actually fixed the scrubbing jank — the async
-        // API alone just moves the same slow work off the main thread.
-        let tolerance = CMTime(seconds: Self.scrubBucketMs / 1000, preferredTimescale: 600)
+        // Thumbnails only: a filmstrip tile is 48 pt (144 px), so decoding at the
+        // source's 1080×1920 held ~8 MB per tile.
+        created.maximumSize = tier == .stage ? CGSize(width: 320, height: 320) : CGSize(width: 288, height: 288)
+        // Exact-frame tolerance (`.zero`) forces a slow precise seek on every
+        // request; a tolerance lets AVFoundation return the nearest already-decoded
+        // frame — that is what fixed the scrubbing jank.
+        let toleranceSeconds = tier == .filmstripBase ? 0.5 : Self.scrubBucketMs / 1000
+        let tolerance = CMTime(seconds: toleranceSeconds, preferredTimescale: 600)
         created.requestedTimeToleranceBefore = tolerance
         created.requestedTimeToleranceAfter = tolerance
-        generators[assetId] = created
+        generators[key] = created
         return created
+    }
+}
+
+/// The filmstrip's fixed source-time grid, as pure functions (unit-tested).
+/// A tile is `tileWidth` pt wide and anchored to *source* time 0, so a clip is a
+/// window onto one strip: trimming only moves the window and the strip never
+/// slides or regenerates.
+enum FilmstripGrid {
+    /// One base thumbnail per second of source, but never more than `baseThumbnailCap`
+    /// per video (a long video gets a coarser step, in whole seconds).
+    static let baseStepFloorMs = 1000.0
+    static let baseThumbnailCap = 240.0
+    /// Detail steps are the base step halved up to this many times (1 s → 31 ms).
+    static let detailHalvings = 5
+
+    static func baseStepMs(durationMs: Double) -> Double {
+        max(baseStepFloorMs, (durationMs / baseThumbnailCap / 1000).rounded(.up) * 1000)
+    }
+
+    /// Detail spacing for a zoom where one tile spans `tileSourceMs` of source:
+    /// the coarsest halving of the base step that still gives each tile its own
+    /// frame. `nil` when the base grid is already as fine as a tile.
+    static func detailStepMs(baseStepMs: Double, tileSourceMs: Double) -> Double? {
+        guard tileSourceMs < baseStepMs else { return nil }
+        for n in 1...detailHalvings {
+            let step = baseStepMs / Double(1 << n)
+            if step <= tileSourceMs { return step }
+        }
+        return baseStepMs / Double(1 << detailHalvings)
+    }
+
+    /// Tile indices covering clip-local x in `lower..<upper`, when the strip is
+    /// shifted left by `trimStartPx` (the clip's `trimStart` in points).
+    static func tiles(lower: Double, upper: Double, trimStartPx: Double, tileWidth: Double) -> ClosedRange<Int>? {
+        guard upper > lower, tileWidth > 0 else { return nil }
+        let first = max(Int(((lower + trimStartPx) / tileWidth).rounded(.down)), 0)
+        let last = max(Int(((upper + trimStartPx) / tileWidth).rounded(.up)) - 1, first)
+        return first...last
     }
 }
 

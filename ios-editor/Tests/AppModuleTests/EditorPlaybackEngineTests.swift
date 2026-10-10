@@ -83,6 +83,33 @@ final class EditorPlaybackEngineTests: XCTestCase {
         XCTAssertEqual(engine.currentTimeMs, coastedTo, accuracy: 1)
     }
 
+    func testTouchDownBrakesACoastSoItStopsQuicklyAndFarShortOfTheFreeGlide() async throws {
+        let free = makeEngine(durationMs: 600_000)
+        free.beginScrub()
+        free.endScrub(velocityMsPerSecond: 20_000)
+        let braked = makeEngine(durationMs: 600_000)
+        braked.beginScrub()
+        braked.endScrub(velocityMsPerSecond: 20_000)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        braked.brake()
+        braked.brake() // idempotent
+        XCTAssertEqual(braked.mode, .coasting, "braking is a short glide, not an instant stop")
+        let brakedAt = braked.currentTimeMs
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertEqual(braked.mode, .idle, "a braked coast must have come to rest")
+        XCTAssertLessThan(braked.currentTimeMs - brakedAt, 4000, "braking travels only a short way")
+        XCTAssertGreaterThan(free.currentTimeMs, braked.currentTimeMs + 10_000, "the free glide is still running far ahead")
+    }
+
+    func testBrakeDoesNothingWhenNotCoasting() {
+        let engine = makeEngine()
+        engine.brake()
+        XCTAssertEqual(engine.mode, .idle)
+        engine.beginScrub()
+        engine.brake()
+        XCTAssertEqual(engine.mode, .scrubbing)
+    }
+
     func testCoastEndsAtTheTimelineEdgeAndGoesIdle() async throws {
         let engine = makeEngine(durationMs: 500)
         engine.beginScrub()
