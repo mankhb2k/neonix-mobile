@@ -594,18 +594,19 @@ struct EditorShellView: View {
             Spacer()
             exportButton
         }
-        .padding()
+        .padding(.horizontal)
+        .padding(.top, 6)
+        .padding(.bottom)
         .background(Color(.systemBackground))
     }
 
     @ViewBuilder
     private var cancelButton: some View {
+        let cancel = Button("Cancel") { dismiss() }.controlSize(.small)
         if #available(iOS 26.0, *) {
-            Button("Cancel") { dismiss() }
-                .buttonStyle(.glass)
+            cancel.buttonStyle(.glass)
         } else {
-            Button("Cancel") { dismiss() }
-                .foregroundColor(.primary)
+            cancel.foregroundColor(.primary)
         }
     }
 
@@ -615,10 +616,12 @@ struct EditorShellView: View {
         if #available(iOS 26.0, *) {
             Button(action: startExport) { exportLabel }
                 .buttonStyle(.glassProminent)
+                .controlSize(.small)
                 .disabled(exportGate.isWorking)
         } else {
             Button(action: startExport) { exportLabel }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .disabled(exportGate.isWorking)
         }
     }

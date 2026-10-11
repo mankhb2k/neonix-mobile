@@ -53,10 +53,10 @@ final class RulerHaptics {
         let now = Date()
         guard now.timeIntervalSince(lastMinor) > 0.055 else { return }
         lastMinor = now
-        soft.impactOccurred(intensity: 0.25)
+        soft.impactOccurred(intensity: 0.3)
     }
 
-    func major() { soft.impactOccurred(intensity: 0.5) }
+    func major() { soft.impactOccurred(intensity: 0.6) }
     func detent() { light.impactOccurred(intensity: 0.7) }
 }
 

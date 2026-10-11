@@ -40,13 +40,17 @@ struct SelectionToolbarView: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        // Only 4 pt between the divider and the scroll view's clip edge, where actions slide out of sight;
+        // the rest of the gap at rest (8 pt) is scroll content margin.
+        HStack(spacing: 0) {
             BottomBarBackButton(action: onBack)
+                .padding(.trailing, 8)
             Divider().frame(height: 28)
+                .padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 22) { actions }
-                    .padding(.horizontal, 8)
             }
+            .contentMargins(.horizontal, 8, for: .scrollContent)
         }
         .padding(.horizontal, 12)
         .accessibilityElement(children: .contain)
