@@ -254,5 +254,5 @@ Transform and Adjust sheets in production.
 - `PLAYBACK_PIPELINE.md` — playback measurement design, results and decisions.
 - `packages/motion-protocol/README.md` — canonical Protocol V2 field reference.
 - `ios-editor/Sources/AppModule` — `Protocol/`, `Runtime/`, `Playback/`, `EditorDocument/`,
-  `UI/` (Editor, Home, Projects, Account); `ContentView` (fixture picker) is reachable
+  `UI/` (Editor - one folder per part: `Shell`, `BottomBar`, `Timeline`, `AdjustSheet`, `TransformSheet`, `Commands`, `Debug`; Home, Projects, Account); `ContentView` (fixture picker) is reachable
   only from Account › Developer.
