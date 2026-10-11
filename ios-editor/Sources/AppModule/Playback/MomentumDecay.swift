@@ -116,3 +116,46 @@ struct CoastTuning: Equatable {
     var decay: MomentumDecay { MomentumDecay.iosNormal.scalingFriction(by: frictionScale) }
     var brakeDecay: MomentumDecay { decay.scalingFriction(by: brakeFrictionScale) }
 }
+
+/// Debug-only log of every timeline release (finger speed, hold before lift, whether it
+/// coasted) to `Documents/release_log.csv` + `NSLog`, so the "no glide when held" threshold
+/// is picked from real-device numbers (`PLAYBACK_PIPELINE.md` § 10). Independent of the HUD.
+enum ReleaseLog {
+    static func append(fingerPxPerSecond: Double, estimatedPxPerSecond: Double?, holdMs: Double?,
+                       pxPerMs: Double, coasted: Bool) {
+        #if DEBUG
+        func f(_ v: Double?) -> String { v.map { String(format: "%.0f", $0) } ?? "" }
+        let line = "\(Date().timeIntervalSince1970),\(f(fingerPxPerSecond)),\(f(estimatedPxPerSecond)),\(f(holdMs)),"
+            + "\(String(format: "%.4f", pxPerMs)),\(coasted ? 1 : 0)\n"
+        NSLog("release_log finger=%@ est=%@ hold=%@ pxPerMs=%.4f coasted=%d",
+              f(fingerPxPerSecond), f(estimatedPxPerSecond), f(holdMs), pxPerMs, coasted ? 1 : 0)
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let url = dir.appendingPathComponent("release_log.csv")
+        let header = "unix_time,finger_px_s,est_px_s,hold_ms,px_per_ms,coasted\n"
+        if !FileManager.default.fileExists(atPath: url.path) { try? header.write(to: url, atomically: true, encoding: .utf8) }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data(line.utf8))
+        }
+        #endif
+    }
+}
+
+/// Whether a timeline release glides at all. Thresholds come from the iPhone 13 release log of
+/// 2026-10-11 (`PLAYBACK_PIPELINE.md` § 10): slow or held releases were 3-85 pt/s, real flicks
+/// 427-1517 pt/s, nothing in between. The old gate (40 ms/s ≈ 3.8 pt/s at the default zoom) let
+/// a 5 pt/s lift glide ~12 pt, and it changed with zoom; this one is in screen points.
+enum ReleaseGate {
+    /// Below this finger speed (pt/s) a lift does not glide.
+    static let minimumFlickPxPerSecond = 120.0
+    /// A finger that sat still this long before lifting is a hold, not a flick
+    /// (`DragGesture.velocity` alone does not decay to 0: 32 pt/s was reported after 409 ms).
+    static let maximumHoldSeconds = 0.1
+
+    static func shouldCoast(fingerPxPerSecond: Double, holdSeconds: Double?) -> Bool {
+        guard abs(fingerPxPerSecond) >= minimumFlickPxPerSecond else { return false }
+        if let hold = holdSeconds, hold > maximumHoldSeconds { return false }
+        return true
+    }
+}

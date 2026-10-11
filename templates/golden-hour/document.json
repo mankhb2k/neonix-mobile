@@ -1,0 +1,158 @@
+{
+  "assets" : [
+    {
+      "duration" : 31200,
+      "height" : 1920,
+      "id" : "video-a",
+      "kind" : "video",
+      "uri" : "13792197_1080_1920_30fps.mp4",
+      "width" : 1080
+    },
+    {
+      "duration" : 12000,
+      "id" : "bgm",
+      "kind" : "audio",
+      "mimeType" : "audio/mp4",
+      "uri" : "assets/bgm.m4a"
+    }
+  ],
+  "audio" : {
+    "sampleRate" : 48000,
+    "tracks" : [
+      {
+        "clips" : [
+          {
+            "assetId" : "bgm",
+            "id" : "bgm-clip",
+            "playbackRate" : 1,
+            "timing" : {
+              "duration" : 12000,
+              "start" : 0
+            },
+            "trim" : {
+              "start" : 0
+            }
+          }
+        ],
+        "id" : "music",
+        "muted" : false,
+        "pan" : 0
+      }
+    ]
+  },
+  "composition" : {
+    "background" : "#101820",
+    "fps" : 30,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "id" : "golden-hour",
+  "layers" : [
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "amount" : 0.55,
+          "kind" : "sepia"
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-1",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 500,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 4000,
+        "start" : 0
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "amount" : 0.55,
+          "kind" : "sepia"
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-2",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 500,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 4000,
+        "start" : 4000
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "amount" : 0.55,
+          "kind" : "sepia"
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-3",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 500,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 4000,
+        "start" : 8000
+      }
+    },
+    {
+      "frame" : {
+        "height" : 200,
+        "width" : 1080
+      },
+      "id" : "title",
+      "kind" : "text",
+      "text" : {
+        "color" : "#FFFFFFff",
+        "fontFamily" : "Helvetica",
+        "fontSize" : 90,
+        "layout" : {
+          "textAlign" : "center",
+          "wrap" : "word"
+        },
+        "text" : "Golden Hour"
+      },
+      "timing" : {
+        "duration" : 12000,
+        "start" : 0
+      }
+    }
+  ]
+}

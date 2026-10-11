@@ -1,0 +1,86 @@
+{
+  "builtinAssets" : [
+
+  ],
+  "composition" : {
+    "durationMs" : 12000,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "fonts" : [
+    "Helvetica"
+  ],
+  "formatVersion" : 2,
+  "minAppVersion" : "1.0",
+  "music" : {
+    "artist" : "Neonix",
+    "title" : "Demo Track"
+  },
+  "name" : "Fast Cuts",
+  "slots" : [
+    {
+      "durationMs" : 1500,
+      "id" : "clip-1",
+      "kind" : "media",
+      "label" : "Clip 1",
+      "layerId" : "slot-1",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-2",
+      "kind" : "media",
+      "label" : "Clip 2",
+      "layerId" : "slot-2",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-3",
+      "kind" : "media",
+      "label" : "Clip 3",
+      "layerId" : "slot-3",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-4",
+      "kind" : "media",
+      "label" : "Clip 4",
+      "layerId" : "slot-4",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-5",
+      "kind" : "media",
+      "label" : "Clip 5",
+      "layerId" : "slot-5",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-6",
+      "kind" : "media",
+      "label" : "Clip 6",
+      "layerId" : "slot-6",
+      "required" : true
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-7",
+      "kind" : "media",
+      "label" : "Clip 7",
+      "layerId" : "slot-7",
+      "required" : false
+    },
+    {
+      "durationMs" : 1500,
+      "id" : "clip-8",
+      "kind" : "media",
+      "label" : "Clip 8",
+      "layerId" : "slot-8",
+      "required" : false
+    }
+  ]
+}

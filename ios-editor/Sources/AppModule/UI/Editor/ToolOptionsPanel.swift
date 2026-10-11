@@ -6,18 +6,12 @@ import SwiftUI
 struct ToolOptionsPanel: View {
     let tool: EditorTool
     let composition: V2Composition
-    /// Chỉnh sửa only — the currently selected clip, if any (`nil` when
-    /// nothing's selected, which the panel itself renders as a hint rather
-    /// than an empty space).
+    /// The currently selected clip, if any (Text and Adjust edit it).
     let selectedLayer: V2Layer?
     /// Âm thanh — the selected standalone `V2AudioClip`, if any.
     let selectedAudioClip: V2AudioClip?
-    let currentTimeMs: Double
     let onSetAspectRatio: (Double, Double) -> Void
     let onSetBackgroundColor: (String) -> Void
-    let onSplit: (String, Double) -> Void
-    let onDelete: (String) -> Void
-    let onExtractAudio: (String) -> Void
     let onPickAudioFile: (URL) -> Void
     let onSetAudioVolume: (String, Double) -> Void
     let onDeleteAudio: (String) -> Void
@@ -31,13 +25,6 @@ struct ToolOptionsPanel: View {
     /// one's content (same `selectedLayer` Chỉnh sửa already reads).
     let onAddText: (String) -> Void
     let onSetTextContent: (String, String) -> Void
-    /// Tuỳ chỉnh — the selected layer's current slider values (neutral if
-    /// never adjusted this session), plus the same begin/live-update/end
-    /// shape `TimelineView`'s drag-to-trim handles already use.
-    let adjustValues: AdjustValues
-    let onAdjustBegin: () -> Void
-    let onAdjustChange: (String, AdjustValues) -> Void
-    let onAdjustEnd: () -> Void
 
     var body: some View {
         switch tool {
@@ -45,11 +32,6 @@ struct ToolOptionsPanel: View {
             AspectRatioOptionsRow(current: (composition.width, composition.height), onSelect: onSetAspectRatio)
         case .background:
             BackgroundColorOptionsRow(current: composition.background, onSelect: onSetBackgroundColor)
-        case .edit:
-            EditOptionsRow(
-                selectedLayer: selectedLayer, currentTimeMs: currentTimeMs,
-                onSplit: onSplit, onDelete: onDelete, onExtractAudio: onExtractAudio
-            )
         case .audio:
             AudioOptionsRow(
                 selectedClip: selectedAudioClip,
@@ -62,11 +44,6 @@ struct ToolOptionsPanel: View {
             SoundEffectsOptionsRow(onSelect: onAddSoundEffect)
         case .text:
             TextOptionsRow(selectedLayer: selectedLayer, onAddText: onAddText, onSetTextContent: onSetTextContent)
-        case .adjust:
-            AdjustOptionsRow(
-                selectedLayer: selectedLayer, values: adjustValues,
-                onBegin: onAdjustBegin, onChange: onAdjustChange, onEnd: onAdjustEnd
-            )
         default:
             EmptyView()
         }
@@ -78,98 +55,7 @@ struct ToolOptionsPanel: View {
 /// decide whether to reserve layout space for the panel at all.
 extension EditorTool {
     var hasOptionsPanel: Bool {
-        self == .aspectRatio || self == .background || self == .edit || self == .audio || self == .effects || self == .text || self == .adjust
-    }
-}
-
-/// Tuỳ chỉnh — every continuous slider this tool has, compiling straight
-/// into `EffectPresetKind`/`SetAdjustCommand` (see CLAUDE.md's "Tuỳ chỉnh"
-/// note): Light/color basics, HSL, white balance, a tone curve (the
-/// draggable graph in `CurveEditorSheet`), and detail/effects. Unlike `AudioOptionsRow`'s
-/// volume slider (commit-on-release only), every tick calls `onChange`
-/// live — a grading tool is useless without real-time feedback — while
-/// `onBegin`/`onEnd` (driven by `Slider`'s own `onEditingChanged`) bracket
-/// exactly one undo step per drag, same shape as `TimelineView`'s
-/// drag-to-trim handles. One long horizontal scroll, not grouped tabs —
-/// simplest thing that works for ~17 sliders without new navigation chrome.
-private struct AdjustOptionsRow: View {
-    let selectedLayer: V2Layer?
-    let values: AdjustValues
-    let onBegin: () -> Void
-    let onChange: (String, AdjustValues) -> Void
-    let onEnd: () -> Void
-
-    @State private var local = AdjustValues()
-    @State private var showingCurveEditor = false
-
-    var body: some View {
-        if let selectedLayer {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
-                    adjustSlider("Brightness", value: $local.brightness, range: -0.5...0.5)
-                    adjustSlider("Contrast", value: $local.contrast, range: 0.5...1.5)
-                    adjustSlider("Saturation", value: $local.saturation, range: 0...2)
-                    adjustSlider("Exposure", value: $local.exposure, range: -2...2)
-                    Divider()
-                    adjustSlider("Hue", value: $local.hue, range: -180...180)
-                    adjustSlider("Lightness", value: $local.lightness, range: -0.5...0.5)
-                    Divider()
-                    adjustSlider("Temperature", value: $local.temperature, range: -1...1)
-                    adjustSlider("Tint", value: $local.tint, range: -1...1)
-                    Divider()
-                    Button {
-                        showingCurveEditor = true
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "chart.xyaxis.line").font(.title3)
-                            Text("Curves").font(.caption2)
-                        }
-                    }
-                    Divider()
-                    adjustSlider("Sharpen", value: $local.sharpen, range: 0...1)
-                    adjustSlider("Clarity", value: $local.clarity, range: -1...1)
-                    adjustSlider("Blur", value: $local.blur, range: 0...20)
-                    Divider()
-                    adjustSlider("Vignette", value: $local.vignette, range: 0...2)
-                    adjustSlider("Noise", value: $local.noise, range: 0...1)
-                }
-                .padding(.horizontal)
-            }
-            .onAppear { local = values }
-            .onChange(of: selectedLayer.id) { _, _ in local = values }
-            .sheet(isPresented: $showingCurveEditor) {
-                CurveEditorSheet(points: $local.curvePoints, onBegin: onBegin, onEnd: onEnd) {
-                    onChange(selectedLayer.id, local)
-                }
-            }
-        } else {
-            Text("Select a clip on the timeline to adjust")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.horizontal)
-        }
-    }
-
-    private func adjustSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption2).foregroundColor(.secondary)
-            Slider(value: value, in: range) { editing in
-                if editing {
-                    onBegin()
-                } else {
-                    onEnd()
-                }
-            }
-            .frame(width: 140)
-            // `Slider`'s own live `value` updates continuously while
-            // dragging regardless of `onEditingChanged` — this is what
-            // gives the Stage real-time feedback, not just a final value
-            // on release.
-            .onChange(of: value.wrappedValue) { _, _ in
-                guard let selectedLayer else { return }
-                onChange(selectedLayer.id, local)
-            }
-        }
+        self == .aspectRatio || self == .background || self == .audio || self == .effects || self == .text
     }
 }
 
@@ -360,82 +246,6 @@ private struct AudioOptionsRow: View {
 
     private func fraction(fromDB gainDb: Double) -> Double {
         min(max(1 + gainDb / 40, 0), 1)
-    }
-}
-
-/// Chỉnh sửa (Phase 2) — Tách (split at the playhead) and Xoá (delete),
-/// both acting on whichever clip is currently selected in the Timeline.
-/// Drag-to-trim handles directly on the clip are a separate, bigger UI
-/// piece explicitly deferred — see the "Bottom nav tools" roadmap plan;
-/// this ships the 2 actions that don't need a new gesture at all.
-private struct EditOptionsRow: View {
-    let selectedLayer: V2Layer?
-    let currentTimeMs: Double
-    let onSplit: (String, Double) -> Void
-    let onDelete: (String) -> Void
-    /// Trích xuất — only meaningful for a video clip (there's no embedded
-    /// audio to pull out of an image/text/shape layer).
-    let onExtractAudio: (String) -> Void
-
-    /// Split only makes sense strictly inside the clip's own range — right
-    /// at either edge would produce a zero-length half.
-    private var canSplit: Bool {
-        guard let layer = selectedLayer else { return false }
-        return currentTimeMs > layer.timing.start && currentTimeMs < layer.timing.start + layer.timing.duration
-    }
-
-    private var isVideo: Bool {
-        selectedLayer?.type == "video"
-    }
-
-    var body: some View {
-        if let selectedLayer {
-            HStack(spacing: 20) {
-                Button {
-                    onSplit(selectedLayer.id, currentTimeMs)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "scissors")
-                            .font(.title3)
-                        Text("Split")
-                            .font(.caption2)
-                    }
-                }
-                .disabled(!canSplit)
-                .foregroundColor(canSplit ? .primary : .secondary)
-
-                if isVideo {
-                    Button {
-                        onExtractAudio(selectedLayer.id)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "waveform")
-                                .font(.title3)
-                            Text("Extract Audio")
-                                .font(.caption2)
-                        }
-                    }
-                }
-
-                Button(role: .destructive) {
-                    onDelete(selectedLayer.id)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "trash")
-                            .font(.title3)
-                        Text("Delete")
-                            .font(.caption2)
-                    }
-                }
-                .foregroundColor(.red)
-            }
-            .padding(.horizontal)
-        } else {
-            Text("Select a clip on the timeline to edit")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.horizontal)
-        }
     }
 }
 

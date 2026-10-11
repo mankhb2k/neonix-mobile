@@ -40,6 +40,8 @@ struct AccountView: View {
 
             Section {
                 Toggle("Playback metrics HUD", isOn: $playbackMetricsArmed)
+                NavigationLink("Templates & credits (API)") { TemplatesDebugView() }
+                NavigationLink("Design Lab") { DesignLabView() }
             } header: {
                 Text("Developer")
             } footer: {

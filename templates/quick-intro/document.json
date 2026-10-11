@@ -1,0 +1,123 @@
+{
+  "assets" : [
+    {
+      "duration" : 31200,
+      "height" : 1920,
+      "id" : "video-a",
+      "kind" : "video",
+      "uri" : "13792197_1080_1920_30fps.mp4",
+      "width" : 1080
+    },
+    {
+      "duration" : 6000,
+      "id" : "bgm",
+      "kind" : "audio",
+      "mimeType" : "audio/mp4",
+      "uri" : "assets/bgm.m4a"
+    }
+  ],
+  "audio" : {
+    "sampleRate" : 48000,
+    "tracks" : [
+      {
+        "clips" : [
+          {
+            "assetId" : "bgm",
+            "id" : "bgm-clip",
+            "playbackRate" : 1,
+            "timing" : {
+              "duration" : 6000,
+              "start" : 0
+            },
+            "trim" : {
+              "start" : 0
+            }
+          }
+        ],
+        "id" : "music",
+        "muted" : false,
+        "pan" : 0
+      }
+    ]
+  },
+  "composition" : {
+    "background" : "#101820",
+    "fps" : 30,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "id" : "quick-intro",
+  "layers" : [
+    {
+      "assetId" : "video-a",
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-1",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "zoom"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 0
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-2",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "zoom"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 3000
+      }
+    },
+    {
+      "frame" : {
+        "height" : 200,
+        "width" : 1080
+      },
+      "id" : "title",
+      "kind" : "text",
+      "text" : {
+        "color" : "#FFFFFFff",
+        "fontFamily" : "Helvetica",
+        "fontSize" : 110,
+        "layout" : {
+          "textAlign" : "center",
+          "wrap" : "word"
+        },
+        "text" : "Hello!",
+        "typewriter" : {
+          "direction" : "forward",
+          "perUnitDelayMs" : 70,
+          "reveal" : "fade"
+        }
+      },
+      "timing" : {
+        "duration" : 4500,
+        "start" : 400
+      }
+    }
+  ]
+}

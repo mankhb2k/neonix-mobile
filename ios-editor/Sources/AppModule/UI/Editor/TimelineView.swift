@@ -312,14 +312,13 @@ struct TimelineView: View {
                                 dragNeedsRebase = false
                             }
                             PlaybackMetrics.shared.count(.dragEvents)
-                            if PlaybackMetrics.shared.isRecording {
-                                // `value.time` is the touch's own timestamp; the
-                                // handler's wall clock is useless here because
-                                // SwiftUI delivers several touch events in one
-                                // pass (their handler times differ by microseconds).
-                                releaseEstimator.add(time: value.time.timeIntervalSinceReferenceDate,
-                                                     x: Double(value.translation.width))
-                            }
+                            // `value.time` is the touch's own timestamp; the
+                            // handler's wall clock is useless here because
+                            // SwiftUI delivers several touch events in one
+                            // pass (their handler times differ by microseconds).
+                            // Always fed: `ReleaseLog` needs it outside a recording.
+                            releaseEstimator.add(time: value.time.timeIntervalSinceReferenceDate,
+                                                 x: Double(value.translation.width))
                             PlaybackMetrics.shared.measure(.inputHandlerMs) {
                                 engine.beginScrub()
                                 engine.scrub(deltaMs: -Double(value.translation.width - dragRebaseX) / pxPerMs)
@@ -343,12 +342,18 @@ struct TimelineView: View {
                                     metrics.record(.releaseHoldMs, ms: hold * 1000)
                                 }
                             }
+                            let estimate = releaseEstimator.pointsPerSecond
+                            let hold = releaseEstimator.holdSeconds(now: value.time.timeIntervalSinceReferenceDate)
                             releaseEstimator.reset()
                             // `.velocity` is points/sec (iOS 17+); negated and
                             // converted the same way as translation, so a
                             // release continues the direction/speed the
                             // finger was already moving.
-                            engine.endScrub(velocityMsPerSecond: -Double(value.velocity.width) / pxPerMs)
+                            let glides = ReleaseGate.shouldCoast(fingerPxPerSecond: Double(value.velocity.width), holdSeconds: hold)
+                            engine.endScrub(velocityMsPerSecond: glides ? -Double(value.velocity.width) / pxPerMs : 0)
+                            ReleaseLog.append(fingerPxPerSecond: Double(value.velocity.width),
+                                              estimatedPxPerSecond: estimate, holdMs: hold.map { $0 * 1000 },
+                                              pxPerMs: Double(pxPerMs), coasted: engine.mode == .coasting)
                         }
                 )
             }

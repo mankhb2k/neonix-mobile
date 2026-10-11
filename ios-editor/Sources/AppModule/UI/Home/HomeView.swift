@@ -1,125 +1,127 @@
 import SwiftUI
 
-/// Placeholder sample data only — no backend/catalog exists yet. Thumbnails
-/// are gradients (no real template media to show), `isNew` drives the "New"
-/// badge seen in the reference design.
-struct TemplateSample: Identifiable {
-    let id = UUID()
-    let title: String
-    let caption: String
-    let gradient: [Color]
-    let isNew: Bool
-}
+/// Browse screen: search, category chips and a two-column waterfall of the published templates. Tapping a card
+/// opens the full-screen viewer; "Use template" there starts the fill-the-slots flow.
+struct HomeView: View {
+    @State private var catalog = TemplateCatalog()
+    /// nil = Discover.
+    @State private var category: String?
+    @State private var searchText = ""
+    @State private var viewer: ViewerRequest?
 
-private enum HomeCategory: String, CaseIterable, Identifiable {
-    case discover = "Discover"
-    case carousels = "Carousels"
-    case collages = "Collages"
-    case stories = "Stories"
-
-    var id: String { rawValue }
-}
-
-/// A horizontally-scrolling row of template cards, the repeated building
-/// block both "Trends" and "Carousels" use.
-private struct TemplateRow: View {
-    let templates: [TemplateSample]
+    private struct ViewerRequest: Identifiable {
+        let id = UUID()
+        let templates: [APITemplate]
+        let startID: String
+    }
 
     var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                searchField
+                if catalog.categories.count > 0 { chips }
+                feed
+            }
+            .padding(.vertical)
+        }
+        .refreshable { await reload() }
+        // Reloads on first show and whenever the search text or category changes (debounced for typing).
+        .task(id: SearchKey(text: searchText, category: category)) {
+            if !searchText.isEmpty { try? await Task.sleep(nanoseconds: 350_000_000) }
+            if Task.isCancelled { return }
+            await reload()
+        }
+        // Back from the viewer: what was bought there should now say "Owned".
+        .fullScreenCover(item: $viewer, onDismiss: { Task { await reload() } }) { request in
+            TemplateViewerView(templates: request.templates, startID: request.startID)
+        }
+    }
+
+    private struct SearchKey: Hashable { let text: String; let category: String? }
+
+    private func reload() async {
+        await catalog.reload(query: searchText, category: category)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+            TextField("Search templates", text: $searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal)
+    }
+
+    private var chips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(templates) { template in
-                    TemplateCard(template: template)
+            HStack(spacing: 8) {
+                chip("Discover", selected: category == nil) { category = nil }
+                ForEach(catalog.categories, id: \.self) { name in
+                    chip(TemplateCatalog.displayName(forCategory: name), selected: category == name) { category = name }
                 }
             }
             .padding(.horizontal)
         }
     }
-}
 
-private struct TemplateCard: View {
-    let template: TemplateSample
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            LinearGradient(colors: template.gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
-
-            VStack {
-                if template.isNew {
-                    Text("New")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.white.opacity(0.9), in: Capsule())
-                        .foregroundColor(.black)
-                        .padding(12)
-                }
-                Spacer()
-                HStack {
-                    Text(template.title)
-                        .font(.footnote.weight(.semibold))
-                        .lineLimit(1)
-                    Spacer()
-                }
-                Text(template.caption)
-                    .font(.caption2)
-                    .opacity(0.85)
-            }
-            .foregroundColor(.white)
-            .padding(12)
+    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(selected ? Color.accentColor : Color(.secondarySystemBackground), in: Capsule())
+                .foregroundColor(selected ? .white : .primary)
         }
-        .frame(width: 150, height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .buttonStyle(.plain)
     }
-}
 
-struct HomeView: View {
-    @State private var category: HomeCategory = .discover
-
-    private let trends: [TemplateSample] = [
-        TemplateSample(title: "Digital Memories", caption: "22s · 33 clips", gradient: [.purple, .black], isNew: true),
-        TemplateSample(title: "Fall Diary", caption: "17s · 36 clips", gradient: [.orange, .brown], isNew: true),
-        TemplateSample(title: "Night Out", caption: "26s · 65 clips", gradient: [.yellow, .orange], isNew: true),
-        TemplateSample(title: "City Lights", caption: "19s · 28 clips", gradient: [.blue, .indigo], isNew: false),
-    ]
-
-    private let carousels: [TemplateSample] = [
-        TemplateSample(title: "October Calendar", caption: "6 slides", gradient: [.red, .black], isNew: true),
-        TemplateSample(title: "Random Moments", caption: "5 slides", gradient: [.gray, .black], isNew: true),
-        TemplateSample(title: "October Gallery", caption: "8 slides", gradient: [.brown, .orange], isNew: true),
-    ]
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Picker("Category", selection: $category) {
-                    ForEach(HomeCategory.allCases) { category in
-                        Text(category.rawValue).tag(category)
-                    }
+    @ViewBuilder private var feed: some View {
+        if catalog.templates.isEmpty {
+            switch catalog.state {
+            case .failed(let message):
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark").font(.largeTitle).foregroundColor(.secondary)
+                    Text("Can't load templates").font(.headline)
+                    Text(message).font(.footnote).foregroundColor(.secondary).multilineTextAlignment(.center)
+                    Button("Try again") { Task { await reload() } }.buttonStyle(.borderedProminent)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
+                .frame(maxWidth: .infinity).padding(.top, 60).padding(.horizontal)
+            case .loaded:
+                Text(searchText.isEmpty ? "No templates yet" : "No results").foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity).padding(.top, 80)
+            default:
+                ProgressView().frame(maxWidth: .infinity).padding(.top, 80)
+            }
+        } else {
+            let columns = MasonryColumns.split(catalog.templates)
+            HStack(alignment: .top, spacing: 12) {
+                column(columns.left)
+                column(columns.right)
+            }
+            .padding(.horizontal)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Trends 🔥").font(.title2.bold())
-                        .padding(.horizontal)
-                    TemplateRow(templates: trends)
-                }
+            if catalog.hasMore {
+                ProgressView().frame(maxWidth: .infinity).padding()
+                    .onAppear { Task { await catalog.loadMore() } }
+            }
+        }
+    }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Carousels").font(.title2.bold())
-                        Image(systemName: "chevron.right").foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal)
-                    Text("Design seamless carousels with ready-to-use templates")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                    TemplateRow(templates: carousels)
+    private func column(_ templates: [APITemplate]) -> some View {
+        LazyVStack(alignment: .leading, spacing: 18) {
+            ForEach(templates) { template in
+                TemplateCard(template: template) {
+                    viewer = ViewerRequest(templates: catalog.templates, startID: template.id)
                 }
             }
-            .padding(.vertical)
         }
+        .frame(maxWidth: .infinity)
     }
 }

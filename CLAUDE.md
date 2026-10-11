@@ -47,7 +47,8 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   curve in closed form (k≈2.0/s), retuned **by the user's feel on the device**: gain 3.3,
   friction ×0.7. No benchmark exists for these numbers — don't "correct" them toward
   native. A touch on a gliding timeline **brakes** it (`engine.brake()`, friction ×20 on
-  top, stops in ~0.1–0.25 s); the touch-down is a `LongPressGesture(minimumDuration: 0)` —
+  top, stops in ~0.1–0.25 s); a release only glides if finger speed ≥ 120 pt/s and the finger
+  wasn't still > 100 ms (`ReleaseGate`; debug log `Documents/release_log.csv`); the touch-down is a `LongPressGesture(minimumDuration: 0)` —
   a `DragGesture(minimumDistance: 0)` there swallowed the clips' tap-to-select. Unmeasured:
   the lift "kick" from gain, and video keeping up at that speed.
 - **Timeline zoom**: pinch (`MagnifyGesture`, simultaneous with the scrub drag), continuous,
@@ -78,7 +79,9 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   compiles down (`PresetCompiler`, `EffectPresets`). `V2Effect`/`effects` are deleted
   from both Swift and TS (breaking change to `formatVersion: 2`, no migration). TS side
   still needs `pnpm typecheck/test/generate:schema` run locally (no Node here).
-- **Layer transform**: exactly `translate/scale/rotate/skew/anchor/perspective`; no
+- **Layer transform**: Editor tier = `EditorLayer.transform` (`EditorTransform`: `x`/`y` px from the canvas centre, `scale`/`scaleX`/`scaleY`,
+  `rotation` degrees clockwise; every key optional) + `opacity`; `PresetCompiler` lowers it to the object's own `V2Transform` (anchor 0,
+  never on the preset's group wrapper, so a preset animates around the resting place). Protocol V2: exactly `translate/scale/rotate/skew/anchor/perspective`; no
   `operations[]` (two representations can disagree). Clip/mask/pattern definitions keep
   their own `V2SvgTransformOperation`. **Anchor** `(0,0,0)` = pivot at the layer's own
   centre; non-zero = pixel offset from it. `scale.z` has no visual effect on flat layers;
@@ -130,12 +133,23 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   (`AssetDurationCache`). Source time is always `VideoTimeMapping`
   (`trimStart + elapsed × rate`); split shifts the 2nd half's `trimStart` (ms, not s).
   Editing commands still assume `playbackRate == 1`.
+- **Bottom bar = always ONE row** (CapCut style, `EditorBottomBar.swift`, `EditorShellView.bottomMode`): main tools
+  (`EditorToolbarView`) -> select a clip/photo/text/audio clip (tap it, or the Edit tool selects what is under the
+  playhead) and the row becomes that item's tools (`SelectionToolbarView`: Split, Extract Audio, Transform, Adjust,
+  Edit text, Volume, Delete) with a "«" back that deselects -> a tool that needs a control (Text field, Audio
+  volume, Aspect ratio, Background) replaces the row with `ToolOptionsPanel` and its own "«". Never stack a second row.
+  Edit is not a panel any more (its actions are the selection row). UI tests: `EditorBottomBarUITests`.
 - **Tools** (`EditorTool`, panel = `ToolOptionsPanel`): Aspect ratio/Background (edit
   `composition`; layers are not re-anchored), Edit (select, split, delete, trim,
   "Extract audio"), Adjust, Curves, Text, Audio (+ sound effects, record). Selection
   is `EditorShellView.selectedLayerId` / `selectedAudioClipId`. Deferred: Bộ lọc picker +
   `.cube` import, Chú thích (needs AI), Lớp phủ/Nhãn dán (extra image layer + sticker
   library). Roadmap plan: `~/.claude/plans/twinkly-noodling-hearth.md`.
+- **Adjust / Transform sheets** (`AdjustSheet`, `TransformSheet`; `.sheet` with a `.height(300)` detent and background
+  interaction on, so the stage stays live): `RulerDial` + a scrolling row of round buttons (Scroll variant of the Design Lab;
+  Adjust's last button is Curves). `AdjustControl`/`TransformControl` hold per-control keyPath, mapping, neutral. Transform
+  writes through `SetTransformCommand` (keeps z/skew/anchor/perspective/tilt) with one undo step per ruler/stage gesture;
+  `TransformGestureOverlay` on the stage = drag/pinch/twist. Tests: `TransformCommandTests`, `EditorBottomBarUITests`.
 - **Adjust (Tuỳ chỉnh)**: `AdjustValues` (17 fields) → `SetAdjustCommand` compiles only
   the groups that moved off neutral into `EffectPresetKind` primitive chains under a stable
   filter id `adjust-<layerId>` (cleared when neutral). Session-only `adjustIntents`
@@ -145,6 +159,22 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   3×3 `feConvolveMatrix`, `feTurbulence` (white noise approximation), `feMerge`,
   `feVignette`. Clarity = blur + arithmetic composite. **Curves**: 5 draggable points at
   fixed x (`CurveGraphView`, `CurveEditorSheet`); `curvePoints` map 1:1 to `CIToneCurve`.
+- **Templates** (`Network/`, `Templates/`, `UI/Home`, `UI/UseTemplate`, `Export/`; server: `api/`, spec
+  `api/docs/template-package.md`, starter templates + `build.py`/`publish.py` in `templates/`): a template is a zip of
+  `manifest.json` + `document.json` (an `EditorDocument`, incl. an `audio` domain for the music) + `assets/`, generated
+  by `TemplateFixturesTests` (edit the builders there, never the JSON). Media slots (`kind: "media"`) take a photo or a
+  video: video shorter than the slot is refused, longer is cropped to a window of exactly `durationMs` (`trimStart`);
+  `TemplateFiller` swaps media in, `TemplateProjectBuilder` compiles and gives text layers their own lanes (`EditorDocument`
+  has no lanes). Package `assets/` are copied into `ImportedMedia` and their URIs rewritten (the flat resolver
+  `bundledURL` stays). Home = poster cards only (nothing plays there); the preview video plays when a template is opened in the viewer.
+  Slot picker is a PhotoKit grid, not `PhotosPicker`. After the picker the template flow does **not** open the full
+  editor: `TemplateEditView` is the result screen (preview, slot strip with replace/crop, Audio = music on/off, Text =
+  the template's texts, Export), driven by `TemplateEditModel`, which rebuilds the project from the creator's document
+  on every change (`TemplateBuild`; nothing is patched in place). The full `EditorShellView` stays for projects (Folder). **A template is bought once, by its first Export** (`ExportGate` → `POST /v1/exports`: spends the
+  price, owned for good, later exports of it are free; `owned` flag in the catalogue); the download is free. Pro add-ons
+  (later) are separate purchases, not a per-export fee. **There is no video renderer yet** (`UnavailableExporter`):
+  Debug builds charge anyway so the flow can be tried, Release refuses without charging. Debug talks to the API with the
+  `X-Dev-User` header (server `DEV_AUTH_BYPASS=true`); Release uses the Keychain bearer token (sign-in not built).
 - **Text tool**: add/edit goes through the real `compile(_:)` text pipeline
   (`AddTextLayerCommand`, `SetTextContentCommand`), never hand-built chunks. Fixed
   defaults (Helvetica 32, white, centred, no wrap, 3 s); no font/colour picker or
@@ -158,6 +188,21 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   `extracted-<name>.m4a` and trims per clip; Record = `AVAudioRecorder` → same import
   path (needs `NSMicrophoneUsageDescription`, shows a hint when permission is denied).
   Original video audio isn't muted after Extract (inert today: samples have none).
+
+## Design Lab
+
+Account › Developer › **Design Lab** (`UI/DesignLab`) is a sandbox for trying UI on fake data before it goes into the
+editor; each experiment is a self-contained screen. Both experiments use one pattern, chosen by the user: **round buttons
+that pick the parameter + a Curves-style system sheet** (`.sheet`, title + Done, the ruler and the same round buttons
+inside, stage stays live via `presentationBackgroundInteraction`; height set in the lab menu, `LabSheetHeight`):
+*Transform controls* (`TransformLabView`: X, Y, Scale, Rotate, Opacity; drag/pinch/twist on the stage too) and *Adjust
+controls* (`AdjustLabView`: 13 scalar controls, live photo, hold to compare; **Scroll** = one scrolling row vs **Groups** =
+Light/Color/Detail tabs - still undecided). Inline panels and plain sliders were tried and dropped.
+`UI/Components/RulerDial` is the real, reusable ruler (`RulerMapping.linear/logarithmic`, `ScrollView` momentum; ticks stand on a
+baseline in three kinds of line - minor tick, major tick, centre mark (no fixed marker: the tick in the middle *becomes* the
+centre mark, accent colour and a little taller than a major tick); all three are 1.5 pt wide (minor grey, major dark); a dot marks the neutral value; soft
+rate-limited haptics via `RulerHaptics`; VoiceOver adjustable; editing ends once it settles). It is meant for the editor's
+Transform and Adjust sheets in production.
 
 ## Rendering notes
 
@@ -200,8 +245,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
 - **`simctl` can't tap or drag.** `ios-editor/UITests` (XCUITest) is the only way to
   synthesize touches (`TimelineZoomUITests` does real pinches); `print` from the app
   under test doesn't reach `xcodebuild` — use `NSLog` + `simctl spawn … log show`.
-  `EditorNavigationUITests` still use the old Vietnamese "Huỷ" label (stale).
-  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (117 passing).
+  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (175 passing).
 - No Node/pnpm in this sandbox: TS (`packages/motion-protocol`) can't be verified here.
 
 ## Key files

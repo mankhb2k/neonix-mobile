@@ -1,0 +1,277 @@
+{
+  "assets" : [
+    {
+      "duration" : 31200,
+      "height" : 1920,
+      "id" : "video-a",
+      "kind" : "video",
+      "uri" : "13792197_1080_1920_30fps.mp4",
+      "width" : 1080
+    },
+    {
+      "duration" : 15000,
+      "id" : "bgm",
+      "kind" : "audio",
+      "mimeType" : "audio/mp4",
+      "uri" : "assets/bgm.m4a"
+    }
+  ],
+  "audio" : {
+    "sampleRate" : 48000,
+    "tracks" : [
+      {
+        "clips" : [
+          {
+            "assetId" : "bgm",
+            "id" : "bgm-clip",
+            "playbackRate" : 1,
+            "timing" : {
+              "duration" : 15000,
+              "start" : 0
+            },
+            "trim" : {
+              "start" : 0
+            }
+          }
+        ],
+        "id" : "music",
+        "muted" : false,
+        "pan" : 0
+      }
+    ]
+  },
+  "composition" : {
+    "background" : "#101820",
+    "fps" : 30,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "id" : "night-out",
+  "layers" : [
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-1",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 0
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-2",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 2500
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-3",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 5000
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-4",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 7500
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-5",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 10000
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "brightness" : 0,
+          "contrast" : 1.25,
+          "exposure" : 0,
+          "hueRotate" : 0,
+          "kind" : "colorAdjust",
+          "lightness" : 0,
+          "saturation" : 1.3
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-6",
+      "inPreset" : {
+        "durationMs" : 300,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 300,
+        "kind" : "zoom"
+      },
+      "timing" : {
+        "duration" : 2500,
+        "start" : 12500
+      }
+    },
+    {
+      "frame" : {
+        "height" : 200,
+        "width" : 1080
+      },
+      "id" : "title",
+      "kind" : "text",
+      "text" : {
+        "color" : "#FFFFFFff",
+        "fontFamily" : "Helvetica",
+        "fontSize" : 96,
+        "layout" : {
+          "textAlign" : "center",
+          "wrap" : "word"
+        },
+        "text" : "Night Out",
+        "typewriter" : {
+          "direction" : "forward",
+          "perUnitDelayMs" : 70,
+          "reveal" : "fade"
+        }
+      },
+      "timing" : {
+        "duration" : 4500,
+        "start" : 400
+      }
+    }
+  ]
+}

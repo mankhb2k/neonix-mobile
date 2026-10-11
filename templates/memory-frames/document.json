@@ -1,0 +1,183 @@
+{
+  "assets" : [
+    {
+      "height" : 5472,
+      "id" : "photo",
+      "kind" : "image",
+      "uri" : "pexels-followingnyc-38428141.jpg",
+      "width" : 3648
+    },
+    {
+      "duration" : 15000,
+      "id" : "bgm",
+      "kind" : "audio",
+      "mimeType" : "audio/mp4",
+      "uri" : "assets/bgm.m4a"
+    }
+  ],
+  "audio" : {
+    "sampleRate" : 48000,
+    "tracks" : [
+      {
+        "clips" : [
+          {
+            "assetId" : "bgm",
+            "id" : "bgm-clip",
+            "playbackRate" : 1,
+            "timing" : {
+              "duration" : 15000,
+              "start" : 0
+            },
+            "trim" : {
+              "start" : 0
+            }
+          }
+        ],
+        "id" : "music",
+        "muted" : false,
+        "pan" : 0
+      }
+    ]
+  },
+  "composition" : {
+    "background" : "#101820",
+    "fps" : 30,
+    "height" : 1620,
+    "width" : 1080
+  },
+  "id" : "memory-frames",
+  "layers" : [
+    {
+      "assetId" : "photo",
+      "frame" : {
+        "height" : 1620,
+        "width" : 1080
+      },
+      "id" : "slot-1",
+      "inPreset" : {
+        "durationMs" : 600,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "image",
+      "outPreset" : {
+        "durationMs" : 600,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 0
+      }
+    },
+    {
+      "assetId" : "photo",
+      "frame" : {
+        "height" : 1620,
+        "width" : 1080
+      },
+      "id" : "slot-2",
+      "inPreset" : {
+        "durationMs" : 600,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "image",
+      "outPreset" : {
+        "durationMs" : 600,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 3000
+      }
+    },
+    {
+      "assetId" : "photo",
+      "frame" : {
+        "height" : 1620,
+        "width" : 1080
+      },
+      "id" : "slot-3",
+      "inPreset" : {
+        "durationMs" : 600,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "image",
+      "outPreset" : {
+        "durationMs" : 600,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 6000
+      }
+    },
+    {
+      "assetId" : "photo",
+      "frame" : {
+        "height" : 1620,
+        "width" : 1080
+      },
+      "id" : "slot-4",
+      "inPreset" : {
+        "durationMs" : 600,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "image",
+      "outPreset" : {
+        "durationMs" : 600,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 9000
+      }
+    },
+    {
+      "assetId" : "photo",
+      "frame" : {
+        "height" : 1620,
+        "width" : 1080
+      },
+      "id" : "slot-5",
+      "inPreset" : {
+        "durationMs" : 600,
+        "easing" : "easeOut",
+        "kind" : "fade"
+      },
+      "kind" : "image",
+      "outPreset" : {
+        "durationMs" : 600,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 12000
+      }
+    },
+    {
+      "frame" : {
+        "height" : 200,
+        "width" : 1080
+      },
+      "id" : "title",
+      "kind" : "text",
+      "text" : {
+        "color" : "#FFFFFFff",
+        "fontFamily" : "Helvetica",
+        "fontSize" : 88,
+        "layout" : {
+          "textAlign" : "center",
+          "wrap" : "word"
+        },
+        "text" : "Memories"
+      },
+      "timing" : {
+        "duration" : 15000,
+        "start" : 0
+      }
+    }
+  ]
+}

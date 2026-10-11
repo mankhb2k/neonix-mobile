@@ -122,8 +122,8 @@ func compile(_ document: EditorDocument) -> V2Project {
             layers.append(V2Layer(
                 id: editorLayer.id,
                 frame: editorLayer.frame,
-                transform: .identity,
-                opacity: 1,
+                transform: editorLayer.transform?.v2 ?? .identity,
+                opacity: editorLayer.opacity ?? 1,
                 filter: filterId,
                 timing: editorLayer.timing,
                 tracks: nil,
@@ -149,8 +149,8 @@ func compile(_ document: EditorDocument) -> V2Project {
                 id: editorLayer.id,
                 parentLayerId: wrapperId,
                 frame: editorLayer.frame,
-                transform: .identity,
-                opacity: 1,
+                transform: editorLayer.transform?.v2 ?? .identity,
+                opacity: editorLayer.opacity ?? 1,
                 filter: filterId,
                 timing: editorLayer.timing,
                 tracks: nil,
@@ -158,7 +158,9 @@ func compile(_ document: EditorDocument) -> V2Project {
             ))
         }
     }
-    return V2Project(composition: document.composition, assets: document.assets, filters: filters.isEmpty ? nil : filters, layers: layers)
+    var project = V2Project(composition: document.composition, assets: document.assets, filters: filters.isEmpty ? nil : filters, layers: layers)
+    if let audio = document.audio { project.audio = audio }
+    return project
 }
 
 /// Lowers an `EditorTextLayer`'s authoring intent into Protocol V2's atomic

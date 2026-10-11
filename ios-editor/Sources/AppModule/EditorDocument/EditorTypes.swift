@@ -49,6 +49,10 @@ struct EditorLayer: Codable {
     /// `V2TextLayout` + `V2TextChunk`s, never persisted as wrap/align intent
     /// in Protocol V2 itself.
     var text: EditorTextLayer?
+    /// Resting position/scale/rotation on the canvas; nil = centred, upright, own size (see `EditorTransform`).
+    var transform: EditorTransform?
+    /// 0...1, nil = fully opaque. Presets (fade) animate on top of it.
+    var opacity: Double?
 }
 
 struct EditorDocument: Codable {
@@ -56,4 +60,7 @@ struct EditorDocument: Codable {
     var composition: V2Composition
     var assets: [V2Asset]
     var layers: [EditorLayer]
+    /// Background music etc. Audio has its own domain, not a layer (CLAUDE.md, "Timeline lanes"); present in
+    /// template documents, nil for plain projects.
+    var audio: V2AudioDomain?
 }

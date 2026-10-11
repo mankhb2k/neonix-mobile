@@ -1,0 +1,101 @@
+[
+  {
+    "slug": "moody-walk",
+    "source": "watermark.MOV",
+    "previewStart": 2,
+    "musicStart": 10,
+    "category": "vlog",
+    "price": 6,
+    "description": "Four moody clips with a bold title. Swap in your own walk."
+  },
+  {
+    "slug": "city-weekend",
+    "source": "watermark 3.MOV",
+    "previewStart": 1,
+    "musicStart": 40,
+    "category": "stories",
+    "price": 6,
+    "description": "Six quick photo moments for a weekend story."
+  },
+  {
+    "slug": "soft-diary",
+    "source": "watermark 4.MOV",
+    "previewStart": 1,
+    "musicStart": 70,
+    "category": "daily life",
+    "price": 10,
+    "description": "Three calm, softly warmed scenes. 3:4."
+  },
+  {
+    "slug": "fast-cuts",
+    "source": "watermark 5.MOV",
+    "previewStart": 1,
+    "musicStart": 100,
+    "category": "trends",
+    "price": 12,
+    "description": "Eight fast cuts that snap to the beat."
+  },
+  {
+    "slug": "travel-reel",
+    "source": "watermark 8.MOV",
+    "previewStart": 1,
+    "musicStart": 130,
+    "category": "travel",
+    "price": 6,
+    "description": "Four travel clips and a wanderlust caption."
+  },
+  {
+    "slug": "memory-frames",
+    "source": "watermark 7.MOV",
+    "previewStart": 1,
+    "musicStart": 160,
+    "category": "stories",
+    "price": 10,
+    "description": "Five memories in a gentle fade. 2:3."
+  },
+  {
+    "slug": "golden-hour",
+    "source": "watermark 9.MOV",
+    "previewStart": 1,
+    "musicStart": 190,
+    "category": "vlog",
+    "price": 0,
+    "description": "Warm golden-hour look over three clips. Free."
+  },
+  {
+    "slug": "night-out",
+    "source": "watermark 10.MOV",
+    "previewStart": 1,
+    "musicStart": 220,
+    "category": "trends",
+    "price": 12,
+    "description": "Six punchy night clips, high contrast."
+  },
+  {
+    "slug": "mono-diary",
+    "source": "watermark 2.MOV",
+    "previewStart": 1,
+    "musicStart": 20,
+    "category": "daily life",
+    "price": 6,
+    "description": "Four black-and-white diary pages. 3:4."
+  },
+  {
+    "slug": "quick-intro",
+    "source": "watermark 6.MOV",
+    "previewStart": 1,
+    "musicStart": 50,
+    "category": "intro",
+    "price": 0,
+    "description": "A short two-clip intro with a hello. Free."
+  },
+  {
+    "slug": "polaroid-collage",
+    "source": "iphone-footage.MOV",
+    "previewStart": 5,
+    "musicStart": 80,
+    "category": "collage",
+    "price": 6,
+    "description": "Three tilted polaroids that pile up one by one. Swap in your own photos."
+  }
+]

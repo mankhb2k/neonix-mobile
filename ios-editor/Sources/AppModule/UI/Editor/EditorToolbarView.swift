@@ -1,23 +1,15 @@
 import SwiftUI
 
-/// Bottom tool row — icon above label, horizontally scrollable, matching
-/// CapCut's own bottom nav *layout* only. Colors stay the app's established
-/// light/system-dynamic-color chrome (`CLAUDE.md`'s standing rule for this
-/// screen's nav), not CapCut's dark theme — confirmed with the user
-/// 2026-10-07 rather than assumed from the reference screenshot.
-///
-/// Tapping selects a tool (its `ToolOptionsPanel` appears above this row if
-/// it has one); tapping the selected tool again clears the selection.
+/// The main row of tools. Choosing one replaces this row (with the tool's own options, or, for Edit, with the tools of
+/// the clip under the playhead) - nothing is highlighted because this row is not on screen while a tool is in use.
 struct EditorToolbarView: View {
-    @Binding var selectedTool: EditorTool?
+    let onSelect: (EditorTool) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 20) {
                 ForEach(EditorTool.allCases) { tool in
-                    Button {
-                        selectedTool = (selectedTool == tool) ? nil : tool
-                    } label: {
+                    Button { onSelect(tool) } label: {
                         VStack(spacing: 4) {
                             Image(systemName: tool.systemImage)
                                 .font(.body)
@@ -25,10 +17,11 @@ struct EditorToolbarView: View {
                                 .font(.caption2)
                                 .lineLimit(1)
                         }
-                        .foregroundColor(selectedTool == tool ? .accentColor : .primary)
+                        .foregroundColor(.primary)
                         .frame(width: 64)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("tool-\(tool.rawValue)")
                 }
             }
             .padding(.horizontal)

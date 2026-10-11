@@ -16,7 +16,7 @@ final class EditorNavigationUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: timeout), .completed, "\(element) should disappear within \(timeout)s")
     }
 
-    /// Opens `projectName` from Folder, taps `Huỷ`, asserts it dismisses.
+    /// Opens `projectName` from Folder, taps `Cancel`, asserts it dismisses.
     private func assertCancelReturnsToFolder(projectName: String) {
         let app = XCUIApplication()
         app.launch()
@@ -27,11 +27,11 @@ final class EditorNavigationUITests: XCTestCase {
         XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "Folder tab should list the placeholder sample projects")
         projectRow.tap()
 
-        let cancelButton = app.buttons["Huỷ"]
-        XCTAssertTrue(cancelButton.waitForExistence(timeout: 5), "EditorShellView's Huỷ button should appear after opening a project")
+        let cancelButton = app.buttons["Cancel"]
+        XCTAssertTrue(cancelButton.waitForExistence(timeout: 5), "EditorShellView's Cancel button should appear after opening a project")
         cancelButton.tap()
 
-        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "Tapping Huỷ should dismiss back to the Folder project list")
+        XCTAssertTrue(projectRow.waitForExistence(timeout: 5), "Tapping Cancel should dismiss back to the Folder project list")
         waitForDisappearance(of: cancelButton)
     }
 

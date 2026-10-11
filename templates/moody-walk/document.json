@@ -1,0 +1,168 @@
+{
+  "assets" : [
+    {
+      "duration" : 31200,
+      "height" : 1920,
+      "id" : "video-a",
+      "kind" : "video",
+      "uri" : "13792197_1080_1920_30fps.mp4",
+      "width" : 1080
+    },
+    {
+      "duration" : 12000,
+      "id" : "bgm",
+      "kind" : "audio",
+      "mimeType" : "audio/mp4",
+      "uri" : "assets/bgm.m4a"
+    }
+  ],
+  "audio" : {
+    "sampleRate" : 48000,
+    "tracks" : [
+      {
+        "clips" : [
+          {
+            "assetId" : "bgm",
+            "id" : "bgm-clip",
+            "playbackRate" : 1,
+            "timing" : {
+              "duration" : 12000,
+              "start" : 0
+            },
+            "trim" : {
+              "start" : 0
+            }
+          }
+        ],
+        "id" : "music",
+        "muted" : false,
+        "pan" : 0
+      }
+    ]
+  },
+  "composition" : {
+    "background" : "#101820",
+    "fps" : 30,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "id" : "moody-walk",
+  "layers" : [
+    {
+      "assetId" : "video-a",
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-1",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 0
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "effectPresets" : [
+        {
+          "amount" : 0.3,
+          "kind" : "sepia"
+        }
+      ],
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-2",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 3000
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-3",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 6000
+      }
+    },
+    {
+      "assetId" : "video-a",
+      "frame" : {
+        "height" : 1920,
+        "width" : 1080
+      },
+      "id" : "slot-4",
+      "inPreset" : {
+        "durationMs" : 500,
+        "easing" : "easeOut",
+        "kind" : "slide"
+      },
+      "kind" : "video",
+      "outPreset" : {
+        "durationMs" : 400,
+        "kind" : "fade"
+      },
+      "timing" : {
+        "duration" : 3000,
+        "start" : 9000
+      }
+    },
+    {
+      "frame" : {
+        "height" : 200,
+        "width" : 1080
+      },
+      "id" : "title",
+      "kind" : "text",
+      "text" : {
+        "color" : "#FFFFFFff",
+        "fontFamily" : "Helvetica",
+        "fontSize" : 96,
+        "layout" : {
+          "textAlign" : "center",
+          "wrap" : "word"
+        },
+        "text" : "Moody Walk"
+      },
+      "timing" : {
+        "duration" : 12000,
+        "start" : 0
+      }
+    }
+  ]
+}

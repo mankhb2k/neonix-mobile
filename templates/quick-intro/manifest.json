@@ -1,0 +1,45 @@
+{
+  "builtinAssets" : [
+
+  ],
+  "composition" : {
+    "durationMs" : 6000,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "fonts" : [
+    "Helvetica"
+  ],
+  "formatVersion" : 2,
+  "minAppVersion" : "1.0",
+  "music" : {
+    "artist" : "Neonix",
+    "title" : "Demo Track"
+  },
+  "name" : "Quick Intro",
+  "slots" : [
+    {
+      "durationMs" : 3000,
+      "id" : "clip-1",
+      "kind" : "media",
+      "label" : "Clip 1",
+      "layerId" : "slot-1",
+      "required" : true
+    },
+    {
+      "durationMs" : 3000,
+      "id" : "clip-2",
+      "kind" : "media",
+      "label" : "Clip 2",
+      "layerId" : "slot-2",
+      "required" : true
+    },
+    {
+      "id" : "title",
+      "kind" : "text",
+      "label" : "Title",
+      "layerId" : "title",
+      "required" : false
+    }
+  ]
+}

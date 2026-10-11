@@ -23,8 +23,8 @@ struct EditorShellView: View {
     /// can react to it too (hide play/exit, show the time readout) — see
     /// ui-design-note.md.
     @State private var isScrubbing = false
-    /// The tool highlighted in the bottom row; also decides which
-    /// `ToolOptionsPanel` shows above it (none for tools without a panel).
+    /// The tool whose options replace the bottom row (nil = no tool open). Only tools with an options panel are
+    /// ever set here; Edit instead selects the clip under the playhead.
     @State private var selectedTool: EditorTool?
     /// Phase 1 of the "Bottom nav tools" roadmap — see
     /// `EditorCommand.swift`/`EditorHistory.swift`. Every edit goes through
@@ -54,14 +54,42 @@ struct EditorShellView: View {
     @State private var adjustIntents: [String: AdjustValues] = [:]
     /// Same "one undo step per drag gesture" shape as `trimDragOriginal`.
     @State private var adjustDragOriginal: V2Project?
+    /// Adjust and Transform are sheets over the lower part of the screen, not rows (see `AdjustSheet`/`TransformSheet`).
+    @State private var showingAdjustSheet = false
+    @State private var showingTransformSheet = false
+    /// The Transform sheet's values for the selected layer; the sheet's rulers and the stage gestures both write here.
+    @State private var transformValues = TransformValues()
+    /// Same "one undo step per drag" shape as `adjustDragOriginal`.
+    @State private var transformDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
     private let toolPanelHeight: CGFloat = 64
 
-    private var showsToolPanel: Bool {
-        selectedTool?.hasOptionsPanel ?? false
+    /// The bottom of the editor is always ONE row; going deeper replaces it (CapCut style) and "«" comes back:
+    ///   main tools -> the selected clip's tools -> a tool's own options.
+    private enum BottomMode {
+        case main
+        case selection(SelectionToolbarView.Subject)
+        case toolPanel(EditorTool)
     }
 
-    init(project: V2Project) {
+    private var bottomMode: BottomMode {
+        if let selectedTool, selectedTool.hasOptionsPanel { return .toolPanel(selectedTool) }
+        if let layer = project.layers.first(where: { $0.id == selectedLayerId }) { return .selection(.layer(layer)) }
+        if project.audio.tracks.flatMap(\.clips).contains(where: { $0.id == selectedAudioClipId }) { return .selection(.audioClip) }
+        return .main
+    }
+
+    private var bottomBarHeight: CGFloat {
+        if case .toolPanel = bottomMode { return toolPanelHeight }
+        return toolbarHeight
+    }
+
+    /// Set when the project came from a template: Export then spends the template's credits first.
+    private let exportContext: TemplateExportContext?
+    @State private var exportGate = ExportGate()
+
+    init(project: V2Project, exportContext: TemplateExportContext? = nil) {
+        self.exportContext = exportContext
         _project = State(initialValue: project)
         _engine = State(initialValue: EditorPlaybackEngine(project: project))
     }
@@ -179,6 +207,48 @@ struct EditorShellView: View {
         setProject(SetAdjustCommand(layerId: layerId, values: values).apply(to: project))
     }
 
+    // MARK: Transform
+
+    private var selectedLayer: V2Layer? { project.layers.first { $0.id == selectedLayerId } }
+
+    private func openTransformSheet() {
+        guard let layer = selectedLayer else { return }
+        transformValues = TransformValues(layer: layer)   // before the flag, so `onChange` below ignores it
+        showingTransformSheet = true
+    }
+
+    private func beginTransform() {
+        guard transformDragOriginal == nil else { return }
+        transformDragOriginal = project
+    }
+
+    /// Live: every change goes straight to the project (bypassing `apply(_:)`), like `updateAdjust`.
+    private func updateTransform(_ values: TransformValues) {
+        guard showingTransformSheet, let id = selectedLayerId else { return }
+        setProject(SetTransformCommand(layerId: id, values: values).apply(to: project))
+    }
+
+    private func endTransform() {
+        guard let original = transformDragOriginal else { return }
+        history.record(current: original)
+        transformDragOriginal = nil
+    }
+
+    @ViewBuilder private var adjustSheet: some View {
+        if let id = selectedLayerId {
+            AdjustSheet(
+                layerId: id, initial: adjustIntents[id] ?? AdjustValues(),
+                onBegin: beginAdjust,
+                onChange: { layerId, values in updateAdjust(layerId: layerId, values: values) },
+                onEnd: endAdjust
+            )
+        }
+    }
+
+    private var transformSheet: some View {
+        TransformSheet(values: $transformValues, composition: project.composition, onBegin: beginTransform, onEnd: endTransform)
+    }
+
     private func endAdjust() {
         guard let original = adjustDragOriginal else { return }
         history.record(current: original)
@@ -204,11 +274,118 @@ struct EditorShellView: View {
             titlebarHeight = newValue
         }
         .task { engine.prepare() }
+        .alert(item: $exportGate.alert) { alert in
+            Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
+        }
+        .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
+        .sheet(isPresented: $showingTransformSheet) { transformSheet }
+        .onChange(of: transformValues) { _, new in updateTransform(new) }
         #if DEBUG
         // Env-driven unattended metrics run (`PLAYBACK_METRICS_SCENARIO`); no-op otherwise.
         .task { await PlaybackMetrics.shared.autoRunIfRequested() }
         #endif
         .onDisappear { engine.pause() }
+    }
+
+    // MARK: Bottom bar (one row)
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        switch bottomMode {
+        case .main:
+            EditorToolbarView(onSelect: handleToolTap)
+        case .selection(let subject):
+            SelectionToolbarView(
+                subject: subject,
+                canSplit: canSplitSelection,
+                onBack: { selectedLayerId = nil; selectedAudioClipId = nil },
+                onSplit: {
+                    guard let id = selectedLayerId else { return }
+                    apply(SplitClipCommand(layerId: id, atMs: currentTimeMs))
+                    selectedLayerId = nil
+                },
+                onExtractAudio: { if let id = selectedLayerId { extractAudio(fromLayerId: id) } },
+                onTransform: openTransformSheet,
+                onAdjust: { showingAdjustSheet = true },
+                onOpenTool: { selectedTool = $0 },
+                onDelete: {
+                    if let id = selectedLayerId {
+                        apply(DeleteClipCommand(layerId: id))
+                        selectedLayerId = nil
+                    } else if let id = selectedAudioClipId {
+                        apply(DeleteAudioClipCommand(clipId: id))
+                        selectedAudioClipId = nil
+                    }
+                }
+            )
+        case .toolPanel(let tool):
+            HStack(spacing: 8) {
+                BottomBarBackButton { selectedTool = nil }
+                optionsPanel(for: tool)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 12)
+        }
+    }
+
+    /// Split only makes sense strictly inside the clip's own range - at either edge it would leave a zero-length half.
+    private var canSplitSelection: Bool {
+        guard let layer = project.layers.first(where: { $0.id == selectedLayerId }) else { return false }
+        return currentTimeMs > layer.timing.start && currentTimeMs < layer.timing.start + layer.timing.duration
+    }
+
+    private func handleToolTap(_ tool: EditorTool) {
+        switch tool {
+        case .edit: selectClipAtPlayhead()
+        case .adjust:
+            // Adjust needs a picture or a clip: pick the one under the playhead, then open its sheet.
+            selectClipAtPlayhead()
+            if let layer = project.layers.first(where: { $0.id == selectedLayerId }), layer.type == "video" || layer.type == "image" {
+                showingAdjustSheet = true
+            }
+        case .filter: break   // still a placeholder with no panel (see `EditorTool`)
+        default: selectedTool = tool
+        }
+    }
+
+    /// Edit: selects what is under the playhead (a video or photo first, then text, then an audio clip), which opens that
+    /// thing's tools. Nothing there = nothing happens.
+    private func selectClipAtPlayhead() {
+        let t = currentTimeMs
+        let rank = ["video": 0, "image": 1, "text": 2]
+        let candidate = project.layers
+            .filter { $0.type != "group" && t >= $0.timing.start && t < $0.timing.start + $0.timing.duration }
+            .min { (rank[$0.type] ?? 3) < (rank[$1.type] ?? 3) }
+        if let candidate {
+            selectedLayerId = candidate.id
+            selectedAudioClipId = nil
+        } else if let clip = project.audio.tracks.flatMap(\.clips).first(where: { t >= $0.timing.start && t < $0.timing.start + $0.timing.duration }) {
+            selectedAudioClipId = clip.id
+            selectedLayerId = nil
+        }
+    }
+
+    private func optionsPanel(for tool: EditorTool) -> some View {
+        ToolOptionsPanel(
+            tool: tool,
+            composition: project.composition,
+            selectedLayer: project.layers.first { $0.id == selectedLayerId },
+            selectedAudioClip: project.audio.tracks.flatMap(\.clips).first { $0.id == selectedAudioClipId },
+            onSetAspectRatio: { width, height in apply(SetAspectRatioCommand(width: width, height: height)) },
+            onSetBackgroundColor: { hex in apply(SetBackgroundColorCommand(hex: hex)) },
+            onPickAudioFile: { url in addAudio(from: url) },
+            onSetAudioVolume: { clipId, gainDb in apply(SetAudioClipVolumeCommand(clipId: clipId, gainDb: gainDb)) },
+            onDeleteAudio: { clipId in
+                apply(DeleteAudioClipCommand(clipId: clipId))
+                selectedAudioClipId = nil
+            },
+            onRecordingFinished: { url in addAudio(from: url) },
+            onAddSoundEffect: { preset in
+                apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
+            },
+            onAddText: { text in addText(text) },
+            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) }
+        )
     }
 
     private var windowedShell: some View {
@@ -220,9 +397,9 @@ struct EditorShellView: View {
                 let squareSide = geo.size.width
                 let videoBoxSide = squareSide * 0.96
                 let stageHeight = squareSide
-                // Timeline: whatever's left after Stage/Titlebar/toolbar(/tool panel), no floor (see ui-design-note.md).
-                let reservedHeight = titlebarHeight + stageHeight + toolbarHeight + (showsToolPanel ? toolPanelHeight : 0)
-                let timelineHeight = max(geo.size.height - reservedHeight - (showsToolPanel ? 3 : 2), 0)
+                // Timeline: whatever's left after Stage/Titlebar/the one bottom row, no floor (see ui-design-note.md).
+                let reservedHeight = titlebarHeight + stageHeight + bottomBarHeight
+                let timelineHeight = max(geo.size.height - reservedHeight - 2, 0)
 
                 VStack(spacing: 0) {
                     StagePreview(
@@ -233,6 +410,15 @@ struct EditorShellView: View {
                         engine: engine
                     )
                     .frame(width: videoBoxSide, height: videoBoxSide)
+                    .overlay {
+                        // While the Transform sheet is open the stage can be dragged, pinched and twisted directly.
+                        if showingTransformSheet, let layer = selectedLayer {
+                            TransformGestureOverlay(
+                                values: $transformValues, composition: project.composition, layerFrame: layer.frame,
+                                onBegin: beginTransform, onEnd: endTransform
+                            )
+                        }
+                    }
                     .frame(width: squareSide, height: squareSide)
                     .background(Color(.systemBackground))
 
@@ -256,46 +442,8 @@ struct EditorShellView: View {
                     .frame(height: timelineHeight)
                     .clipped()
                     Divider()
-                    if let selectedTool, showsToolPanel {
-                        ToolOptionsPanel(
-                            tool: selectedTool,
-                            composition: project.composition,
-                            selectedLayer: project.layers.first { $0.id == selectedLayerId },
-                            selectedAudioClip: project.audio.tracks.flatMap(\.clips).first { $0.id == selectedAudioClipId },
-                            currentTimeMs: currentTimeMs,
-                            onSetAspectRatio: { width, height in apply(SetAspectRatioCommand(width: width, height: height)) },
-                            onSetBackgroundColor: { hex in apply(SetBackgroundColorCommand(hex: hex)) },
-                            onSplit: { layerId, atMs in
-                                apply(SplitClipCommand(layerId: layerId, atMs: atMs))
-                                selectedLayerId = nil
-                            },
-                            onDelete: { layerId in
-                                apply(DeleteClipCommand(layerId: layerId))
-                                selectedLayerId = nil
-                            },
-                            onExtractAudio: { layerId in extractAudio(fromLayerId: layerId) },
-                            onPickAudioFile: { url in addAudio(from: url) },
-                            onSetAudioVolume: { clipId, gainDb in apply(SetAudioClipVolumeCommand(clipId: clipId, gainDb: gainDb)) },
-                            onDeleteAudio: { clipId in
-                                apply(DeleteAudioClipCommand(clipId: clipId))
-                                selectedAudioClipId = nil
-                            },
-                            onRecordingFinished: { url in addAudio(from: url) },
-                            onAddSoundEffect: { preset in
-                                apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
-                            },
-                            onAddText: { text in addText(text) },
-                            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) },
-                            adjustValues: selectedLayerId.flatMap { adjustIntents[$0] } ?? AdjustValues(),
-                            onAdjustBegin: beginAdjust,
-                            onAdjustChange: { layerId, values in updateAdjust(layerId: layerId, values: values) },
-                            onAdjustEnd: endAdjust
-                        )
-                        .frame(height: toolPanelHeight)
-                        Divider()
-                    }
-                    EditorToolbarView(selectedTool: $selectedTool)
-                        .frame(height: toolbarHeight)
+                    bottomBar
+                        .frame(height: bottomBarHeight)
                 }
             }
         }
@@ -461,14 +609,29 @@ struct EditorShellView: View {
         }
     }
 
+    /// Charges first (template projects), shows a spinner meanwhile, and only then renders.
     @ViewBuilder
     private var exportButton: some View {
         if #available(iOS 26.0, *) {
-            Button("Export") { dismiss() }
+            Button(action: startExport) { exportLabel }
                 .buttonStyle(.glassProminent)
+                .disabled(exportGate.isWorking)
         } else {
-            Button("Export") { dismiss() }
+            Button(action: startExport) { exportLabel }
                 .buttonStyle(.borderedProminent)
+                .disabled(exportGate.isWorking)
+        }
+    }
+
+    @ViewBuilder
+    private var exportLabel: some View {
+        if exportGate.isWorking { ProgressView().frame(minWidth: 44) } else { Text("Export") }
+    }
+
+    private func startExport() {
+        Task {
+            await exportGate.export(project: project, context: exportContext)
+            if exportGate.completed { dismiss() }
         }
     }
 
@@ -632,7 +795,7 @@ private struct FullscreenScrubber: View {
 /// tick during Play/scrub, not all of `EditorShellView.body` (toolbar,
 /// timeline, tool panel...). Same isolation `FullscreenScrubber` already
 /// used for the scrub track below.
-private struct StagePreview: View {
+struct StagePreview: View {
     let composition: V2Composition
     let assets: [V2Asset]
     let layers: [V2Layer]

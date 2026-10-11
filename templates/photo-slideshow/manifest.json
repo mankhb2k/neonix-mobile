@@ -1,0 +1,61 @@
+{
+  "builtinAssets" : [
+
+  ],
+  "composition" : {
+    "durationMs" : 12000,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "fonts" : [
+    "Helvetica"
+  ],
+  "formatVersion" : 2,
+  "minAppVersion" : "1.0",
+  "music" : {
+    "artist" : "Neonix",
+    "title" : "Demo Track"
+  },
+  "name" : "Photo Slideshow",
+  "slots" : [
+    {
+      "durationMs" : 3000,
+      "id" : "photo-1",
+      "kind" : "media",
+      "label" : "Photo 1",
+      "layerId" : "slot-1",
+      "required" : true
+    },
+    {
+      "durationMs" : 3000,
+      "id" : "photo-2",
+      "kind" : "media",
+      "label" : "Photo 2",
+      "layerId" : "slot-2",
+      "required" : true
+    },
+    {
+      "durationMs" : 3000,
+      "id" : "photo-3",
+      "kind" : "media",
+      "label" : "Photo 3",
+      "layerId" : "slot-3",
+      "required" : false
+    },
+    {
+      "durationMs" : 3000,
+      "id" : "photo-4",
+      "kind" : "media",
+      "label" : "Photo 4",
+      "layerId" : "slot-4",
+      "required" : false
+    },
+    {
+      "id" : "title",
+      "kind" : "text",
+      "label" : "Title",
+      "layerId" : "title",
+      "required" : true
+    }
+  ]
+}

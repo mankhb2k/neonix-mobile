@@ -1,0 +1,53 @@
+{
+  "builtinAssets" : [
+
+  ],
+  "composition" : {
+    "durationMs" : 9000,
+    "height" : 1920,
+    "width" : 1080
+  },
+  "fonts" : [
+    "Helvetica"
+  ],
+  "formatVersion" : 2,
+  "minAppVersion" : "1.0",
+  "music" : {
+    "artist" : "Neonix",
+    "title" : "Demo Track"
+  },
+  "name" : "Polaroid Collage",
+  "slots" : [
+    {
+      "durationMs" : 9000,
+      "id" : "photo-1",
+      "kind" : "media",
+      "label" : "Photo 1",
+      "layerId" : "slot-1",
+      "required" : true
+    },
+    {
+      "durationMs" : 7500,
+      "id" : "photo-2",
+      "kind" : "media",
+      "label" : "Photo 2",
+      "layerId" : "slot-2",
+      "required" : true
+    },
+    {
+      "durationMs" : 6000,
+      "id" : "photo-3",
+      "kind" : "media",
+      "label" : "Photo 3",
+      "layerId" : "slot-3",
+      "required" : true
+    },
+    {
+      "id" : "title",
+      "kind" : "text",
+      "label" : "Title",
+      "layerId" : "title",
+      "required" : false
+    }
+  ]
+}
