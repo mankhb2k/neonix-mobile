@@ -63,6 +63,8 @@ struct EditorShellView: View {
     @State private var transformDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
     private let toolPanelHeight: CGFloat = 64
+    /// The bottom row sits this much lower than the safe-area edge (into the home-indicator margin); the timeline gets the points.
+    private let bottomBarDrop: CGFloat = 8
 
     /// The bottom of the editor is always ONE row; going deeper replaces it (CapCut style) and "«" comes back:
     ///   main tools -> the selected clip's tools -> a tool's own options.
@@ -399,7 +401,7 @@ struct EditorShellView: View {
                 let stageHeight = squareSide
                 // Timeline: whatever's left after Stage/Titlebar/the one bottom row, no floor (see ui-design-note.md).
                 let reservedHeight = titlebarHeight + stageHeight + bottomBarHeight
-                let timelineHeight = max(geo.size.height - reservedHeight - 2, 0)
+                let timelineHeight = max(geo.size.height - reservedHeight - 2, 0) + bottomBarDrop
 
                 VStack(spacing: 0) {
                     StagePreview(
@@ -444,6 +446,7 @@ struct EditorShellView: View {
                     Divider()
                     bottomBar
                         .frame(height: bottomBarHeight)
+                        .zIndex(1)
                 }
             }
         }
@@ -472,7 +475,7 @@ struct EditorShellView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 fullscreenControlBar(screenWidth: geo.size.width)
-                    .padding(.bottom, 60)
+                    .padding(.bottom, 80)
             }
         }
     }
@@ -536,8 +539,8 @@ struct EditorShellView: View {
                     Spacer()
                     Text(formattedTime(maxDurationMs, includeFraction: false))
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundColor(.white)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundColor(.primary)
                 .transition(.opacity)
             }
 
@@ -548,8 +551,8 @@ struct EditorShellView: View {
                     } label: {
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                             .font(.title3)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
+                            .fontWeight(.regular)
+                            .foregroundColor(.primary)
                             .frame(width: 28, height: 28)
                     }
                     .accessibilityIdentifier("fullscreen-play")
@@ -564,8 +567,8 @@ struct EditorShellView: View {
                     } label: {
                         Image(systemName: "arrow.down.right.and.arrow.up.left")
                             .font(.title3)
-                            .fontWeight(.medium)
-                            .foregroundColor(.white)
+                            .fontWeight(.regular)
+                            .foregroundColor(.primary)
                             .frame(width: 28, height: 28)
                     }
                     .transition(.opacity.animation(.easeOut(duration: 0.18)))
@@ -573,7 +576,8 @@ struct EditorShellView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+        // Scrubbing turns the pill into a taller rounded rectangle: +8 pt (4 above, 4 below).
+        .padding(.vertical, isScrubbing ? 14 : 10)
     }
 
     private func formattedTime(_ ms: Double, includeFraction: Bool) -> String {
@@ -655,17 +659,6 @@ struct EditorShellView: View {
             }
 
             HStack {
-                Button {
-                    isFullscreen = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.headline)
-                        .fontWeight(.regular)
-                }
-                .accessibilityIdentifier("enter-fullscreen")
-
-                Spacer()
-
                 HStack(spacing: 22) {
                     Button(action: undo) {
                         Image(systemName: "arrow.uturn.backward")
@@ -680,6 +673,17 @@ struct EditorShellView: View {
                     }
                     .disabled(!history.canRedo)
                 }
+
+                Spacer()
+
+                Button {
+                    isFullscreen = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.headline)
+                        .fontWeight(.regular)
+                }
+                .accessibilityIdentifier("enter-fullscreen")
             }
         }
         .foregroundColor(.primary)
@@ -706,6 +710,7 @@ struct EditorShellView: View {
 private struct FullscreenScrubber: View {
     let engine: EditorPlaybackEngine
     @Binding var isDragging: Bool
+    @Environment(\.colorScheme) private var colorScheme
     /// True while a touch owns the gesture. Unlike `onEnded`, a `@GestureState`
     /// also resets when the system cancels the gesture, so the bar can never stay
     /// stuck in its scrubbing state (see `.onChange` below).
@@ -723,8 +728,10 @@ private struct FullscreenScrubber: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.3))
-                Capsule().fill(Color.white)
+                // Measured on the Photos player bar: the track is white (57 % on the light glass, 36 % on the dark),
+                // the played part is the label colour (≈ black 27 % on light, ≈ white 90 % on dark).
+                Capsule().fill(Color.white.opacity(colorScheme == .dark ? 0.36 : 0.57))
+                Capsule().fill(colorScheme == .dark ? Color.white.opacity(0.9) : Color.black.opacity(0.27))
                     .frame(width: geo.size.width * fraction)
             }
             // A fill narrower than the track's end cap is a thin bar that pokes out of

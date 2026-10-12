@@ -63,7 +63,7 @@ struct SelectionToolbarView: View {
             if layer.type == "text" { action("Edit text", "pencil", id: "edit-text") { onOpenTool(.text) } }
             action("Split", "scissors", id: "split", enabled: canSplit, perform: onSplit)
             if layer.type == "video" { action("Extract Audio", "waveform", id: "extract-audio", perform: onExtractAudio) }
-            if layer.type != "group" { action("Transform", "arrow.up.left.and.arrow.down.right", id: "transform", perform: onTransform) }
+            if layer.type != "group" { action("Transform", "crop.rotate", id: "transform", perform: onTransform) }
             if layer.type == "video" || layer.type == "image" { action("Adjust", "slider.horizontal.3", id: "adjust", perform: onAdjust) }
             action("Delete", "trash", id: "delete", tint: .red, perform: onDelete)
         case .audioClip:

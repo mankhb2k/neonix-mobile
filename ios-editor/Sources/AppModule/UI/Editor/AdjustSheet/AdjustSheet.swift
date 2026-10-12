@@ -54,7 +54,7 @@ struct AdjustSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(280)])
         .presentationBackgroundInteraction(.enabled)
         .sheet(isPresented: $showingCurves) {
             CurveEditorSheet(points: $values.curvePoints, onBegin: onBegin, onEnd: onEnd) {

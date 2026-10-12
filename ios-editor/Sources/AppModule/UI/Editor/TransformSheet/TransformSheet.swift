@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Transform as a sheet over the lower part of the screen (the same pattern as Adjust): the ruler on top, the round
-/// buttons for Position X/Y, Scale, Rotate and Opacity under it, "Reset" last. The stage above stays live and can
+/// buttons for Position X/Y, Scale, Rotate and Opacity under it; Reset is an icon button opposite Done. The stage above stays live and can
 /// also be dragged, pinched and twisted directly (`TransformGestureOverlay`); both edit the same `values`.
 struct TransformSheet: View {
     @Binding var values: TransformValues
@@ -29,12 +29,18 @@ struct TransformSheet: View {
             .navigationTitle(control.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { reset { $0 = TransformValues() } } label: { Image(systemName: "arrow.counterclockwise") }
+                        .disabled(values == TransformValues())
+                        .accessibilityLabel("Reset")
+                        .accessibilityIdentifier("transform-reset")
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.accessibilityIdentifier("transformDone")
                 }
             }
         }
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(280)])
         .presentationBackgroundInteraction(.enabled)
     }
 
@@ -43,9 +49,10 @@ struct TransformSheet: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     ForEach(TransformControl.allCases) { item in button(item).id(item.rawValue) }
-                    resetButton
                 }
                 .padding(.horizontal, 16)
+                // The 5 buttons are narrower than the screen: without this a horizontal ScrollView hugs them to the left.
+                .containerRelativeFrame(.horizontal, alignment: .center)
             }
             .onChange(of: control) { _, new in withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(new.rawValue, anchor: .center) } }
         }
@@ -71,19 +78,6 @@ struct TransformSheet: View {
         .accessibilityIdentifier("transform-\(item.rawValue)")
         .accessibilityLabel(item.title)
         .accessibilityValue(item.display(values[keyPath: item.keyPath]))
-    }
-
-    private var resetButton: some View {
-        Button { reset { $0 = TransformValues() } } label: {
-            VStack(spacing: 4) {
-                Circle().fill(Color(.secondarySystemBackground)).frame(width: 48, height: 48)
-                    .overlay(Image(systemName: "arrow.counterclockwise").font(.system(size: 18, weight: .medium)))
-                Text("Reset").font(.caption2).foregroundColor(.secondary)
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(values == TransformValues())
-        .accessibilityIdentifier("transform-reset")
     }
 
     private func reset(_ change: (inout TransformValues) -> Void) {
