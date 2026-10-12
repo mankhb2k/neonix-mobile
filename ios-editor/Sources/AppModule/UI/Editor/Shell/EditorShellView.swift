@@ -55,6 +55,10 @@ struct EditorShellView: View {
     @State private var adjustIntents: [String: AdjustValues] = [:]
     /// Same "one undo step per drag gesture" shape as `trimDragOriginal`.
     @State private var adjustDragOriginal: V2Project?
+    /// The Filter picked per clip (session-only, like `adjustIntents`) and the pre-gesture snapshot for its undo step.
+    @State private var filterIntents: [String: AppliedFilter] = [:]
+    @State private var filterDragOriginal: V2Project?
+    @State private var showingFilterSheet = false
     /// The selected video has a sound track (probed when the selection changes) - decides Volume / Extract Audio / Unlink.
     @State private var selectedHasAudio = false
     /// A tool that is only a button so far: the short "<tool> is coming soon" note over the stage.
@@ -200,7 +204,41 @@ struct EditorShellView: View {
     /// later edit to a *different* slider doesn't silently drop this one.
     private func updateAdjust(layerId: String, values: AdjustValues) {
         adjustIntents[layerId] = values
-        setProject(SetAdjustCommand(layerId: layerId, values: values).apply(to: project))
+        setProject(SetAdjustCommand(layerId: layerId, values: values, filter: filterIntents[layerId]).apply(to: project))
+    }
+
+    // MARK: Filter
+
+    private func beginFilter() {
+        guard filterDragOriginal == nil else { return }
+        filterDragOriginal = project
+    }
+
+    /// A filter pick or an Intensity tick: the picked look plus whatever the Adjust sliders hold, compiled together.
+    private func updateFilter(layerId: String, filter: AppliedFilter?) {
+        filterIntents[layerId] = filter
+        setProject(SetAdjustCommand(layerId: layerId, values: adjustIntents[layerId] ?? AdjustValues(), filter: filter).apply(to: project))
+    }
+
+    private func endFilter() {
+        guard let original = filterDragOriginal else { return }
+        history.record(current: original)
+        filterDragOriginal = nil
+    }
+
+    @ViewBuilder private var filterSheet: some View {
+        if let id = selectedLayerId {
+            FilterSheet(
+                layerId: id, initial: filterIntents[id],
+                sourceProvider: {
+                    guard let layer = project.layers.first(where: { $0.id == id }) else { return nil }
+                    return await FilterThumbnails.source(for: layer, project: project, atMs: currentTimeMs)
+                },
+                onBegin: beginFilter,
+                onChange: { layerId, filter in updateFilter(layerId: layerId, filter: filter) },
+                onEnd: endFilter
+            )
+        }
     }
 
     // MARK: Transform
@@ -275,6 +313,7 @@ struct EditorShellView: View {
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
+        .sheet(isPresented: $showingFilterSheet) { filterSheet }
         .sheet(isPresented: $showingTransformSheet) { transformSheet }
         .onChange(of: transformValues) { _, new in updateTransform(new) }
         .task(id: selectedLayerId) { await probeSelectedAudio() }
@@ -338,6 +377,7 @@ struct EditorShellView: View {
         case .transform: openTransformSheet()
         case .opacity: openTransformSheet(focus: .opacity)
         case .adjust: showingAdjustSheet = true
+        case .filter: showingFilterSheet = true
         case .editText: selectedTool = .text
         case .volume:
             if selectedAudioClipId != nil { selectedTool = .audio } else { comingSoonTitle = tool.title }
@@ -379,7 +419,12 @@ struct EditorShellView: View {
             if let layer = project.layers.first(where: { $0.id == selectedLayerId }), layer.type == "video" || layer.type == "image" {
                 showingAdjustSheet = true
             }
-        case .filter: break   // still a placeholder with no panel (see `EditorTool`)
+        case .filter:
+            // Filter, like Adjust, needs a picture or a clip: pick the one under the playhead, then open its sheet.
+            selectClipAtPlayhead()
+            if let layer = project.layers.first(where: { $0.id == selectedLayerId }), layer.type == "video" || layer.type == "image" {
+                showingFilterSheet = true
+            }
         default: selectedTool = tool
         }
     }

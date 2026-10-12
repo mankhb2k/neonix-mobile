@@ -152,7 +152,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   the left and **Delete pinned on the right**; the tools between scroll. Which tools show and their order is
   `ClipTool.tools(for:hasAudio:)` (the order of each kind is written out there, user list 2026-10-12). Video: Split, Volume*, Speed, Animation,
   Adjust, Filter, Transform, Opacity, Crop, Replace, Duplicate, Overlay, Remove BG, Unlink* (*only with a sound track, probed per selection).
-  Text clip: Edit text, Split, Style, Animation, Duplicate, Lasting text, Transform. No Extract Audio any more (the service
+  Text clip: Edit text, Split, Style, Animation, Duplicate, Transform. No Extract Audio any more (the service
   `MediaImportService.extractAudio` stays). The **Text** main tool is a list first: Add text (-> text field) and Auto captions.
   Built: Split, Transform, Adjust, Opacity (opens Transform on its Opacity ruler), Edit text, Delete, audio-clip Volume; every
   other button only shows "<tool> is coming soon" until it is built -> a tool that needs a control (Text field, Audio
@@ -184,6 +184,21 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   `feComponentTransfer` (identity/linear/gamma/5-point table), `feGaussianBlur`, `feComposite arithmetic` (k1 = 0), 3×3
   `feConvolveMatrix`, `feTurbulence` (white noise approximation), `feMerge`, `feVignette`, `feVibrance`, `feHighlightShadow`, `feTemperatureTint`, `feUnsharpMask`. **Curves**: 5
   draggable points at fixed x (`CurveGraphView`, `CurveEditorSheet`); `curvePoints` map 1:1 to `CIToneCurve`.
+- **Filter (Bộ lọc)** (`UI/Editor/FilterSheet`, built 2026-10-12 from the "A Grid + slider" lab variant): a filter is a **named bundle of
+  Adjust values** (`FilterCatalog`, 16 presets in Basic/Film/B&W/Vintage, values judged by eye - tune freely), scaled by Intensity
+  (`AdjustValues.scaled`) and compiled by `SetAdjustCommand(layerId:values:filter:)` **before** the Adjust sliders into the one
+  `adjust-<layerId>` filter, so sliders keep working on top of the look. No LUT/`.cube` yet (`feColorLUT` is declared but the
+  renderer doesn't draw it); bundles can't do per-hue shifts. `FilterSheet`: 340 pt sheet, chips, 4-column grid (None first)
+  of thumbnails = the clip's own frame at the playhead through each preset's real chain (`FilterThumbnails`), tap = apply (one
+  undo step), Intensity slider only once a filter is picked. Opens from the clip row's Filter and the main Filter tool (like Adjust).
+  Session-only `filterIntents` (like `adjustIntents`): reopening a project shows no picked filter although the chain is persisted.
+  **Thumbnail cost, measured on an iPhone 13** (`FilterThumbnailBench`, Debug; `FILTER_BENCH=1`, optional `FILTER_BENCH_VIDEO`, result in
+  `Documents/filter_bench.txt`, pull with `devicectl ... copy from`; interleaved pipelines, 12 frames, 89 s 1080x1920 footage): the first
+  version (fresh `AVAssetImageGenerator` frame at 300 px + 16 renders at 300 px) took ~33-50 ms wall / ~12-15 ms in-process CPU per grid; the
+  current one (nearest `VideoFrameCache.baseThumbs` filmstrip thumbnail shrunk to 160 px, rows rendered first, per-(frame, preset) cache)
+  ~11-15 ms wall / ~9-10 ms CPU, and **0 on reopening**. The video decode shows ~1 ms CPU in our process (hardware decoder) but ~19 ms wall.
+  The first grid of a process also pays ~140 ms wall / ~60 ms CPU of cold Core Image. A fixed illustration instead would save only the
+  remaining ~10 ms, so it was not worth it. The simulator's numbers differ a lot (software decode): measure on the phone.
 - **Templates** (`Network/`, `Templates/`, `UI/Home`, `UI/UseTemplate`, `Export/`; server: `api/`, spec
   `api/docs/template-package.md`, starter templates + `build.py`/`publish.py` in `templates/`): a template is a zip of
   `manifest.json` + `document.json` (an `EditorDocument`, incl. an `audio` domain for the music) + `assets/`, generated
@@ -222,7 +237,9 @@ that pick the parameter + a Curves-style system sheet** (`.sheet`, title + Done,
 inside, stage stays live via `presentationBackgroundInteraction`; height set in the lab menu, `LabSheetHeight`):
 *Transform controls* (`TransformLabView`: X, Y, Scale, Rotate, Opacity; drag/pinch/twist on the stage too) and *Adjust
 controls* (`AdjustLabView`: 16 scalar controls, live photo, hold to compare; **Scroll** = one scrolling row vs **Groups** =
-Light/Color/Detail tabs - still undecided). Inline panels and plain sliders were tried and dropped.
+Light/Color/Detail tabs - still undecided). Inline panels and plain sliders were tried and dropped. A third experiment, *Filter picker* (`FilterLabView`, 16 fake filters, SwiftUI look
+stand-ins, `LabFilter`), compares a 4-column grid sheet (A), the same with a pull-up detent (B) and one row of thumbnails (C), with the Intensity
+as a ruler or a slider, shown only once a filter is picked: the ruler (~120 pt with its readout) leaves only one clipped grid row in a 340 pt sheet, the slider leaves a full row + a peeking one.
 `UI/Components/RulerDial` is the real, reusable ruler (`RulerMapping.linear/logarithmic`, `ScrollView` momentum; ticks stand on a
 baseline in three kinds of line - minor tick, major tick, centre mark (no fixed marker: the tick in the middle *becomes* the
 centre mark, accent colour and a little taller than a major tick); all three are 1.5 pt wide (minor grey, major dark); a dot marks the neutral value; soft
@@ -270,7 +287,7 @@ Transform and Adjust sheets in production.
 - **`simctl` can't tap or drag.** `ios-editor/UITests` (XCUITest) is the only way to
   synthesize touches (`TimelineZoomUITests` does real pinches); `print` from the app
   under test doesn't reach `xcodebuild` — use `NSLog` + `simctl spawn … log show`.
-  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (215 passing).
+  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (231 passing).
 - No Node/pnpm in this sandbox: TS (`packages/motion-protocol`) can't be verified here.
 
 ## Key files

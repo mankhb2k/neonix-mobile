@@ -26,9 +26,9 @@ final class ClipToolTests: XCTestCase {
     }
 
     func testATextClipFollowsTheUsersList() {
-        // Split, Style, Animation, Duplicate, Lasting text, Transform (Delete pinned); Edit text stays first.
-        XCTAssertEqual(ClipTool.tools(for: .text, hasAudio: false), [.editText, .split, .style, .animation, .duplicate, .lastingText, .transform])
-        XCTAssertEqual(ClipTool.lastingText.title, "Lasting text")
+        // Split, Style, Animation, Duplicate, Transform (Delete pinned); Edit text stays first.
+        XCTAssertEqual(ClipTool.tools(for: .text, hasAudio: false), [.editText, .split, .style, .animation, .duplicate, .transform])
+        XCTAssertNil(ClipTool(rawValue: "lasting-text"), "Lasting text was dropped (user 2026-10-12)")
         XCTAssertFalse(ClipTool.style.isBuilt(for: .text))
     }
 
@@ -53,10 +53,11 @@ final class ClipToolTests: XCTestCase {
 
     func testOnlyTheToolsThatWorkAreMarkedBuilt() {
         XCTAssertTrue(ClipTool.split.isBuilt(for: .video))
+        XCTAssertTrue(ClipTool.filter.isBuilt(for: .video), "Filter is built (grid + Intensity)")
         XCTAssertTrue(ClipTool.opacity.isBuilt(for: .image))
         XCTAssertTrue(ClipTool.volume.isBuilt(for: .audio))
         XCTAssertFalse(ClipTool.volume.isBuilt(for: .video), "video volume is not built yet")
-        for notYet in [ClipTool.speed, .animation, .filter, .crop, .replace, .duplicate, .overlay, .removeBackground, .unlink, .style, .lastingText] {
+        for notYet in [ClipTool.speed, .animation, .crop, .replace, .duplicate, .overlay, .removeBackground, .unlink, .style] {
             XCTAssertFalse(notYet.isBuilt(for: .video), "\(notYet)")
         }
     }

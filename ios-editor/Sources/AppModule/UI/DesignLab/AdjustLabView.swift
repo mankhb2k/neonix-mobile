@@ -230,7 +230,7 @@ struct AdjustLabView: View {
 
     // MARK: Photo
 
-    private static func loadPhoto() async -> UIImage? {
+    static func loadPhoto() async -> UIImage? {
         await Task.detached(priority: .userInitiated) {
             guard let url = bundledURL(filename: "pexels-followingnyc-38428141.jpg"),
                   let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }

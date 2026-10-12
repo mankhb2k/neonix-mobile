@@ -149,7 +149,7 @@ final class EditorBottomBarUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["rulerReadout"].label, "100%", "opens on Opacity")
     }
 
-    /// Selecting a text clip on the timeline gives the text tools: Split, Style, Animation, Duplicate, Lasting text,
+    /// Selecting a text clip on the timeline gives the text tools: Split, Style, Animation, Duplicate,
     /// Transform (Delete pinned), and Edit text puts the clip's words in the field.
     func testATextClipOffersTheTextToolList() throws {
         let app = openTripToParis()
@@ -165,10 +165,10 @@ final class EditorBottomBarUITests: XCTestCase {
         window.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX + pxPerMs * 2500, dy: lane.frame.midY)).tap()
 
         XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
-        for id in ["edit-text", "split", "style", "animation", "duplicate", "lasting-text", "transform"] {
+        for id in ["edit-text", "split", "style", "animation", "duplicate", "transform"] {
             XCTAssertTrue(app.buttons["action-\(id)"].exists, id)
         }
-        for id in ["volume", "adjust", "opacity", "crop"] {
+        for id in ["volume", "adjust", "opacity", "crop", "lasting-text"] {
             XCTAssertFalse(app.buttons["action-\(id)"].exists, "\(id) is not a text tool")
         }
         XCTAssertTrue(app.buttons["action-delete"].isHittable)
@@ -177,5 +177,43 @@ final class EditorBottomBarUITests: XCTestCase {
         app.buttons["action-edit-text"].tap()
         XCTAssertTrue(app.textFields["editorTextField"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["editorTextField"].value as? String == "", "the field holds the clip's words")
+    }
+
+    /// Filter opens from the clip row: a grid with None first, no Intensity until a filter is picked, then the slider.
+    func testFilterSheetPicksAFilterAndShowsIntensityOnlyThen() throws {
+        let app = openTripToParis()
+        app.buttons["tool-edit"].tap()
+        let row = app.descendants(matching: .any)["selectionToolbar"]
+        var guardCount = 0
+        while !app.buttons["action-filter"].isHittable, guardCount < 6 { row.swipeLeft(); guardCount += 1 }
+        app.buttons["action-filter"].tap()
+
+        XCTAssertTrue(app.buttons["filterCell-none"].waitForExistence(timeout: 5), "None is the first cell")
+        XCTAssertTrue(app.buttons["filterCell-warm"].exists)
+        XCTAssertFalse(app.sliders["filterSlider"].exists, "no Intensity while no filter is picked")
+        saveShot(app, "filter-prod-grid")
+
+        app.buttons["filterCell-mono"].tap()
+        XCTAssertTrue(app.sliders["filterSlider"].waitForExistence(timeout: 5), "picking a filter shows Intensity")
+        saveShot(app, "filter-prod-picked")
+        app.sliders["filterSlider"].adjust(toNormalizedSliderPosition: 0.5)
+        XCTAssertNotEqual(app.staticTexts["filterIntensityValue"].label, "100")
+
+        app.buttons["filterChip-B&W"].tap()
+        XCTAssertTrue(app.buttons["filterCell-noir"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["filterCell-warm"].exists, "Warm is not in B&W")
+
+        app.buttons["filterReset"].tap()
+        XCTAssertFalse(app.sliders["filterSlider"].waitForExistence(timeout: 1), "Reset removes the filter and hides Intensity")
+        app.buttons["filterDone"].tap()
+        XCTAssertTrue(app.buttons["action-delete"].waitForExistence(timeout: 5), "back on the clip's row")
+    }
+
+    /// The main toolbar's Filter tool selects the clip under the playhead and opens the same sheet.
+    func testTheMainFilterToolOpensTheSheet() throws {
+        let app = openTripToParis()
+        app.buttons["tool-filter"].tap()
+        XCTAssertTrue(app.buttons["filterCell-none"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["filterDone"].exists)
     }
 }

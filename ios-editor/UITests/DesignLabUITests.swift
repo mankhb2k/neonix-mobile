@@ -137,4 +137,82 @@ final class DesignLabUITests: XCTestCase {
         XCTAssertTrue(app.buttons["groupChip-noise"].waitForExistence(timeout: 5), "all five Detail buttons fit without scrolling")
         XCTAssertTrue(app.buttons["groupChip-noise"].isHittable)
     }
+
+    // MARK: Filter lab
+
+    private func openFilterLab() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Filter picker"]
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["filterClose"].waitForExistence(timeout: 10), "the filter lab opens full screen")
+        return app
+    }
+
+    /// The three layouts: pick a filter, the stage follows; the Intensity ruler changes the strength; categories filter the list.
+    func testFilterLabGridPicksAFilterAndScalesIt() throws {
+        let app = openFilterLab()
+        app.buttons["filterAction-Filter"].tap()
+        XCTAssertTrue(app.buttons["filterCell-warm"].waitForExistence(timeout: 5), "the grid lists the filters")
+        XCTAssertTrue(app.buttons["filterCell-none"].exists, "None is the first cell")
+        saveShot(app, "filter-A-grid")
+
+        XCTAssertFalse(app.descendants(matching: .any)["ruler"].exists, "no Intensity control while no filter is picked")
+        app.buttons["filterCell-warm"].tap()
+        XCTAssertEqual(app.staticTexts["filterStageName"].label, "Warm 100%")
+        XCTAssertTrue(app.descendants(matching: .any)["ruler"].waitForExistence(timeout: 5), "picking a filter shows Intensity")
+        app.descendants(matching: .any)["ruler"].swipeRight(velocity: .slow)
+        XCTAssertNotEqual(app.staticTexts["filterStageName"].label, "Warm 100%", "the Intensity ruler changes the strength")
+        saveShot(app, "filter-A-warm")
+
+        // A category narrows the grid.
+        app.buttons["filterChip-B&W"].tap()
+        XCTAssertTrue(app.buttons["filterCell-mono"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["filterCell-warm"].exists, "Warm is not in B&W")
+
+        app.buttons["filterCell-none"].tap()
+        XCTAssertEqual(app.staticTexts["filterStageName"].label, "No filter")
+        XCTAssertFalse(app.descendants(matching: .any)["ruler"].waitForExistence(timeout: 1), "choosing None hides Intensity again")
+        app.buttons["filterDone"].tap()
+        XCTAssertFalse(app.buttons["filterCell-mono"].waitForExistence(timeout: 2))
+    }
+
+    /// The compact Intensity slider leaves room for a second grid row in the same 340 pt sheet.
+    func testFilterLabSliderIntensityFitsMoreOfTheGrid() throws {
+        let app = openFilterLab()
+        app.buttons["Slider"].tap()
+        app.buttons["filterAction-Filter"].tap()
+        XCTAssertTrue(app.buttons["filterCell-warm"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.sliders["filterSlider"].exists, "hidden until a filter is picked")
+        saveShot(app, "filter-A-none-no-slider")
+        app.buttons["filterCell-warm"].tap()
+        XCTAssertTrue(app.sliders["filterSlider"].waitForExistence(timeout: 5))
+        app.sliders["filterSlider"].adjust(toNormalizedSliderPosition: 0.5)
+        XCTAssertNotEqual(app.staticTexts["filterStageName"].label, "Warm 100%", "the slider changes the strength")
+        // The second row of the grid is (partly) on screen: a cell from row 2 is hittable or at least exists.
+        XCTAssertTrue(app.buttons["filterCell-crisp"].exists || app.buttons["filterCell-film400"].exists)
+        saveShot(app, "filter-A-slider")
+    }
+
+    func testFilterLabTallAndRowLayouts() throws {
+        let app = openFilterLab()
+        app.buttons["B Grid+"].tap()
+        app.buttons["filterAction-Filter"].tap()
+        XCTAssertTrue(app.buttons["filterCell-warm"].waitForExistence(timeout: 5))
+        saveShot(app, "filter-B-grid-plus")
+        app.buttons["filterDone"].tap()
+
+        app.buttons["C Row"].tap()
+        app.buttons["filterAction-Filter"].tap()
+        XCTAssertTrue(app.buttons["filterCell-cool"].waitForExistence(timeout: 5), "the row lists the filters too")
+        app.buttons["filterCell-cool"].tap()
+        XCTAssertEqual(app.staticTexts["filterStageName"].label, "Cool 100%")
+        saveShot(app, "filter-C-row")
+    }
 }

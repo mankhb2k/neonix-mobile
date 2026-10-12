@@ -482,6 +482,9 @@ struct AdjustValues: Equatable {
 struct SetAdjustCommand: EditorCommand {
     let layerId: String
     let values: AdjustValues
+    /// The picked Filter (a named bundle of Adjust values) and its strength. It is compiled *before* `values`, so the
+    /// sliders keep working on top of the look; both end up in the one `adjust-<layerId>` filter.
+    var filter: AppliedFilter? = nil
 
     private static func filterId(for layerId: String) -> String { "adjust-\(layerId)" }
 
@@ -492,54 +495,59 @@ struct SetAdjustCommand: EditorCommand {
         let id = Self.filterId(for: layerId)
         var filters = (project.filters ?? []).filter { $0.id != id }
 
-        if values.isNeutral {
+        var presets: [EffectPresetKind] = []
+        if let filter, let preset = FilterCatalog.preset(id: filter.id) {
+            presets += adjustPresets(for: preset.values.scaled(filter.intensity))
+        }
+        presets += adjustPresets(for: values)
+
+        if presets.isEmpty {
             layers[index].filter = nil
         } else {
-            var presets: [EffectPresetKind] = []
-            let neutral = AdjustValues()
-            // Order: tone -> colour -> white balance -> curves -> detail/effects (what a photo editor applies).
-            if values.exposure != neutral.exposure || values.brilliance != neutral.brilliance
-                || values.highlights != neutral.highlights || values.shadows != neutral.shadows
-                || values.contrast != neutral.contrast || values.brightness != neutral.brightness
-                || values.blackPoint != neutral.blackPoint {
-                presets.append(.toneAdjust(
-                    exposure: values.exposure, brilliance: values.brilliance, highlights: values.highlights,
-                    shadows: values.shadows, contrast: values.contrast, brightness: values.brightness,
-                    blackPoint: values.blackPoint
-                ))
-            }
-            if values.saturation != neutral.saturation || values.vibrance != neutral.vibrance || values.hue != neutral.hue {
-                presets.append(.colorGrade(saturation: values.saturation, vibrance: values.vibrance, hue: values.hue))
-            }
-            if values.temperature != neutral.temperature || values.tint != neutral.tint {
-                presets.append(.whiteBalance(temperature: values.temperature, tint: values.tint))
-            }
-            if values.curvePoints != neutral.curvePoints {
-                presets.append(.toneCurve(points: values.curvePoints))
-            }
-            if values.sharpen != neutral.sharpen {
-                presets.append(.sharpen(amount: values.sharpen))
-            }
-            if values.clarity != neutral.clarity {
-                presets.append(.clarity(amount: values.clarity))
-            }
-            if values.vignette != neutral.vignette {
-                presets.append(.vignette(intensity: values.vignette, radius: 1))
-            }
-            if values.noise != neutral.noise {
-                presets.append(.noise(scale: 4, amount: values.noise, opacity: 0.5, seed: 0))
-            }
-
-            if presets.isEmpty {
-                layers[index].filter = nil
-            } else {
-                filters.append(compileFilter(id: id, presets: presets))
-                layers[index].filter = id
-            }
+            filters.append(compileFilter(id: id, presets: presets))
+            layers[index].filter = id
         }
-
         return project.withLayers(layers).withFilters(filters.isEmpty ? nil : filters)
     }
+}
+
+/// The `EffectPresetKind`s one set of Adjust values needs - only the groups that moved off neutral, in the order a photo
+/// editor applies them: tone, colour, white balance, curves, then detail and effects.
+func adjustPresets(for values: AdjustValues) -> [EffectPresetKind] {
+    var presets: [EffectPresetKind] = []
+    let neutral = AdjustValues()
+    if values.exposure != neutral.exposure || values.brilliance != neutral.brilliance
+        || values.highlights != neutral.highlights || values.shadows != neutral.shadows
+        || values.contrast != neutral.contrast || values.brightness != neutral.brightness
+        || values.blackPoint != neutral.blackPoint {
+        presets.append(.toneAdjust(
+            exposure: values.exposure, brilliance: values.brilliance, highlights: values.highlights,
+            shadows: values.shadows, contrast: values.contrast, brightness: values.brightness,
+            blackPoint: values.blackPoint
+        ))
+    }
+    if values.saturation != neutral.saturation || values.vibrance != neutral.vibrance || values.hue != neutral.hue {
+        presets.append(.colorGrade(saturation: values.saturation, vibrance: values.vibrance, hue: values.hue))
+    }
+    if values.temperature != neutral.temperature || values.tint != neutral.tint {
+        presets.append(.whiteBalance(temperature: values.temperature, tint: values.tint))
+    }
+    if values.curvePoints != neutral.curvePoints {
+        presets.append(.toneCurve(points: values.curvePoints))
+    }
+    if values.sharpen != neutral.sharpen {
+        presets.append(.sharpen(amount: values.sharpen))
+    }
+    if values.clarity != neutral.clarity {
+        presets.append(.clarity(amount: values.clarity))
+    }
+    if values.vignette != neutral.vignette {
+        presets.append(.vignette(intensity: values.vignette, radius: 1))
+    }
+    if values.noise != neutral.noise {
+        presets.append(.noise(scale: 4, amount: values.noise, opacity: 0.5, seed: 0))
+    }
+    return presets
 }
 
 /// Where the playhead lands after a trim drag: a left handle -> the clip's start; a right handle -> its end minus one

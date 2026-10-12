@@ -5,6 +5,7 @@ import SwiftUI
 struct DesignLabView: View {
     @State private var showingTransform = false
     @State private var showingAdjust = false
+    @State private var showingFilter = false
 
     var body: some View {
         List {
@@ -26,6 +27,15 @@ struct DesignLabView: View {
                     }
                 }
                 .accessibilityIdentifier("lab-adjust")
+
+                Button { showingFilter = true } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Filter picker").font(.body.weight(.semibold)).foregroundColor(.primary)
+                        Text("16 fake filters on a live photo with an Intensity ruler: a 4-column grid in a fixed sheet, the same with a pull-up detent, or one row of thumbnails.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("lab-filter")
             } header: {
                 Text("Experiments")
             } footer: {
@@ -35,5 +45,6 @@ struct DesignLabView: View {
         .navigationTitle("Design Lab")
         .fullScreenCover(isPresented: $showingTransform) { TransformLabView() }
         .fullScreenCover(isPresented: $showingAdjust) { AdjustLabView() }
+        .fullScreenCover(isPresented: $showingFilter) { FilterLabView() }
     }
 }

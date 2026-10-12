@@ -11,7 +11,6 @@ enum ClipTool: String, CaseIterable, Identifiable {
     case removeBackground = "remove-bg"
     case unlink
     case style
-    case lastingText = "lasting-text"
     case delete
 
     var id: String { rawValue }
@@ -20,7 +19,6 @@ enum ClipTool: String, CaseIterable, Identifiable {
         switch self {
         case .editText: return "Edit text"
         case .removeBackground: return "Remove BG"
-        case .lastingText: return "Lasting text"
         default: return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
         }
     }
@@ -43,7 +41,6 @@ enum ClipTool: String, CaseIterable, Identifiable {
         case .removeBackground: return "person.crop.rectangle"
         case .unlink: return "link"
         case .style: return "textformat.size"
-        case .lastingText: return "arrow.right.to.line"
         case .delete: return "trash"
         }
     }
@@ -51,7 +48,7 @@ enum ClipTool: String, CaseIterable, Identifiable {
     /// Whether the tool does something yet. The others are only buttons for now: tapping one says it is coming.
     func isBuilt(for kind: ClipKind) -> Bool {
         switch self {
-        case .split, .transform, .adjust, .delete, .editText, .opacity: return true
+        case .split, .transform, .adjust, .filter, .delete, .editText, .opacity: return true
         case .volume: return kind == .audio
         default: return false
         }
@@ -68,7 +65,7 @@ enum ClipTool: String, CaseIterable, Identifiable {
             return [.split, .animation, .adjust, .filter, .transform, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground]
         case .text:
             // Edit text stays first: it is the only way to change the words of a text clip.
-            return [.editText, .split, .style, .animation, .duplicate, .lastingText, .transform]
+            return [.editText, .split, .style, .animation, .duplicate, .transform]
         case .audio:
             return [.split, .volume, .speed, .duplicate]
         case .other:

@@ -9,10 +9,8 @@ import SwiftUI
 /// different tools in real CapCut (one is a LUT color-grade preset picker,
 /// the other is manual sliders), not two names for the same feature.
 ///
-/// **`filter` ("Bộ lọc") is still a UI-only placeholder** — the
-/// `feColorLUT`/`V2LutAsset` primitives it will drive exist (see CLAUDE.md),
-/// but there is no LUT picker, bundled `.cube` preset or import flow yet, so
-/// tapping it only highlights it.
+/// **`filter` ("Bộ lọc")** opens the Filter sheet (a grid of named Adjust bundles with an Intensity slider; see
+/// `FilterSheet`) for the clip under the playhead, like `adjust`. There is no LUT/`.cube` picker yet.
 ///
 /// Case order matches CapCut's own bottom nav order for the tools this app
 /// kept (confirmed with the user 2026-10-07 when the nav was redesigned).
