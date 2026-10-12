@@ -30,6 +30,9 @@ import SwiftUI
 /// selectionBorderWidth` tall, not `rowHeight`; the handles now match that
 /// same height instead of the plain clip height, so they don't look
 /// shorter than the frame they sit inside.
+/// (2026-10-12) The frame is drawn with `strokeBorder`, entirely *inside* the clip: `.stroke` put half of it outside,
+/// and the lane clips the outside half at the bottom, so the bottom edge looked half as thick as the top. The
+/// handles are therefore exactly `rowHeight` tall.
 private let selectionBorderWidth: CGFloat = 2
 
 struct TimelineView: View {
@@ -65,7 +68,7 @@ struct TimelineView: View {
     /// into exactly one undo step instead of one per pixel moved.
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
-    let onTrimEnd: () -> Void
+    let onTrimEnd: (HorizontalEdge, String) -> Void
     /// Composition frame rate — the finest zoom step is one frame.
     var fps: Double = 30
 
@@ -89,6 +92,8 @@ struct TimelineView: View {
     /// handles' own drag, so without this it would scrub the playhead under the
     /// finger while a clip is trimmed (`dragIsTrim` latches it per touch).
     @State private var isTrimming = false
+    /// Edge auto-scroll while a trim handle is held near a screen edge (`TrimAutoScroll`).
+    @State private var trimAutoScroll = TrimAutoScroll()
     @State private var dragIsTrim = false
     /// Only the main (primary video) lane uses this height — every other
     /// lane, including every standalone audio track, uses the smaller
@@ -259,6 +264,10 @@ struct TimelineView: View {
                 // anywhere in the timeline, not just exactly on the track.
                 .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 .contentShape(Rectangle())
+                .onChange(of: geo.size.width, initial: true) { _, width in
+                    trimAutoScroll.engine = engine
+                    trimAutoScroll.panelWidth = Double(width)
+                }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("timeline")
                 .accessibilityValue(String(format: "%.4f", pxPerMs))
@@ -396,9 +405,13 @@ struct TimelineView: View {
         )
         // Touch-down on a handle (before any drag distance) so the scrub never gets a
         // head start — it could otherwise move the playhead a few points first.
+        .environment(\.trimAutoScroll, trimAutoScroll)
         .environment(\.onTrimTouch) { touching in
+            // Called on every drag event of the handle, not only on touch-down: ending a scrub on each one would
+            // cancel the playhead run `TrimAutoScroll` started, so only the first (touch-down) call counts.
+            let touchDown = touching && !isTrimming
             isTrimming = touching
-            if touching, engine.mode == .scrubbing { engine.endScrub(velocityMsPerSecond: 0) }
+            if touchDown, engine.mode == .scrubbing { engine.endScrub(velocityMsPerSecond: 0) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(isMainLane ? "lane-main" : "lane-\(order)")
@@ -515,7 +528,7 @@ private struct LaneRowView: View {
     let onSelectLayer: (String) -> Void
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
-    let onTrimEnd: () -> Void
+    let onTrimEnd: (HorizontalEdge, String) -> Void
 
     private let prefixSpacing: CGFloat = 8
 
@@ -576,7 +589,8 @@ private struct LaneRowView: View {
                         isSelected: isSelected,
                         onTrimBegin: onTrimBegin,
                         onTrimUpdate: onTrimUpdate,
-                        onTrimEnd: onTrimEnd
+                        onTrimEnd: onTrimEnd,
+                        allowsNegativeStart: showsCoverAndMute   // true only for the main lane
                     )
                     .onTapGesture { onSelectLayer(layer.id) }
                 } else {
@@ -806,13 +820,16 @@ private struct FilmstripClipView: View {
     let isSelected: Bool
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
-    let onTrimEnd: () -> Void
+    let onTrimEnd: (HorizontalEdge, String) -> Void
+    /// Main lane only: the left edge (and the clips it pushes) may go below 0 during the drag.
+    var allowsNegativeStart = false
 
     /// The clip's own layer state at the moment a trim drag began — deltas
     /// are computed against this fixed origin every `onChanged` tick
     /// (absolute, not incremental), the same reasoning `TimelineView`'s own
     /// scrub-drag already uses. `nil` whenever no trim drag is in progress.
     @State private var dragStartLayer: V2Layer?
+    @Environment(\.trimAutoScroll) private var autoScroll
     /// The source video's own real duration (`AssetDurationCache`), loaded
     /// once a clip becomes selected — the right handle needs this to know
     /// how far it's allowed to *extend* (reveal more unused footage) rather
@@ -918,7 +935,7 @@ private struct FilmstripClipView: View {
         // 2026-10-08). Selection is communicated by the handles plus this
         // thin gray frame connecting them (iOS Photos trim style, added
         // 2026-10-08, replacing the earlier plain white wash).
-        .overlay(isSelected ? Rectangle().stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
+        .overlay(isSelected ? Rectangle().strokeBorder(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
         .overlay(alignment: .leading) {
             if isSelected {
                 TrimHandleView(rowHeight: rowHeight, corners: [.topLeft, .bottomLeft], edge: .leading).gesture(leftHandleDrag).modifier(TrimTouchModifier())
@@ -981,43 +998,63 @@ private struct FilmstripClipView: View {
                 if dragStartLayer == nil {
                     dragStartLayer = layer
                     onTrimBegin()
+                    autoScroll?.begin(pxPerMs: pxPerMs, allowsNegativeTime: allowsNegativeStart) {
+                        applyLeftTrim(translationWidth: autoScroll?.translationWidth ?? 0, extraMs: autoScroll?.scrolledMs ?? 0)
+                    }
                 }
-                guard let original = dragStartLayer else { return }
-                let deltaMs = Double(value.translation.width) / pxPerMs
-                let originalEnd = original.timing.start + original.timing.duration
-
-                var candidateStart: Double
-                if case .video(let payload) = original.payload {
-                    let originalTrimStart = payload.trimStart ?? 0
-                    let clampedTrimStart = max(originalTrimStart + deltaMs, 0)
-                    candidateStart = original.timing.start + (clampedTrimStart - originalTrimStart)
-                } else {
-                    candidateStart = original.timing.start + deltaMs
-                }
-                candidateStart = max(candidateStart, 0)
-
-                let (resolvedStart, siblingStarts) = reflowLane(
-                    laneClips: laneClips,
-                    draggedLayerId: original.id,
-                    newDraggedStart: candidateStart,
-                    newDraggedDuration: originalEnd - candidateStart
-                )
-                let appliedDelta = resolvedStart - original.timing.start
-                let newDuration = originalEnd - resolvedStart
-                guard newDuration >= minDurationMs else { return }
-
-                var newTrimStart: Double?
-                var newTrimEnd: Double?
-                if case .video(let payload) = original.payload {
-                    newTrimStart = max((payload.trimStart ?? 0) + appliedDelta, 0)
-                    newTrimEnd = payload.trimEnd
-                }
-                onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: newDuration, trimStart: newTrimStart, trimEnd: newTrimEnd, siblingStarts: siblingStarts))
+                autoScroll?.update(translationWidth: value.translation.width, fingerX: Double(value.location.x))
+                _ = applyLeftTrim(translationWidth: value.translation.width, extraMs: autoScroll?.scrolledMs ?? 0)
             }
             .onEnded { _ in
+                autoScroll?.end()
                 dragStartLayer = nil
-                onTrimEnd()
+                onTrimEnd(.leading, layer.id)
             }
+    }
+
+    /// One left-handle update. `extraMs` = playhead time the edge auto-scroll has travelled. False = a limit was hit
+    /// (0 floor, lane reflow clamp, minimum length), which also stops the auto-scroll.
+    private func applyLeftTrim(translationWidth: CGFloat, extraMs: Double) -> Bool {
+        guard let original = dragStartLayer else { return false }
+        let deltaMs = Double(translationWidth) / pxPerMs + extraMs
+        let originalEnd = original.timing.start + original.timing.duration
+        var limited = false
+
+        var candidateStart: Double
+        if case .video(let payload) = original.payload {
+            let originalTrimStart = payload.trimStart ?? 0
+            let rawTrimStart = originalTrimStart + deltaMs
+            if rawTrimStart < 0 { limited = true }
+            let clampedTrimStart = max(rawTrimStart, 0)
+            candidateStart = original.timing.start + (clampedTrimStart - originalTrimStart)
+        } else {
+            candidateStart = original.timing.start + deltaMs
+        }
+        if !allowsNegativeStart {
+            if candidateStart < 0 { limited = true }
+            candidateStart = max(candidateStart, 0)
+        }
+
+        let (resolvedStart, siblingStarts) = reflowLane(
+            laneClips: laneClips,
+            draggedLayerId: original.id,
+            newDraggedStart: candidateStart,
+            newDraggedDuration: originalEnd - candidateStart,
+            floorAtZero: !allowsNegativeStart
+        )
+        if abs(resolvedStart - candidateStart) > 0.5 { limited = true }
+        let appliedDelta = resolvedStart - original.timing.start
+        let newDuration = originalEnd - resolvedStart
+        guard newDuration >= minDurationMs else { return false }
+
+        var newTrimStart: Double?
+        var newTrimEnd: Double?
+        if case .video(let payload) = original.payload {
+            newTrimStart = max((payload.trimStart ?? 0) + appliedDelta, 0)
+            newTrimEnd = payload.trimEnd
+        }
+        onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: newDuration, trimStart: newTrimStart, trimEnd: newTrimEnd, siblingStarts: siblingStarts))
+        return !limited
     }
 
     /// Right handle: moves the clip's own *end*, start stays fixed (a
@@ -1034,38 +1071,51 @@ private struct FilmstripClipView: View {
                 if dragStartLayer == nil {
                     dragStartLayer = layer
                     onTrimBegin()
+                    autoScroll?.begin(pxPerMs: pxPerMs) {
+                        applyRightTrim(translationWidth: autoScroll?.translationWidth ?? 0, extraMs: autoScroll?.scrolledMs ?? 0)
+                    }
                 }
-                guard let original = dragStartLayer else { return }
-                let deltaMs = Double(value.translation.width) / pxPerMs
-
-                var newTrimEnd: Double?
-                var candidateDuration: Double
-                if case .video(let payload) = original.payload {
-                    let originalTrimEnd = payload.trimEnd ?? ((payload.trimStart ?? 0) + original.timing.duration)
-                    var clampedTrimEnd = originalTrimEnd + deltaMs
-                    if let assetDurationMs { clampedTrimEnd = min(clampedTrimEnd, assetDurationMs) }
-                    newTrimEnd = clampedTrimEnd
-                    candidateDuration = original.timing.duration + (clampedTrimEnd - originalTrimEnd)
-                } else {
-                    candidateDuration = original.timing.duration + deltaMs
-                }
-                guard candidateDuration >= minDurationMs else { return }
-
-                let (resolvedStart, siblingStarts) = reflowLane(
-                    laneClips: laneClips,
-                    draggedLayerId: original.id,
-                    newDraggedStart: original.timing.start,
-                    newDraggedDuration: candidateDuration
-                )
-
-                var newTrimStart: Double?
-                if case .video(let payload) = original.payload { newTrimStart = payload.trimStart }
-                onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: candidateDuration, trimStart: newTrimStart, trimEnd: newTrimEnd, siblingStarts: siblingStarts))
+                autoScroll?.update(translationWidth: value.translation.width, fingerX: Double(value.location.x))
+                _ = applyRightTrim(translationWidth: value.translation.width, extraMs: autoScroll?.scrolledMs ?? 0)
             }
             .onEnded { _ in
+                autoScroll?.end()
                 dragStartLayer = nil
-                onTrimEnd()
+                onTrimEnd(.trailing, layer.id)
             }
+    }
+
+    /// One right-handle update; false = a limit was hit (end of the source video, minimum length), which also stops
+    /// the auto-scroll.
+    private func applyRightTrim(translationWidth: CGFloat, extraMs: Double) -> Bool {
+        guard let original = dragStartLayer else { return false }
+        let deltaMs = Double(translationWidth) / pxPerMs + extraMs
+        var limited = false
+
+        var newTrimEnd: Double?
+        var candidateDuration: Double
+        if case .video(let payload) = original.payload {
+            let originalTrimEnd = payload.trimEnd ?? ((payload.trimStart ?? 0) + original.timing.duration)
+            var clampedTrimEnd = originalTrimEnd + deltaMs
+            if let assetDurationMs, clampedTrimEnd > assetDurationMs { clampedTrimEnd = assetDurationMs; limited = true }
+            newTrimEnd = clampedTrimEnd
+            candidateDuration = original.timing.duration + (clampedTrimEnd - originalTrimEnd)
+        } else {
+            candidateDuration = original.timing.duration + deltaMs
+        }
+        guard candidateDuration >= minDurationMs else { return false }
+
+        let (resolvedStart, siblingStarts) = reflowLane(
+            laneClips: laneClips,
+            draggedLayerId: original.id,
+            newDraggedStart: original.timing.start,
+            newDraggedDuration: candidateDuration
+        )
+
+        var newTrimStart: Double?
+        if case .video(let payload) = original.payload { newTrimStart = payload.trimStart }
+        onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: candidateDuration, trimStart: newTrimStart, trimEnd: newTrimEnd, siblingStarts: siblingStarts))
+        return !limited
     }
 }
 
@@ -1122,7 +1172,7 @@ private struct TrimHandleView: View {
     /// (`rowHeight + selectionBorderWidth` — see that constant's doc
     /// comment), not just the bare clip height, so the handle reads as
     /// part of the same block as the frame instead of looking shorter.
-    private var handleHeight: CGFloat { rowHeight + selectionBorderWidth }
+    private var handleHeight: CGFloat { rowHeight }
 
     var body: some View {
         RoundedCornerShape(radius: 6, corners: corners)
@@ -1191,7 +1241,10 @@ func reflowLane(
     laneClips: [V2Layer],
     draggedLayerId: String,
     newDraggedStart: Double,
-    newDraggedDuration: Double
+    newDraggedDuration: Double,
+    /// `false` on the main lane (main-lane magnet): clips may go to negative times while a trim is being dragged;
+    /// `PackMainLaneCommand` puts the lane's head back at 0 when the finger lifts.
+    floorAtZero: Bool = true
 ) -> (draggedStart: Double, siblingStarts: [String: Double]) {
     let ordered = laneClips.sorted { $0.timing.start < $1.timing.start }
     guard let draggedIndex = ordered.firstIndex(where: { $0.id == draggedLayerId }) else {
@@ -1212,7 +1265,7 @@ func reflowLane(
         starts[layer.id] = nextStart
     }
 
-    if let firstId = ordered.first?.id, let leadingStart = starts[firstId], leadingStart < 0 {
+    if floorAtZero, let firstId = ordered.first?.id, let leadingStart = starts[firstId], leadingStart < 0 {
         let deficit = -leadingStart
         for key in starts.keys { starts[key, default: 0] += deficit }
     }
@@ -1374,11 +1427,12 @@ private struct TimelineClipView: View {
     let isSelected: Bool
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
-    let onTrimEnd: () -> Void
+    let onTrimEnd: (HorizontalEdge, String) -> Void
 
     /// Same fixed-origin-per-gesture pattern as `FilmstripClipView`'s own
     /// drag handles — see its doc comment.
     @State private var dragStartLayer: V2Layer?
+    @Environment(\.trimAutoScroll) private var autoScroll
     private let minDurationMs: Double = 200
 
     var body: some View {
@@ -1390,7 +1444,7 @@ private struct TimelineClipView: View {
             // stroke anymore either; the type is communicated by the fill
             // + icon/label alone.
             .fill(color)
-            .overlay(isSelected ? Rectangle().stroke(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
+            .overlay(isSelected ? Rectangle().strokeBorder(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
             .overlay(alignment: .leading) {
                 HStack(spacing: 4) {
                     Image(systemName: icon)
@@ -1434,36 +1488,53 @@ private struct TimelineClipView: View {
                 if dragStartLayer == nil {
                     dragStartLayer = layer
                     onTrimBegin()
+                    autoScroll?.begin(pxPerMs: pxPerMs) {
+                        applyLeftTrim(translationWidth: autoScroll?.translationWidth ?? 0, extraMs: autoScroll?.scrolledMs ?? 0)
+                    }
                 }
-                guard let original = dragStartLayer else { return }
-                let deltaMs = Double(value.translation.width) / pxPerMs
-                let originalEnd = original.timing.start + original.timing.duration
-                var candidateStart = max(original.timing.start + deltaMs, 0)
-
-                var siblingStarts: [String: Double] = [:]
-                var resolvedStart = candidateStart
-                if isPushLaneType(original.type) {
-                    let result = reflowLane(
-                        laneClips: laneClips,
-                        draggedLayerId: original.id,
-                        newDraggedStart: candidateStart,
-                        newDraggedDuration: originalEnd - candidateStart
-                    )
-                    resolvedStart = result.draggedStart
-                    siblingStarts = result.siblingStarts
-                } else if let floor = previousClipEnd(in: laneClips, before: original.id, originalStart: original.timing.start) {
-                    candidateStart = max(candidateStart, floor)
-                    resolvedStart = candidateStart
-                }
-
-                let newDuration = originalEnd - resolvedStart
-                guard newDuration >= minDurationMs else { return }
-                onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: newDuration, trimStart: nil, trimEnd: nil, siblingStarts: siblingStarts))
+                autoScroll?.update(translationWidth: value.translation.width, fingerX: Double(value.location.x))
+                _ = applyLeftTrim(translationWidth: value.translation.width, extraMs: autoScroll?.scrolledMs ?? 0)
             }
             .onEnded { _ in
+                autoScroll?.end()
                 dragStartLayer = nil
-                onTrimEnd()
+                onTrimEnd(.leading, layer.id)
             }
+    }
+
+    /// One left-handle update; false = a limit was hit (0 floor, a neighbour, minimum length), which also stops the
+    /// auto-scroll.
+    private func applyLeftTrim(translationWidth: CGFloat, extraMs: Double) -> Bool {
+        guard let original = dragStartLayer else { return false }
+        let deltaMs = Double(translationWidth) / pxPerMs + extraMs
+        let originalEnd = original.timing.start + original.timing.duration
+        var limited = false
+        var candidateStart = original.timing.start + deltaMs
+        if candidateStart < 0 { limited = true }
+        candidateStart = max(candidateStart, 0)
+
+        var siblingStarts: [String: Double] = [:]
+        var resolvedStart = candidateStart
+        if isPushLaneType(original.type) {
+            let result = reflowLane(
+                laneClips: laneClips,
+                draggedLayerId: original.id,
+                newDraggedStart: candidateStart,
+                newDraggedDuration: originalEnd - candidateStart
+            )
+            resolvedStart = result.draggedStart
+            siblingStarts = result.siblingStarts
+            if abs(resolvedStart - candidateStart) > 0.5 { limited = true }
+        } else if let floor = previousClipEnd(in: laneClips, before: original.id, originalStart: original.timing.start) {
+            if candidateStart < floor { limited = true }
+            candidateStart = max(candidateStart, floor)
+            resolvedStart = candidateStart
+        }
+
+        let newDuration = originalEnd - resolvedStart
+        guard newDuration >= minDurationMs else { return false }
+        onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: newDuration, trimStart: nil, trimEnd: nil, siblingStarts: siblingStarts))
+        return !limited
     }
 
     private var rightHandleDrag: some Gesture {
@@ -1472,33 +1543,47 @@ private struct TimelineClipView: View {
                 if dragStartLayer == nil {
                     dragStartLayer = layer
                     onTrimBegin()
+                    autoScroll?.begin(pxPerMs: pxPerMs) {
+                        applyRightTrim(translationWidth: autoScroll?.translationWidth ?? 0, extraMs: autoScroll?.scrolledMs ?? 0)
+                    }
                 }
-                guard let original = dragStartLayer else { return }
-                let deltaMs = Double(value.translation.width) / pxPerMs
-                var candidateDuration = original.timing.duration + deltaMs
-
-                var siblingStarts: [String: Double] = [:]
-                var resolvedStart = original.timing.start
-                if isPushLaneType(original.type) {
-                    let result = reflowLane(
-                        laneClips: laneClips,
-                        draggedLayerId: original.id,
-                        newDraggedStart: original.timing.start,
-                        newDraggedDuration: candidateDuration
-                    )
-                    resolvedStart = result.draggedStart
-                    siblingStarts = result.siblingStarts
-                } else if let ceiling = nextClipStart(in: laneClips, after: original.id, originalStart: original.timing.start) {
-                    candidateDuration = min(candidateDuration, ceiling - original.timing.start)
-                }
-
-                guard candidateDuration >= minDurationMs else { return }
-                onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: candidateDuration, trimStart: nil, trimEnd: nil, siblingStarts: siblingStarts))
+                autoScroll?.update(translationWidth: value.translation.width, fingerX: Double(value.location.x))
+                _ = applyRightTrim(translationWidth: value.translation.width, extraMs: autoScroll?.scrolledMs ?? 0)
             }
             .onEnded { _ in
+                autoScroll?.end()
                 dragStartLayer = nil
-                onTrimEnd()
+                onTrimEnd(.trailing, layer.id)
             }
+    }
+
+    /// One right-handle update; false = a limit was hit (a neighbour ahead, minimum length), which also stops the
+    /// auto-scroll.
+    private func applyRightTrim(translationWidth: CGFloat, extraMs: Double) -> Bool {
+        guard let original = dragStartLayer else { return false }
+        let deltaMs = Double(translationWidth) / pxPerMs + extraMs
+        var limited = false
+        var candidateDuration = original.timing.duration + deltaMs
+
+        var siblingStarts: [String: Double] = [:]
+        var resolvedStart = original.timing.start
+        if isPushLaneType(original.type) {
+            let result = reflowLane(
+                laneClips: laneClips,
+                draggedLayerId: original.id,
+                newDraggedStart: original.timing.start,
+                newDraggedDuration: candidateDuration
+            )
+            resolvedStart = result.draggedStart
+            siblingStarts = result.siblingStarts
+        } else if let ceiling = nextClipStart(in: laneClips, after: original.id, originalStart: original.timing.start) {
+            if candidateDuration > ceiling - original.timing.start { limited = true }
+            candidateDuration = min(candidateDuration, ceiling - original.timing.start)
+        }
+
+        guard candidateDuration >= minDurationMs else { return false }
+        onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: candidateDuration, trimStart: nil, trimEnd: nil, siblingStarts: siblingStarts))
+        return !limited
     }
 
     private var color: Color {

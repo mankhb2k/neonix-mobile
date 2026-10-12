@@ -187,10 +187,21 @@ struct EditorShellView: View {
     /// Called once when the drag ends — records the single pre-drag
     /// snapshot `beginTrim()` captured, collapsing the whole gesture into
     /// one undo step.
-    private func endTrim() {
+    private func endTrim(edge: HorizontalEdge, layerId: String) {
         guard let original = trimDragOriginal else { return }
+        // Main-lane magnet: a trim leaves a hole in the main lane; close it now, in the same undo step.
+        let packed = PackMainLaneCommand().apply(to: project)
+        withAnimation(.easeOut(duration: 0.2)) { setProject(packed) }
         history.record(current: original)
         trimDragOriginal = nil
+        // The playhead goes to the edge that was dragged: a left handle -> the clip's head, a right handle -> its tail
+        // minus one frame (after packing/rippling). The time floor lowered for a main-lane left trim is restored once it has landed.
+        if let layer = packed.layers.first(where: { $0.id == layerId }) {
+            let target = trimLandingTimeMs(isLeadingHandle: edge == .leading, layer: layer, fps: packed.composition.fps)
+            engine.glide(toMs: target) { [engine] in engine.setTimeFloor(0) }
+        } else {
+            engine.setTimeFloor(0)
+        }
     }
 
     /// Tuỳ chỉnh — same "one undo step per gesture" shape as `beginTrim`,

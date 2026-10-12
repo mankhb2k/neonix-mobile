@@ -164,16 +164,24 @@ final class TimelineTrimUITests: XCTestCase {
         let y = right.frame.midY
         window.withOffset(CGVector(dx: rightBefore, dy: y))
             .press(forDuration: 0.3, thenDragTo: window.withOffset(CGVector(dx: rightBefore - 20, dy: y)))
-        XCTAssertEqual(right.frame.midX - rightBefore, -20, accuracy: 5, "the right edge must follow the finger")
-        XCTAssertEqual(timeline.label, timeBefore, "trimming must not scrub the playhead")
+        // On release the playhead goes to the edge that was dragged: the clip's tail, 20 pt earlier than before.
+        Thread.sleep(forTimeInterval: 0.8)
+        let centerX = app.windows.firstMatch.frame.midX
+        XCTAssertEqual(right.frame.minX, centerX, accuracy: 6, "after a right trim the playhead sits on the clip's end")
+        let endBefore = (Double(timeBefore) ?? 0) + (rightBefore - 14 - centerX) / pxPerMs
+        XCTAssertEqual(Double(timeline.label) ?? .nan, endBefore - 20 / pxPerMs, accuracy: 120, "and it is 20 pt of time earlier than the old end")
 
         let left = app.descendants(matching: .any)["trim-handle-leading"].firstMatch
         XCTAssertTrue(left.exists)
+        let timeBeforeLeft = Double(timeline.label) ?? 0
         let leftBefore = left.frame.midX
         window.withOffset(CGVector(dx: leftBefore, dy: y))
             .press(forDuration: 0.3, thenDragTo: window.withOffset(CGVector(dx: leftBefore + 20, dy: y)))
-        XCTAssertEqual(left.frame.midX - leftBefore, 20, accuracy: 5, "the left edge must follow the finger")
-        XCTAssertEqual(timeline.label, timeBefore, "trimming must not scrub the playhead")
+        // ... and after a left trim it sits on the clip's head, 20 pt of time later than the old start.
+        Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertEqual(left.frame.maxX, centerX, accuracy: 6, "after a left trim the playhead sits on the clip's start")
+        let startBefore = timeBeforeLeft + (leftBefore + 14 - centerX) / pxPerMs
+        XCTAssertEqual(Double(timeline.label) ?? .nan, startBefore + 20 / pxPerMs, accuracy: 120)
     }
 }
 

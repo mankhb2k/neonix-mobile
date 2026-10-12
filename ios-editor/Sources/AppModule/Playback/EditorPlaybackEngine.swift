@@ -68,6 +68,11 @@ final class EditorPlaybackEngine {
     /// A touch landed on the coast: same speed, much heavier friction (`brake()`).
     @ObservationIgnored private var isBraking = false
     @ObservationIgnored private let clock = DisplayLinkClock()
+    @ObservationIgnored private let glideClock = DisplayLinkClock()
+    @ObservationIgnored private var glideCompletion: (() -> Void)?
+    /// Lowest time the playhead may take. 0, except while a main-lane trim is dragged: the lane may then go before t0
+    /// (main-lane magnet) and the playhead follows it; the drag's end puts it back to 0 (`glide(toMs:)`).
+    @ObservationIgnored private(set) var timeFloorMs = 0.0
     /// Real sound — see `AudioMixEngine`'s own doc comment for the sync
     /// model. Only ever told to play from `playbackTick`/`play()`, never
     /// from scrubbing/coasting.
@@ -182,6 +187,7 @@ final class EditorPlaybackEngine {
     /// drag starts exactly where the playhead visibly is. Safe to call on
     /// every drag tick — only the first one in a gesture does anything.
     func beginScrub() {
+        cancelGlide()
         guard mode != .scrubbing else { return }
         if mode == .coasting { recordCoastEnd(.interrupted) }
         clock.stop()
@@ -364,7 +370,45 @@ final class EditorPlaybackEngine {
     }
 
     private func clamped(_ ms: Double) -> Double {
-        min(max(ms, 0), maxDurationMs)
+        min(max(ms, timeFloorMs), maxDurationMs)
+    }
+
+    func setTimeFloor(_ ms: Double) {
+        timeFloorMs = min(ms, 0)
+    }
+
+    /// Slides the playhead to `target` (ease-out, `duration` seconds) as a scrub, then calls `completion`. A touch that
+    /// starts a scrub cancels it (the completion still runs, so a lowered time floor is always restored).
+    func glide(toMs target: Double, duration: Double = 0.2, completion: (() -> Void)? = nil) {
+        cancelGlide()
+        let from = currentTimeMs
+        let goal = clamped(target)
+        guard abs(goal - from) > 0.5 else { completion?(); return }
+        beginScrub()
+        glideCompletion = completion
+        var elapsed = 0.0
+        glideClock.start { [weak self] dt in
+            guard let self else { return }
+            elapsed += dt
+            let progress = min(elapsed / duration, 1)
+            let eased = 1 - pow(1 - progress, 3)
+            self.scrub(toMs: from + (goal - from) * eased)
+            if progress >= 1 {
+                self.glideClock.stop()
+                let done = self.glideCompletion
+                self.glideCompletion = nil
+                self.endScrub(velocityMsPerSecond: 0)
+                done?()
+            }
+        }
+    }
+
+    private func cancelGlide() {
+        guard glideClock.isRunning else { return }
+        glideClock.stop()
+        let done = glideCompletion
+        glideCompletion = nil
+        done?()
     }
 
     // MARK: Metrics

@@ -133,6 +133,16 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   (`AssetDurationCache`). Source time is always `VideoTimeMapping`
   (`trimStart + elapsed × rate`); split shifts the 2nd half's `trimStart` (ms, not s).
   Editing commands still assume `playbackRate == 1`.
+  **Main-lane magnet** (`PackMainLaneCommand`, 2026-10-12): the main lane (lowest `order` with a video) never has a hole - after a trim
+  drag ends (`endTrim`, same undo step, 0.2 s animation) and after deleting a main-lane clip its clips are laid end to end from 0.
+  While a trim is dragged the main lane may go to **negative** times (left edge past t0, clips in front pushed past t0: `reflowLane(floorAtZero: false)`,
+  `FilmstripClipView.allowsNegativeStart`); the release packs it back to 0. Edge auto-scroll stops when the playhead reaches 0.
+  Text/overlay lanes and audio are not touched. Snap-to-edges is not built yet.
+  **After any trim (every lane) the playhead glides (0.2 s) to the dragged edge**: left handle -> the clip's start, right handle ->
+  its end, after packing (`EditorPlaybackEngine.glide`). A main-lane left trim lowers `engine.timeFloorMs` so the playhead may follow
+  the edge before t0 (edge auto-scroll too); the glide's completion restores the floor to 0.
+  **Edge auto-scroll** (`TrimAutoScroll`): a trim handle held within 64 pt of a screen edge keeps going (slow 120 pt/s, within 24 pt
+  fast 480 pt/s, on-screen speed so zoom doesn't matter); the playhead runs with it and everything stops together at a limit.
 - **Bottom bar = always ONE row** (CapCut style, `EditorBottomBar.swift`, `EditorShellView.bottomMode`): main tools
   (`EditorToolbarView`) -> select a clip/photo/text/audio clip (tap it, or the Edit tool selects what is under the
   playhead) and the row becomes that item's tools (`SelectionToolbarView`: Split, Extract Audio, Transform, Adjust,
@@ -245,7 +255,7 @@ Transform and Adjust sheets in production.
 - **`simctl` can't tap or drag.** `ios-editor/UITests` (XCUITest) is the only way to
   synthesize touches (`TimelineZoomUITests` does real pinches); `print` from the app
   under test doesn't reach `xcodebuild` — use `NSLog` + `simctl spawn … log show`.
-  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (175 passing).
+  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (193 passing).
 - No Node/pnpm in this sandbox: TS (`packages/motion-protocol`) can't be verified here.
 
 ## Key files

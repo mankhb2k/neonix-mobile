@@ -200,6 +200,54 @@ final class EditorPlaybackEngineTests: XCTestCase {
             layers: [layer]
         )
     }
+
+    // MARK: time floor + glide (trim: the playhead follows the edge, even before t0, and lands on it)
+
+    func testThePlayheadCannotGoBelowZeroUnlessTheFloorIsLowered() {
+        let engine = makeEngine()
+        engine.beginScrub()
+        engine.scrub(toMs: -500)
+        XCTAssertEqual(engine.currentTimeMs, 0, "default floor is 0")
+
+        engine.setTimeFloor(-1_000_000)
+        engine.scrub(toMs: -500)
+        XCTAssertEqual(engine.currentTimeMs, -500, "a main-lane trim lowers the floor")
+
+        engine.setTimeFloor(0)
+        engine.scrub(toMs: -200)
+        XCTAssertEqual(engine.currentTimeMs, 0)
+        engine.endScrub(velocityMsPerSecond: 0)
+    }
+
+    func testGlideLandsOnTheTargetThenRunsItsCompletionAndLeavesScrubbing() {
+        let engine = makeEngine()
+        engine.beginScrub()
+        engine.setTimeFloor(-1000)
+        engine.scrub(toMs: -400)
+        engine.endScrub(velocityMsPerSecond: 0)
+
+        let done = expectation(description: "glide finished")
+        engine.glide(toMs: 3000, duration: 0.1) { done.fulfill() }
+        wait(for: [done], timeout: 3)
+        XCTAssertEqual(engine.currentTimeMs, 3000, accuracy: 0.5)
+        XCTAssertEqual(engine.mode, .idle)
+    }
+
+    func testGlideToWhereTheyAlreadyAreCompletesAtOnce() {
+        let engine = makeEngine()
+        var finished = false
+        engine.glide(toMs: 0) { finished = true }
+        XCTAssertTrue(finished)
+    }
+
+    func testATouchDuringAGlideCancelsItButStillRunsTheCompletion() {
+        let engine = makeEngine()
+        var finished = false
+        engine.glide(toMs: 5000, duration: 5) { finished = true }
+        engine.beginScrub()
+        XCTAssertTrue(finished, "the completion (which restores the time floor) must not be lost")
+        engine.endScrub(velocityMsPerSecond: 0)
+    }
 }
 
 

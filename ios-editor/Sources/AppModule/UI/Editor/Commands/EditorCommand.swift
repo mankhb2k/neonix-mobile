@@ -147,8 +147,50 @@ struct DeleteClipCommand: EditorCommand {
     let layerId: String
 
     func apply(to project: V2Project) -> V2Project {
-        project.withLayers(project.layers.filter { $0.id != layerId })
+        let mainOrder = primaryVideoLaneOrder(of: project.layers)
+        let removed = project.layers.first { $0.id == layerId }
+        let remaining = project.withLayers(project.layers.filter { $0.id != layerId })
+        // Deleting a clip of the main lane leaves a hole there: close it (main-lane magnet).
+        guard let mainOrder, let removed, removed.type == "video", removed.order == mainOrder else { return remaining }
+        return packLane(order: mainOrder, in: remaining)
     }
+}
+
+/// The main lane = the lowest `order` that holds a video clip (the one pinned under the ruler).
+func primaryVideoLaneOrder(of layers: [V2Layer]) -> Int? {
+    layers.filter { $0.type == "video" }.map(\.order).min()
+}
+
+/// Main-lane magnet (user decision 2026-10-12): the main lane never has a hole - its clips follow each other, the first
+/// one at 0, in start order with their own durations. Run after a trim drag ends and after a delete. Text/overlay
+/// lanes and audio are not touched (they may have gaps and keep their absolute times). No-op when already packed.
+struct PackMainLaneCommand: EditorCommand {
+    func apply(to project: V2Project) -> V2Project {
+        guard let order = primaryVideoLaneOrder(of: project.layers) else { return project }
+        return packLane(order: order, in: project)
+    }
+}
+
+/// Lays the clips of lane `order` end to end from 0, in start order (ties keep array order). Returns `project`
+/// itself when nothing moves.
+func packLane(order: Int, in project: V2Project) -> V2Project {
+    let clips = project.layers.enumerated()
+        .filter { $0.element.order == order && $0.element.type != "group" }
+        .sorted { ($0.element.timing.start, $0.offset) < ($1.element.timing.start, $1.offset) }
+    var starts: [String: Double] = [:]
+    var cursor = 0.0
+    for (_, clip) in clips {
+        starts[clip.id] = cursor
+        cursor += clip.timing.duration
+    }
+    guard project.layers.contains(where: { layer in starts[layer.id].map { $0 != layer.timing.start } ?? false }) else { return project }
+    let layers = project.layers.map { layer -> V2Layer in
+        guard let start = starts[layer.id], start != layer.timing.start else { return layer }
+        var moved = layer
+        moved.timing = V2Timing(start: start, duration: layer.timing.duration)
+        return moved
+    }
+    return project.withLayers(layers)
 }
 
 extension V2Project {
@@ -499,4 +541,13 @@ struct SetAdjustCommand: EditorCommand {
 
         return project.withLayers(layers).withFilters(filters.isEmpty ? nil : filters)
     }
+}
+
+/// Where the playhead lands after a trim drag: a left handle -> the clip's start; a right handle -> its end minus one
+/// frame (user decision 2026-10-12). At exactly `start + duration` no clip is visible (`t < start + duration`), so the
+/// last clip of the project would show an empty preview; one frame earlier shows the clip's final frame.
+func trimLandingTimeMs(isLeadingHandle: Bool, layer: V2Layer, fps: Double) -> Double {
+    if isLeadingHandle { return layer.timing.start }
+    let frameMs = 1000 / max(fps, 1)
+    return max(layer.timing.start, layer.timing.start + layer.timing.duration - frameMs)
 }
