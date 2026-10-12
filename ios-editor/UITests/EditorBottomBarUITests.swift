@@ -34,7 +34,7 @@ final class EditorBottomBarUITests: XCTestCase {
         XCTAssertTrue(app.buttons["toolbarBack"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["action-split"].exists || app.buttons["action-delete"].exists)
         XCTAssertTrue(app.buttons["action-delete"].exists)
-        XCTAssertTrue(app.buttons["action-extract-audio"].exists, "a video clip can give up its audio")
+        XCTAssertFalse(app.buttons["action-extract-audio"].exists, "Extract Audio is gone from the row")
         XCTAssertFalse(app.buttons["tool-aspectRatio"].exists, "the main row is gone, not stacked below")
         XCTAssertFalse(app.buttons["tool-audio"].exists)
         saveShot(app, "bar-2-clip")
@@ -100,7 +100,15 @@ final class EditorBottomBarUITests: XCTestCase {
         app.buttons["tool-text"].tap()
         XCTAssertTrue(app.buttons["toolbarBack"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["tool-audio"].exists, "the tools row is replaced by the Text options")
+        // The Text tool is a short list first: Add text and Auto captions.
+        XCTAssertTrue(app.buttons["text-add"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["text-captions"].exists)
+        XCTAssertFalse(app.textFields["editorTextField"].exists)
         saveShot(app, "bar-4-text")
+        app.buttons["text-captions"].tap()
+        XCTAssertTrue(app.staticTexts["Auto captions is coming soon"].waitForExistence(timeout: 3))
+        app.buttons["text-add"].tap()
+        XCTAssertTrue(app.textFields["editorTextField"].waitForExistence(timeout: 5), "Add text shows the text field")
         app.buttons["toolbarBack"].tap()
         XCTAssertTrue(app.buttons["tool-audio"].waitForExistence(timeout: 5))
     }
@@ -111,5 +119,63 @@ final class EditorBottomBarUITests: XCTestCase {
         XCTAssertTrue(app.buttons["action-delete"].waitForExistence(timeout: 5))
         app.buttons["action-delete"].tap()
         XCTAssertTrue(app.buttons["tool-aspectRatio"].waitForExistence(timeout: 5), "with nothing selected any more the main row is back")
+    }
+
+    /// The Edit row for a video: Split first, the rest scrolls, Delete is pinned at the right; a tool that is not built
+    /// yet only says it is coming; Opacity opens the Transform sheet on its Opacity ruler.
+    func testTheClipRowIsOrderedPinsDeleteAndAnnouncesUnbuiltTools() throws {
+        let app = openTripToParis()
+        app.buttons["tool-edit"].tap()
+        XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["action-delete"].isHittable, "Delete is pinned, always reachable")
+        let split = app.buttons["action-split"].frame.minX
+        XCTAssertLessThan(split, app.buttons["action-delete"].frame.minX)
+        saveShot(app, "bar-7-clip-row")
+
+        // A tool that is not built yet.
+        let row = app.descendants(matching: .any)["selectionToolbar"]
+        var guardCount = 0
+        while !app.buttons["action-speed"].isHittable, guardCount < 4 { row.swipeLeft(); guardCount += 1 }
+        app.buttons["action-speed"].tap()
+        XCTAssertTrue(app.staticTexts["Speed is coming soon"].waitForExistence(timeout: 3))
+        saveShot(app, "bar-8-coming-soon")
+        XCTAssertFalse(app.staticTexts["Speed is coming soon"].waitForExistence(timeout: 0.1) == false && false)
+
+        // Opacity is real: it opens the Transform sheet on the Opacity ruler.
+        guardCount = 0
+        while !app.buttons["action-opacity"].isHittable, guardCount < 6 { row.swipeLeft(); guardCount += 1 }
+        app.buttons["action-opacity"].tap()
+        XCTAssertTrue(app.staticTexts["rulerReadout"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["rulerReadout"].label, "100%", "opens on Opacity")
+    }
+
+    /// Selecting a text clip on the timeline gives the text tools: Split, Style, Animation, Duplicate, Lasting text,
+    /// Transform (Delete pinned), and Edit text puts the clip's words in the field.
+    func testATextClipOffersTheTextToolList() throws {
+        let app = openTripToParis()
+        let timeline = app.otherElements["timeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 15))
+        timeline.pinch(withScale: 0.3, velocity: -1.5)
+        let pxPerMs = Double((timeline.value as? String) ?? "") ?? .nan
+        let laneScroll = app.descendants(matching: .any)["lane-scroll"].firstMatch
+        if laneScroll.exists { laneScroll.swipeDown(); laneScroll.swipeDown() }
+        let lane = app.descendants(matching: .any)["lane-1"].firstMatch
+        XCTAssertTrue(lane.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        window.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX + pxPerMs * 2500, dy: lane.frame.midY)).tap()
+
+        XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
+        for id in ["edit-text", "split", "style", "animation", "duplicate", "lasting-text", "transform"] {
+            XCTAssertTrue(app.buttons["action-\(id)"].exists, id)
+        }
+        for id in ["volume", "adjust", "opacity", "crop"] {
+            XCTAssertFalse(app.buttons["action-\(id)"].exists, "\(id) is not a text tool")
+        }
+        XCTAssertTrue(app.buttons["action-delete"].isHittable)
+        saveShot(app, "bar-9-text-clip-row")
+
+        app.buttons["action-edit-text"].tap()
+        XCTAssertTrue(app.textFields["editorTextField"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["editorTextField"].value as? String == "", "the field holds the clip's words")
     }
 }

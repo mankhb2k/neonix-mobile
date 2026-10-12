@@ -247,11 +247,10 @@ private struct LabAdjustLook: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .brightness(values[.brightness] + values[.lightness] + values[.exposure] * 0.2)
+            .brightness(values[.brightness] * 0.5 + values[.exposure] * 0.2)
             .contrast(values[.contrast])
             .saturation(values[.saturation])
             .hueRotation(.degrees(values[.hue]))
-            .blur(radius: values[.blur] * 0.4)
             .overlay(Color(red: 1, green: 0.55, blue: 0.1).opacity(max(0, values[.temperature]) * 0.4).blendMode(.overlay).allowsHitTesting(false))
             .overlay(Color(red: 0.1, green: 0.5, blue: 1).opacity(max(0, -values[.temperature]) * 0.4).blendMode(.overlay).allowsHitTesting(false))
             .overlay(Color(red: 0.2, green: 1, blue: 0.3).opacity(max(0, values[.tint]) * 0.3).blendMode(.overlay).allowsHitTesting(false))

@@ -150,6 +150,21 @@ indirect enum V2FilterPrimitive: Codable {
     /// `intensity` map directly to `CIVignette`'s `inputRadius`/
     /// `inputIntensity` with zero approximation error.
     case feVignette(V2FilterPrimitiveBase, radius: Double, intensity: Double)
+    /// Not a real SVG primitive either, added 2026-10-12 for the Adjust tool's Vibrance slider - the same deliberate
+    /// exception as `feVignette`. Vibrance boosts muted colours more than already-saturated ones, which depends on each
+    /// pixel's own saturation; no global matrix/transfer function can express that, but Core Image's `CIVibrance`
+    /// does, with one parameter: `amount` maps straight to `inputAmount` (-1...1, 0 = unchanged).
+    case feVibrance(V2FilterPrimitiveBase, amount: Double)
+    /// Non-SVG exception (2026-10-12), same reasoning as `feVibrance`: Highlights/Shadows recovery is local (depends on
+    /// neighbouring pixels), no transfer function can express it. Both -1...1, 0 = unchanged: `highlights` < 0 recovers
+    /// bright areas, > 0 brightens them; `shadows` > 0 lifts dark areas, < 0 deepens them. Runtime: `CIHighlightShadowAdjust`.
+    case feHighlightShadow(V2FilterPrimitiveBase, highlights: Double, shadows: Double)
+    /// Non-SVG exception: white balance. Both -1...1, 0 = unchanged: `temperature` > 0 warmer, < 0 cooler; `tint` > 0
+    /// greener, < 0 more magenta. Runtime: `CITemperatureAndTint`.
+    case feTemperatureTint(V2FilterPrimitiveBase, temperature: Double, tint: Double)
+    /// Non-SVG exception: unsharp mask. `radius` in pixels, `intensity` > 0 sharpens, < 0 softens, 0 = unchanged.
+    /// Small radius = Sharpen, large radius = Clarity. Runtime: `CIUnsharpMask`.
+    case feUnsharpMask(V2FilterPrimitiveBase, radius: Double, intensity: Double)
     case feColorMatrix(V2FilterPrimitiveBase, kind: String, values: [Double]?)
     case feComponentTransfer(V2FilterPrimitiveBase, functions: V2ComponentTransferFunctions)
     case feComposite(V2FilterPrimitiveBase, in2: String, operator_: String?, k1: Double?, k2: Double?, k3: Double?, k4: Double?)
@@ -169,7 +184,7 @@ indirect enum V2FilterPrimitive: Codable {
 
     var base: V2FilterPrimitiveBase {
         switch self {
-        case .feBlend(let b, _, _), .feColorLUT(let b, _), .feVignette(let b, _, _), .feColorMatrix(let b, _, _), .feComponentTransfer(let b, _),
+        case .feBlend(let b, _, _), .feColorLUT(let b, _), .feVignette(let b, _, _), .feVibrance(let b, _), .feHighlightShadow(let b, _, _), .feTemperatureTint(let b, _, _), .feUnsharpMask(let b, _, _), .feColorMatrix(let b, _, _), .feComponentTransfer(let b, _),
              .feComposite(let b, _, _, _, _, _, _), .feConvolveMatrix(let b, _, _, _, _, _, _, _),
              .feDisplacementMap(let b, _, _, _, _), .feDropShadow(let b, _, _, _, _, _), .feFlood(let b, _, _),
              .feGaussianBlur(let b, _), .feImage(let b, _), .feMerge(let b, _), .feMorphology(let b, _, _),
@@ -184,7 +199,7 @@ indirect enum V2FilterPrimitive: Codable {
         case assetId
         case in2, mode, kind, values, functions, operator_ = "operator", k1, k2, k3, k4
         case order, kernelMatrix, divisor, bias, target, edgeMode, preserveAlpha
-        case intensity
+        case intensity, amount, highlights, shadows, temperature, tint
         case scale, xChannelSelector, yChannelSelector
         case dx, dy, stdDeviation, floodColor, floodOpacity
         case color, opacity, href, nodes, radius
@@ -209,6 +224,14 @@ indirect enum V2FilterPrimitive: Codable {
             self = .feColorLUT(base, assetId: try c.decode(String.self, forKey: .assetId))
         case "feVignette":
             self = .feVignette(base, radius: try c.decode(Double.self, forKey: .radius), intensity: try c.decode(Double.self, forKey: .intensity))
+        case "feVibrance":
+            self = .feVibrance(base, amount: try c.decode(Double.self, forKey: .amount))
+        case "feHighlightShadow":
+            self = .feHighlightShadow(base, highlights: try c.decode(Double.self, forKey: .highlights), shadows: try c.decode(Double.self, forKey: .shadows))
+        case "feTemperatureTint":
+            self = .feTemperatureTint(base, temperature: try c.decode(Double.self, forKey: .temperature), tint: try c.decode(Double.self, forKey: .tint))
+        case "feUnsharpMask":
+            self = .feUnsharpMask(base, radius: try c.decode(Double.self, forKey: .radius), intensity: try c.decode(Double.self, forKey: .intensity))
         case "feColorMatrix":
             self = .feColorMatrix(base, kind: try c.decode(String.self, forKey: .kind), values: try c.decodeIfPresent([Double].self, forKey: .values))
         case "feComponentTransfer":
@@ -295,6 +318,14 @@ indirect enum V2FilterPrimitive: Codable {
             try c.encode("feColorLUT", forKey: .type); try c.encode(assetId, forKey: .assetId)
         case .feVignette(_, let radius, let intensity):
             try c.encode("feVignette", forKey: .type); try c.encode(radius, forKey: .radius); try c.encode(intensity, forKey: .intensity)
+        case .feVibrance(_, let amount):
+            try c.encode("feVibrance", forKey: .type); try c.encode(amount, forKey: .amount)
+        case .feHighlightShadow(_, let highlights, let shadows):
+            try c.encode("feHighlightShadow", forKey: .type); try c.encode(highlights, forKey: .highlights); try c.encode(shadows, forKey: .shadows)
+        case .feTemperatureTint(_, let temperature, let tint):
+            try c.encode("feTemperatureTint", forKey: .type); try c.encode(temperature, forKey: .temperature); try c.encode(tint, forKey: .tint)
+        case .feUnsharpMask(_, let radius, let intensity):
+            try c.encode("feUnsharpMask", forKey: .type); try c.encode(radius, forKey: .radius); try c.encode(intensity, forKey: .intensity)
         case .feColorMatrix(_, let kind, let values):
             try c.encode("feColorMatrix", forKey: .type); try c.encode(kind, forKey: .kind); try c.encodeIfPresent(values, forKey: .values)
         case .feComponentTransfer(_, let functions):

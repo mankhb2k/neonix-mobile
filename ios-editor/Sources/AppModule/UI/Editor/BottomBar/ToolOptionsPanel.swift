@@ -25,6 +25,8 @@ struct ToolOptionsPanel: View {
     /// one's content (same `selectedLayer` Chỉnh sửa already reads).
     let onAddText: (String) -> Void
     let onSetTextContent: (String, String) -> Void
+    /// A feature that is only a button so far (Auto captions): the shell shows its "coming soon" note.
+    let onComingSoon: (String) -> Void
 
     var body: some View {
         switch tool {
@@ -43,7 +45,7 @@ struct ToolOptionsPanel: View {
         case .effects:
             SoundEffectsOptionsRow(onSelect: onAddSoundEffect)
         case .text:
-            TextOptionsRow(selectedLayer: selectedLayer, onAddText: onAddText, onSetTextContent: onSetTextContent)
+            TextOptionsRow(selectedLayer: selectedLayer, onAddText: onAddText, onSetTextContent: onSetTextContent, onComingSoon: onComingSoon)
         default:
             EmptyView()
         }
@@ -59,19 +61,18 @@ extension EditorTool {
     }
 }
 
-/// Văn bản — a single text field that does double duty: "Thêm chữ" when
-/// nothing text-ish is selected (places a new clip at the playhead,
-/// `AddTextLayerCommand`), "Sửa nội dung" when a text clip already is
-/// (`SetTextContentCommand`, rewriting just that clip's content in place —
-/// its position/duration never move). Reusing `selectedLayer` is
-/// deliberate: it's the same selection Chỉnh sửa's Tách/Xoá already act on,
-/// so selecting a text clip in either tool lets you edit it in this one.
+/// Văn bản. With no text clip selected the Text tool first offers a short list - **Add text** and **Auto captions**
+/// (user 2026-10-12); Add text then shows the text field (`AddTextLayerCommand`, a new clip at the playhead). With a
+/// text clip selected ("Edit text" in its row) it goes straight to the field and rewrites just that clip's content
+/// (`SetTextContentCommand`; its position and duration never move).
 private struct TextOptionsRow: View {
     let selectedLayer: V2Layer?
     let onAddText: (String) -> Void
     let onSetTextContent: (String, String) -> Void
+    let onComingSoon: (String) -> Void
 
     @State private var draftText: String = ""
+    @State private var isTyping = false
 
     private var selectedTextLayer: V2Layer? {
         guard let selectedLayer, selectedLayer.type == "text" else { return nil }
@@ -88,16 +89,39 @@ private struct TextOptionsRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            TextField(selectedTextLayer == nil ? "Enter text..." : "Edit text...", text: $draftText)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(commit)
-            Button(selectedTextLayer == nil ? "Add Text" : "Done", action: commit)
-                .disabled(!canCommit)
+        Group {
+            if isTyping || selectedTextLayer != nil {
+                HStack(spacing: 12) {
+                    TextField(selectedTextLayer == nil ? "Enter text..." : "Edit text...", text: $draftText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(commit)
+                        .accessibilityIdentifier("editorTextField")
+                    Button(selectedTextLayer == nil ? "Add Text" : "Done", action: commit)
+                        .disabled(!canCommit)
+                }
+                .padding(.horizontal)
+            } else {
+                HStack(spacing: 28) {
+                    choice("Add text", symbol: "text.badge.plus", id: "text-add") { isTyping = true }
+                    choice("Auto captions", symbol: "captions.bubble", id: "text-captions") { onComingSoon("Auto captions") }
+                }
+            }
         }
-        .padding(.horizontal)
         .onAppear { draftText = currentText ?? "" }
-        .onChange(of: selectedLayer?.id) { _, _ in draftText = currentText ?? "" }
+        .onChange(of: selectedLayer?.id) { _, _ in draftText = currentText ?? ""; isTyping = false }
+    }
+
+    private func choice(_ title: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.title3)
+                Text(title).font(.caption2).lineLimit(1)
+            }
+            .frame(minWidth: 72)
+            .foregroundColor(.primary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
     }
 
     private func commit() {
@@ -108,6 +132,7 @@ private struct TextOptionsRow: View {
         } else {
             onAddText(trimmed)
             draftText = ""
+            isTyping = false
         }
     }
 }

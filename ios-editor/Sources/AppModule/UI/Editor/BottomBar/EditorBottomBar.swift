@@ -20,8 +20,9 @@ struct BottomBarBackButton: View {
 }
 
 /// The one row shown while a clip, photo, text or audio clip is selected: what can be done with *that* thing, with
-/// a back button that deselects it. Transform and Adjust open as a sheet over the lower part of the screen (a ruler and
-/// round buttons); the text field and the volume slider open as the next row, with their own back button.
+/// a back button that deselects it on the left and Delete pinned on the right. The tools in between scroll sideways;
+/// which ones appear, and in what order, is `ClipTool.tools(for:hasAudio:)`. A tool that is not built yet shows a short
+/// "coming soon" note instead of doing anything (`EditorShellView.handleClipTool`).
 struct SelectionToolbarView: View {
     enum Subject {
         case layer(V2Layer)
@@ -29,15 +30,18 @@ struct SelectionToolbarView: View {
     }
 
     let subject: Subject
+    /// The selected video has a sound track (decides Volume / Extract Audio / Unlink).
+    let hasAudio: Bool
     let canSplit: Bool
     let onBack: () -> Void
-    let onSplit: () -> Void
-    let onExtractAudio: () -> Void
-    let onTransform: () -> Void
-    let onAdjust: () -> Void
-    /// Text and Audio still open their options as the next row.
-    let onOpenTool: (EditorTool) -> Void
-    let onDelete: () -> Void
+    let onTool: (ClipTool) -> Void
+
+    private var kind: ClipKind {
+        switch subject {
+        case .layer(let layer): return ClipKind(layerType: layer.type)
+        case .audioClip: return .audio
+        }
+    }
 
     var body: some View {
         // Only 4 pt between the divider and the scroll view's clip edge, where actions slide out of sight;
@@ -48,42 +52,33 @@ struct SelectionToolbarView: View {
             Divider().frame(height: 28)
                 .padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 22) { actions }
+                HStack(spacing: 22) {
+                    ForEach(ClipTool.tools(for: kind, hasAudio: hasAudio)) { tool in button(tool) }
+                }
             }
             .contentMargins(.horizontal, 8, for: .scrollContent)
+            Divider().frame(height: 28)
+                .padding(.leading, 4)
+            button(.delete)
+                .padding(.leading, 8)
         }
         .padding(.horizontal, 12)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("selectionToolbar")
     }
 
-    @ViewBuilder private var actions: some View {
-        switch subject {
-        case .layer(let layer):
-            if layer.type == "text" { action("Edit text", "pencil", id: "edit-text") { onOpenTool(.text) } }
-            action("Split", "scissors", id: "split", enabled: canSplit, perform: onSplit)
-            if layer.type == "video" { action("Extract Audio", "waveform", id: "extract-audio", perform: onExtractAudio) }
-            if layer.type != "group" { action("Transform", "crop.rotate", id: "transform", perform: onTransform) }
-            if layer.type == "video" || layer.type == "image" { action("Adjust", "slider.horizontal.3", id: "adjust", perform: onAdjust) }
-            action("Delete", "trash", id: "delete", tint: .red, perform: onDelete)
-        case .audioClip:
-            action("Volume", "speaker.wave.2", id: "volume") { onOpenTool(.audio) }
-            action("Delete", "trash", id: "delete", tint: .red, perform: onDelete)
-        }
-    }
-
-    private func action(_ title: String, _ symbol: String, id: String, enabled: Bool = true, tint: Color? = nil,
-                        perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
+    private func button(_ tool: ClipTool) -> some View {
+        let enabled = tool != .split || canSplit
+        return Button { onTool(tool) } label: {
             VStack(spacing: 4) {
-                Image(systemName: symbol).font(.title3)
-                Text(title).font(.caption2).lineLimit(1)
+                Image(systemName: tool.symbol).font(.title3)
+                Text(tool.title).font(.caption2).lineLimit(1)
             }
             .frame(minWidth: 48)
-            .foregroundColor(enabled ? (tint ?? .primary) : .secondary)
+            .foregroundColor(!enabled ? .secondary : (tool == .delete ? .red : .primary))
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .accessibilityIdentifier("action-\(id)")
+        .accessibilityIdentifier("action-\(tool.id)")
     }
 }

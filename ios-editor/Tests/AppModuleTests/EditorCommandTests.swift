@@ -364,7 +364,7 @@ final class EditorCommandTests: XCTestCase {
     func testSetAdjustCommandWritesAStableFilterIdAndReplacesOnASecondCall() {
         let project = makeProject().withLayers([makeVideoLayer()])
 
-        let first = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.2, contrast: 1, saturation: 1, exposure: 0)).apply(to: project)
+        let first = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.2)).apply(to: project)
         XCTAssertEqual(first.filters?.count, 1)
         let filterId = first.layers.first?.filter
         XCTAssertNotNil(filterId)
@@ -372,14 +372,14 @@ final class EditorCommandTests: XCTestCase {
 
         // A second, different value replaces the same filter entry rather
         // than appending a duplicate.
-        let second = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.4, contrast: 1, saturation: 1, exposure: 0)).apply(to: first)
+        let second = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.4)).apply(to: first)
         XCTAssertEqual(second.filters?.count, 1)
         XCTAssertEqual(second.layers.first?.filter, filterId)
     }
 
     func testSetAdjustCommandWithNeutralValuesClearsTheFilter() {
         let project = makeProject().withLayers([makeVideoLayer()])
-        let adjusted = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.2, contrast: 1, saturation: 1, exposure: 0)).apply(to: project)
+        let adjusted = SetAdjustCommand(layerId: "clip1", values: AdjustValues(brightness: 0.2)).apply(to: project)
         XCTAssertEqual(adjusted.filters?.count, 1)
 
         let reset = SetAdjustCommand(layerId: "clip1", values: AdjustValues()).apply(to: adjusted)
@@ -389,7 +389,7 @@ final class EditorCommandTests: XCTestCase {
 
     func testSetAdjustCommandIsNoOpForUnknownLayer() {
         let project = makeProject().withLayers([makeVideoLayer()])
-        let result = SetAdjustCommand(layerId: "nope", values: AdjustValues(brightness: 0.3, contrast: 1, saturation: 1, exposure: 0)).apply(to: project)
+        let result = SetAdjustCommand(layerId: "nope", values: AdjustValues(brightness: 0.3)).apply(to: project)
         XCTAssertNil(result.filters)
         XCTAssertNil(result.layers.first?.filter)
     }
@@ -410,15 +410,13 @@ final class EditorCommandTests: XCTestCase {
         let sharpenResult = SetAdjustCommand(layerId: "clip1", values: sharpenOnly).apply(to: project)
         XCTAssertEqual(sharpenResult.filters?.first?.primitives.count, 1)
 
-        // Touching a basics-group slider (hue, part of `colorAdjust`) *and*
-        // Vignette compiles both presets into the same filter's primitive
-        // chain: `colorAdjust`'s own 4 primitives (hue/sat/exposure/tone)
-        // + 1 `feVignette`.
+        // Hue (a `colorGrade` preset: only the hueRotate stage is emitted) *and* Vignette compile into the same
+        // filter's chain: 1 feColorMatrix + 1 feVignette.
         var combo = AdjustValues()
         combo.hue = 30
         combo.vignette = 0.5
         let comboResult = SetAdjustCommand(layerId: "clip1", values: combo).apply(to: project)
-        XCTAssertEqual(comboResult.filters?.first?.primitives.count, 5)
+        XCTAssertEqual(comboResult.filters?.first?.primitives.count, 2)
     }
 
     /// Curves — a non-identity `curvePoints` array (the real draggable

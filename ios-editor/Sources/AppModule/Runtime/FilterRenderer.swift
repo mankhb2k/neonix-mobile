@@ -74,7 +74,7 @@ enum FilterRenderer {
     /// (`identity`/`linear`/`table` via `CIToneCurve`), `feGaussianBlur`,
     /// `feComposite` (`arithmetic` only), `feConvolveMatrix` (3×3 only),
     /// `feTurbulence` (approximated — see that case's own comment),
-    /// `feMerge`, and `feVignette`. Every other primitive type passes
+    /// `feMerge`, `feVignette`, `feVibrance`, `feHighlightShadow`, `feTemperatureTint`, and `feUnsharpMask`. Every other primitive type passes
     /// `input` through unchanged rather than crashing/blanking the layer —
     /// this app's established "no ported validator, fail closed"
     /// convention.
@@ -97,6 +97,14 @@ enum FilterRenderer {
             return merge(nodes: nodes, outputs: outputs, fallback: input)
         case .feVignette(_, let radius, let intensity):
             return vignette(input: input, radius: radius, intensity: intensity)
+        case .feVibrance(_, let amount):
+            return vibrance(input: input, amount: amount)
+        case .feHighlightShadow(_, let highlights, let shadows):
+            return highlightShadow(input: input, highlights: highlights, shadows: shadows)
+        case .feTemperatureTint(_, let temperature, let tint):
+            return temperatureTint(input: input, temperature: temperature, tint: tint)
+        case .feUnsharpMask(_, let radius, let intensity):
+            return unsharpMask(input: input, radius: radius, intensity: intensity, extent: extent)
         default:
             return input
         }
@@ -175,6 +183,12 @@ enum FilterRenderer {
             return toneCurve(input: input, values: values)
         }
 
+        if case .gamma(let amplitude, let exponent, let offset) = functions.r,
+           case .gamma(amplitude, exponent, offset) = functions.g ?? .identity,
+           case .gamma(amplitude, exponent, offset) = functions.b ?? .identity {
+            return gamma(input: input, amplitude: amplitude, exponent: exponent, offset: offset)
+        }
+
         func slopeIntercept(_ function: V2FilterTransferFunction?) -> (Double, Double) {
             guard case .linear(let slope, let intercept) = function else { return (1, 0) }
             return (slope, intercept)
@@ -192,6 +206,19 @@ enum FilterRenderer {
         ciFilter.setValue(CIVector(x: 0, y: 0, z: 0, w: aSlope), forKey: "inputAVector")
         ciFilter.setValue(CIVector(x: ri, y: gi, z: bi, w: aIntercept), forKey: "inputBiasVector")
         return ciFilter.outputImage ?? input
+    }
+
+    /// `amplitude * x^exponent + offset`, r/g/b sharing one function. The pow is `CIGammaAdjust` (after a 0...1 clamp, as
+    /// SVG clamps every stage - a negative base would give NaN); amplitude/offset are a `CIColorMatrix` on top.
+    private static func gamma(input: CIImage, amplitude: Double, exponent: Double, offset: Double) -> CIImage {
+        guard let clamp = CIFilter(name: "CIColorClamp"), let power = CIFilter(name: "CIGammaAdjust") else { return input }
+        clamp.setValue(input, forKey: kCIInputImageKey)
+        clamp.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputMinComponents")
+        clamp.setValue(CIVector(x: 1, y: 1, z: 1, w: 1), forKey: "inputMaxComponents")
+        power.setValue(clamp.outputImage ?? input, forKey: kCIInputImageKey)
+        power.setValue(exponent, forKey: "inputPower")
+        let powered = power.outputImage ?? input
+        return amplitude == 1 && offset == 0 ? powered : scale(powered, by: amplitude, bias: offset)
     }
 
     private static func toneCurve(input: CIImage, values: [Double]) -> CIImage {
@@ -295,6 +322,15 @@ enum FilterRenderer {
         return result
     }
 
+    // MARK: feVibrance (non-SVG exception, see V2Filter.swift's own doc comment)
+
+    private static func vibrance(input: CIImage, amount: Double) -> CIImage {
+        guard let ciFilter = CIFilter(name: "CIVibrance") else { return input }
+        ciFilter.setValue(input, forKey: kCIInputImageKey)
+        ciFilter.setValue(amount, forKey: "inputAmount")
+        return ciFilter.outputImage ?? input
+    }
+
     // MARK: feVignette (non-SVG exception, see V2Filter.swift's own doc comment)
 
     private static func vignette(input: CIImage, radius: Double, intensity: Double) -> CIImage {
@@ -303,5 +339,52 @@ enum FilterRenderer {
         ciFilter.setValue(radius, forKey: kCIInputRadiusKey)
         ciFilter.setValue(intensity, forKey: kCIInputIntensityKey)
         return ciFilter.outputImage ?? input
+    }
+
+    // MARK: feHighlightShadow (non-SVG exception, see V2Filter.swift's own doc comment)
+
+    /// `CIHighlightShadowAdjust` only darkens highlights (`inputHighlightAmount` 0...1, 1 = none) and lifts or deepens
+    /// shadows (-1...1). Brightening highlights (`highlights` > 0) has no CIFilter: a small hand-written curve, the
+    /// bright end only.
+    private static func highlightShadow(input: CIImage, highlights: Double, shadows: Double) -> CIImage {
+        var image = input
+        if highlights < 0 || shadows != 0, let ciFilter = CIFilter(name: "CIHighlightShadowAdjust") {
+            ciFilter.setValue(image, forKey: kCIInputImageKey)
+            ciFilter.setValue(1 + min(highlights, 0), forKey: "inputHighlightAmount")
+            ciFilter.setValue(shadows, forKey: "inputShadowAmount")
+            image = ciFilter.outputImage ?? image
+        }
+        if highlights > 0 {
+            image = toneCurve(input: image, values: [0, 0.25, 0.5 + 0.06 * highlights, 0.75 + 0.12 * highlights, 1])
+        }
+        return image
+    }
+
+    // MARK: feTemperatureTint (non-SVG exception)
+
+    /// `CITemperatureAndTint` re-targets the white point from 6500 K: the neutral stays put, the target moves (+-2500 K,
+    /// +-100 tint units at the slider ends).
+    private static func temperatureTint(input: CIImage, temperature: Double, tint: Double) -> CIImage {
+        guard let ciFilter = CIFilter(name: "CITemperatureAndTint") else { return input }
+        ciFilter.setValue(input, forKey: kCIInputImageKey)
+        ciFilter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+        ciFilter.setValue(CIVector(x: 6500 - temperature * 2500, y: tint * 100), forKey: "inputTargetNeutral")
+        return ciFilter.outputImage ?? input
+    }
+
+    // MARK: feUnsharpMask (non-SVG exception)
+
+    /// `CIUnsharpMask` takes only intensity >= 0; softening (< 0) has no CIFilter, so it blends toward a Gaussian blur
+    /// with the same arithmetic as the clarity composite (`(1 + i) * original - i * blurred`).
+    private static func unsharpMask(input: CIImage, radius: Double, intensity: Double, extent: CGRect) -> CIImage {
+        if intensity < 0 {
+            let blurred = gaussianBlur(input: input, stdDeviation: V2FilterStdDeviation(x: radius, y: radius), extent: extent)
+            return arithmeticComposite(input, blurred, k1: 0, k2: 1 + intensity, k3: -intensity, k4: 0)
+        }
+        guard let ciFilter = CIFilter(name: "CIUnsharpMask") else { return input }
+        ciFilter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        ciFilter.setValue(radius, forKey: kCIInputRadiusKey)
+        ciFilter.setValue(intensity, forKey: kCIInputIntensityKey)
+        return (ciFilter.outputImage ?? input).cropped(to: extent)
     }
 }

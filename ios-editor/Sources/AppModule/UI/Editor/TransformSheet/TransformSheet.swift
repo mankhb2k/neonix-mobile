@@ -10,7 +10,17 @@ struct TransformSheet: View {
     let onEnd: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var control: TransformControl = .x
+    @State private var control: TransformControl
+
+    /// `initialControl`: the ruler the sheet opens on (the Opacity tool opens it on `.opacity`).
+    init(values: Binding<TransformValues>, composition: V2Composition, initialControl: TransformControl = .x,
+         onBegin: @escaping () -> Void, onEnd: @escaping () -> Void) {
+        _values = values
+        self.composition = composition
+        self.onBegin = onBegin
+        self.onEnd = onEnd
+        _control = State(initialValue: initialControl)
+    }
 
     var body: some View {
         NavigationStack {

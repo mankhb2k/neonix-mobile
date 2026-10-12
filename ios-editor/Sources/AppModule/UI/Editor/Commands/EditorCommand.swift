@@ -433,35 +433,31 @@ struct SetTextContentCommand: EditorCommand {
     }
 }
 
-/// Tuỳ chỉnh — the 4 slider values, neutral at `AdjustValues()`. `brightness`
-/// is additive (0 = no change), `contrast`/`saturation` are multiplicative
-/// (1 = no change), `exposure` is EV stops (0 = no change) — matching
-/// `EffectPresetKind.colorAdjust`'s own parameter shapes exactly, since this
-/// struct exists only to carry those 4 numbers between the UI and
-/// `SetAdjustCommand`.
+/// Tuỳ chỉnh - the Adjust tool's values, neutral at `AdjustValues()`: `contrast`/`saturation` are multiplicative (1 = no
+/// change), every other control is centred or one-sided around 0 (0 = no change). Exposure is in EV stops. The list
+/// is the user's (2026-10-12): no Lightness, no Blur (Blur moves to the Effects tool).
 struct AdjustValues: Equatable {
-    // Light/color basics.
-    var brightness: Double = 0
-    var contrast: Double = 1
-    var saturation: Double = 1
+    // Light.
     var exposure: Double = 0
-    // HSL (completes Hue/Saturation/Lightness — `saturation` above is
-    // shared with the basics group, same slider drives both).
-    var hue: Double = 0
-    var lightness: Double = 0
-    // White balance.
+    var brilliance: Double = 0
+    var highlights: Double = 0
+    var shadows: Double = 0
+    var contrast: Double = 1
+    var brightness: Double = 0
+    var blackPoint: Double = 0
+    // Color.
+    var saturation: Double = 1
+    var vibrance: Double = 0
     var temperature: Double = 0
+    var hue: Double = 0
     var tint: Double = 0
-    // Curves — a real draggable tone-curve graph (`CurveGraphView`), 5
-    // output values at fixed x-positions `0, 0.25, 0.5, 0.75, 1`. The
-    // default is the identity curve (straight diagonal, no change).
+    // Curves - a real draggable tone-curve graph (`CurveGraphView`), 5 output values at fixed x-positions
+    // `0, 0.25, 0.5, 0.75, 1`. The default is the identity curve (straight diagonal, no change).
     var curvePoints: [Double] = [0, 0.25, 0.5, 0.75, 1]
-    // Detail.
+    // Detail / effects.
+    var vignette: Double = 0
     var sharpen: Double = 0
     var clarity: Double = 0
-    var blur: Double = 0
-    // Effects.
-    var vignette: Double = 0
     var noise: Double = 0
 
     var isNeutral: Bool { self == AdjustValues() }
@@ -501,13 +497,19 @@ struct SetAdjustCommand: EditorCommand {
         } else {
             var presets: [EffectPresetKind] = []
             let neutral = AdjustValues()
-            if values.brightness != neutral.brightness || values.contrast != neutral.contrast
-                || values.saturation != neutral.saturation || values.exposure != neutral.exposure
-                || values.hue != neutral.hue || values.lightness != neutral.lightness {
-                presets.append(.colorAdjust(
-                    brightness: values.brightness, contrast: values.contrast, saturation: values.saturation,
-                    exposure: values.exposure, hueRotate: values.hue, lightness: values.lightness
+            // Order: tone -> colour -> white balance -> curves -> detail/effects (what a photo editor applies).
+            if values.exposure != neutral.exposure || values.brilliance != neutral.brilliance
+                || values.highlights != neutral.highlights || values.shadows != neutral.shadows
+                || values.contrast != neutral.contrast || values.brightness != neutral.brightness
+                || values.blackPoint != neutral.blackPoint {
+                presets.append(.toneAdjust(
+                    exposure: values.exposure, brilliance: values.brilliance, highlights: values.highlights,
+                    shadows: values.shadows, contrast: values.contrast, brightness: values.brightness,
+                    blackPoint: values.blackPoint
                 ))
+            }
+            if values.saturation != neutral.saturation || values.vibrance != neutral.vibrance || values.hue != neutral.hue {
+                presets.append(.colorGrade(saturation: values.saturation, vibrance: values.vibrance, hue: values.hue))
             }
             if values.temperature != neutral.temperature || values.tint != neutral.tint {
                 presets.append(.whiteBalance(temperature: values.temperature, tint: values.tint))
@@ -520,9 +522,6 @@ struct SetAdjustCommand: EditorCommand {
             }
             if values.clarity != neutral.clarity {
                 presets.append(.clarity(amount: values.clarity))
-            }
-            if values.blur != neutral.blur {
-                presets.append(.blur(radius: values.blur))
             }
             if values.vignette != neutral.vignette {
                 presets.append(.vignette(intensity: values.vignette, radius: 1))

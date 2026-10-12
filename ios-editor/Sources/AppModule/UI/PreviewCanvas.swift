@@ -199,15 +199,19 @@ private struct LayerContentView: View {
             if asset == nil {
                 Color.gray
             } else if let player = playerEngine.player(for: layerId) {
-                if let filter {
-                    FilteredPlayerView(
-                        player: player,
-                        filter: filter,
-                        previewContentMode: contentMode,
-                        requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
-                    )
-                } else {
+                // The raw layer stays mounted under the filtered view. A filter appearing mid-edit (the first
+                // Adjust tick) used to swap the raw layer for a brand-new Metal view that needs ~250 ms before its
+                // first frame - a black flash; now the raw frame shows until the Metal view has drawn.
+                ZStack {
                     StagePlayerLayerView(player: player, contentMode: contentMode)
+                    if let filter {
+                        FilteredPlayerView(
+                            player: player,
+                            filter: filter,
+                            previewContentMode: contentMode,
+                            requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
+                        )
+                    }
                 }
             } else {
                 // The engine has not created this layer's player yet (it does
@@ -340,6 +344,7 @@ private final class FilteredPlayerMetalView: MTKView {
         isPaused = false
         colorPixelFormat = .bgra8Unorm
         backgroundColor = .clear
+        alpha = 0   // invisible until the first frame is presented, so the raw video underneath shows meanwhile
         player.currentItem?.add(output)
     }
 
@@ -389,6 +394,7 @@ private final class FilteredPlayerMetalView: MTKView {
         )
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        if alpha == 0 { alpha = 1 }
     }
 
     private static func makeOutput() -> AVPlayerItemVideoOutput {

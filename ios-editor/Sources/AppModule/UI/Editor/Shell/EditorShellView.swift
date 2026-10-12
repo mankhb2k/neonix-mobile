@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
 /// Titlebar / Timeline. See `ui-design-note.md` (repo root) for the full
@@ -54,6 +55,12 @@ struct EditorShellView: View {
     @State private var adjustIntents: [String: AdjustValues] = [:]
     /// Same "one undo step per drag gesture" shape as `trimDragOriginal`.
     @State private var adjustDragOriginal: V2Project?
+    /// The selected video has a sound track (probed when the selection changes) - decides Volume / Extract Audio / Unlink.
+    @State private var selectedHasAudio = false
+    /// A tool that is only a button so far: the short "<tool> is coming soon" note over the stage.
+    @State private var comingSoonTitle: String?
+    /// Which ruler the Transform sheet opens on (the Opacity tool opens it on Opacity).
+    @State private var transformFocus: TransformControl = .x
     /// Adjust and Transform are sheets over the lower part of the screen, not rows (see `AdjustSheet`/`TransformSheet`).
     @State private var showingAdjustSheet = false
     @State private var showingTransformSheet = false
@@ -144,30 +151,6 @@ struct EditorShellView: View {
         selectedAudioClipId = nil
     }
 
-    /// Trích xuất — pulls the selected video layer's own audio out onto the
-    /// audio lane, positioned to exactly line up with that clip (same
-    /// `timing.start`/duration, `trim` matching the video's own `trimStart`)
-    /// since `MediaImportService.extractAudio` always exports the *whole*
-    /// source asset's audio, cached, not just the trimmed slice this one
-    /// clip currently shows.
-    private func extractAudio(fromLayerId layerId: String) {
-        guard let layer = project.layers.first(where: { $0.id == layerId }),
-              case .video(let payload) = layer.payload,
-              let videoAsset = project.assets.first(where: { $0.id == payload.assetId }),
-              case .video(let v) = videoAsset,
-              let url = bundledURL(filename: v.uri)
-        else { return }
-
-        let trimStart = payload.trimStart ?? 0
-        Task {
-            guard let asset = try? await MediaImportService.extractAudio(from: url) else { return }
-            apply(AddAudioClipCommand(
-                asset: asset, durationMs: layer.timing.duration, atMs: layer.timing.start,
-                trimStartMs: trimStart, trimEndMs: trimStart + layer.timing.duration
-            ))
-        }
-    }
-
     /// Called once when a trim-handle drag starts — snapshots the
     /// pre-drag project so `endTrim()` can record *that* into history,
     /// not whatever the live-updated project happens to be by then.
@@ -224,8 +207,9 @@ struct EditorShellView: View {
 
     private var selectedLayer: V2Layer? { project.layers.first { $0.id == selectedLayerId } }
 
-    private func openTransformSheet() {
+    private func openTransformSheet(focus: TransformControl = .x) {
         guard let layer = selectedLayer else { return }
+        transformFocus = focus
         transformValues = TransformValues(layer: layer)   // before the flag, so `onChange` below ignores it
         showingTransformSheet = true
     }
@@ -259,7 +243,7 @@ struct EditorShellView: View {
     }
 
     private var transformSheet: some View {
-        TransformSheet(values: $transformValues, composition: project.composition, onBegin: beginTransform, onEnd: endTransform)
+        TransformSheet(values: $transformValues, composition: project.composition, initialControl: transformFocus, onBegin: beginTransform, onEnd: endTransform)
     }
 
     private func endAdjust() {
@@ -293,6 +277,24 @@ struct EditorShellView: View {
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
         .sheet(isPresented: $showingTransformSheet) { transformSheet }
         .onChange(of: transformValues) { _, new in updateTransform(new) }
+        .task(id: selectedLayerId) { await probeSelectedAudio() }
+        .overlay(alignment: .bottom) {
+            if let title = comingSoonTitle {
+                Text("\(title) is coming soon")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(.bottom, 96)
+                    .transition(.opacity)
+                    .accessibilityIdentifier("comingSoonToast")
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: comingSoonTitle)
+        .task(id: comingSoonTitle) {
+            guard comingSoonTitle != nil else { return }
+            try? await Task.sleep(for: .seconds(1.6))
+            comingSoonTitle = nil
+        }
         #if DEBUG
         // Env-driven unattended metrics run (`PLAYBACK_METRICS_SCENARIO`); no-op otherwise.
         .task { await PlaybackMetrics.shared.autoRunIfRequested() }
@@ -310,26 +312,10 @@ struct EditorShellView: View {
         case .selection(let subject):
             SelectionToolbarView(
                 subject: subject,
+                hasAudio: selectedHasAudio,
                 canSplit: canSplitSelection,
                 onBack: { selectedLayerId = nil; selectedAudioClipId = nil },
-                onSplit: {
-                    guard let id = selectedLayerId else { return }
-                    apply(SplitClipCommand(layerId: id, atMs: currentTimeMs))
-                    selectedLayerId = nil
-                },
-                onExtractAudio: { if let id = selectedLayerId { extractAudio(fromLayerId: id) } },
-                onTransform: openTransformSheet,
-                onAdjust: { showingAdjustSheet = true },
-                onOpenTool: { selectedTool = $0 },
-                onDelete: {
-                    if let id = selectedLayerId {
-                        apply(DeleteClipCommand(layerId: id))
-                        selectedLayerId = nil
-                    } else if let id = selectedAudioClipId {
-                        apply(DeleteAudioClipCommand(clipId: id))
-                        selectedAudioClipId = nil
-                    }
-                }
+                onTool: handleClipTool
             )
         case .toolPanel(let tool):
             HStack(spacing: 8) {
@@ -339,6 +325,43 @@ struct EditorShellView: View {
             }
             .padding(.horizontal, 12)
         }
+    }
+
+    /// One entry for every button of the selection row. Built tools do their job; the others only say they are coming
+    /// (the UI exists first, each tool gets built one by one).
+    private func handleClipTool(_ tool: ClipTool) {
+        switch tool {
+        case .split:
+            guard let id = selectedLayerId else { return }
+            apply(SplitClipCommand(layerId: id, atMs: currentTimeMs))
+            selectedLayerId = nil
+        case .transform: openTransformSheet()
+        case .opacity: openTransformSheet(focus: .opacity)
+        case .adjust: showingAdjustSheet = true
+        case .editText: selectedTool = .text
+        case .volume:
+            if selectedAudioClipId != nil { selectedTool = .audio } else { comingSoonTitle = tool.title }
+        case .delete:
+            if let id = selectedLayerId {
+                apply(DeleteClipCommand(layerId: id))
+                selectedLayerId = nil
+            } else if let id = selectedAudioClipId {
+                apply(DeleteAudioClipCommand(clipId: id))
+                selectedAudioClipId = nil
+            }
+        default:
+            comingSoonTitle = tool.title
+        }
+    }
+
+    /// Whether the selected clip is a video whose file has a sound track.
+    private func probeSelectedAudio() async {
+        guard let layer = selectedLayer, case .video(let payload) = layer.payload,
+              case .video(let asset)? = project.assets.first(where: { $0.id == payload.assetId }),
+              let url = bundledURL(filename: asset.uri)
+        else { selectedHasAudio = false; return }
+        let tracks = try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
+        selectedHasAudio = !(tracks ?? []).isEmpty
     }
 
     /// Split only makes sense strictly inside the clip's own range - at either edge it would leave a zero-length half.
@@ -397,7 +420,8 @@ struct EditorShellView: View {
                 apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
             },
             onAddText: { text in addText(text) },
-            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) }
+            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) },
+            onComingSoon: { title in comingSoonTitle = title }
         )
     }
 

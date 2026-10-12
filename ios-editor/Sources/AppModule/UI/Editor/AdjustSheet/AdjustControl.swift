@@ -1,62 +1,73 @@
 import SwiftUI
 
-/// The Adjust tool's 13 scalar controls (Curves keeps its own graph editor), grouped like the Photos app, with the ruler
-/// configuration and the readout of each. Shared by the editor's `AdjustSheet` and the Design Lab.
+/// The Adjust tool's 16 scalar controls (Curves keeps its own graph editor), grouped like the Photos app, with the
+/// ruler configuration and the readout of each. Shared by the editor's `AdjustSheet` and the Design Lab.
+/// List and order set by the user 2026-10-12: Exposure, Brilliance, Highlights, Shadows, Contrast, Brightness, Black
+/// point, Saturation, Vibrance, Temperature, Hue, Tint, Vignette, Sharpen, Clarity, Noise (Blur moved to Effects).
 enum AdjustGroup: String, CaseIterable, Identifiable {
     case light = "Light", color = "Color", detail = "Detail"
     var id: String { rawValue }
 }
 
 enum AdjustControl: String, CaseIterable, Identifiable {
-    case brightness, contrast, exposure, lightness
-    case saturation, hue, temperature, tint
-    case sharpen, clarity, blur, vignette, noise
+    case exposure, brilliance, highlights, shadows, contrast, brightness, blackPoint
+    case saturation, vibrance, temperature, hue, tint
+    case vignette, sharpen, clarity, noise
 
     var id: String { rawValue }
 
     var group: AdjustGroup {
         switch self {
-        case .brightness, .contrast, .exposure, .lightness: return .light
-        case .saturation, .hue, .temperature, .tint: return .color
-        case .sharpen, .clarity, .blur, .vignette, .noise: return .detail
+        case .exposure, .brilliance, .highlights, .shadows, .contrast, .brightness, .blackPoint: return .light
+        case .saturation, .vibrance, .temperature, .hue, .tint: return .color
+        case .vignette, .sharpen, .clarity, .noise: return .detail
         }
     }
 
-    var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    var title: String {
+        if self == .blackPoint { return "Black point" }
+        return rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+    }
 
     /// Where this control's value lives in the real `AdjustValues` (what `SetAdjustCommand` compiles).
     var keyPath: WritableKeyPath<AdjustValues, Double> {
         switch self {
-        case .brightness: return \.brightness
-        case .contrast: return \.contrast
         case .exposure: return \.exposure
-        case .lightness: return \.lightness
+        case .brilliance: return \.brilliance
+        case .highlights: return \.highlights
+        case .shadows: return \.shadows
+        case .contrast: return \.contrast
+        case .brightness: return \.brightness
+        case .blackPoint: return \.blackPoint
         case .saturation: return \.saturation
-        case .hue: return \.hue
+        case .vibrance: return \.vibrance
         case .temperature: return \.temperature
+        case .hue: return \.hue
         case .tint: return \.tint
+        case .vignette: return \.vignette
         case .sharpen: return \.sharpen
         case .clarity: return \.clarity
-        case .blur: return \.blur
-        case .vignette: return \.vignette
         case .noise: return \.noise
         }
     }
 
     var symbol: String {
         switch self {
-        case .brightness: return "sun.max"
-        case .contrast: return "circle.lefthalf.filled"
         case .exposure: return "plusminus.circle"
-        case .lightness: return "sun.min"
+        case .brilliance: return "sparkle"
+        case .highlights: return "circle.tophalf.filled"
+        case .shadows: return "circle.bottomhalf.filled"
+        case .contrast: return "circle.lefthalf.filled"
+        case .brightness: return "sun.max"
+        case .blackPoint: return "circle.fill"
         case .saturation: return "drop"
-        case .hue: return "paintpalette"
+        case .vibrance: return "sparkles"
         case .temperature: return "thermometer.medium"
+        case .hue: return "paintpalette"
         case .tint: return "eyedropper"
+        case .vignette: return "smallcircle.filled.circle"
         case .sharpen: return "triangle"
         case .clarity: return "diamond"
-        case .blur: return "circle.dotted"
-        case .vignette: return "smallcircle.filled.circle"
         case .noise: return "circle.grid.3x3"
         }
     }
@@ -68,17 +79,15 @@ enum AdjustControl: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Same ranges as the editor's Adjust sliders.
     var mapping: RulerMapping {
         switch self {
-        case .brightness, .lightness: return .linear(-0.5...0.5, step: 0.01, majorEvery: 10)
-        case .contrast: return .linear(0.5...1.5, step: 0.01, majorEvery: 10)
         case .exposure: return .linear(-2...2, step: 0.05, majorEvery: 10)
+        case .brilliance, .highlights, .shadows, .brightness, .blackPoint, .vibrance, .temperature, .tint, .clarity:
+            return .linear(-1...1, step: 0.02, majorEvery: 10)
+        case .contrast: return .linear(0.5...1.5, step: 0.01, majorEvery: 10)
         case .saturation: return .linear(0...2, step: 0.02, majorEvery: 10)
         case .hue: return .linear(-180...180, step: 1, majorEvery: 30)
-        case .temperature, .tint, .clarity: return .linear(-1...1, step: 0.02, majorEvery: 10)
         case .sharpen, .noise: return .linear(0...1, step: 0.01, majorEvery: 10)
-        case .blur: return .linear(0...20, step: 0.2, majorEvery: 10)
         case .vignette: return .linear(0...2, step: 0.02, majorEvery: 10)
         }
     }
@@ -90,14 +99,13 @@ enum AdjustControl: String, CaseIterable, Identifiable {
             return rounded == 0 ? "0" : String(format: "%+.\(decimals)f", rounded)
         }
         switch self {
-        case .brightness, .lightness: return signed(value * 200)
+        case .brilliance, .highlights, .shadows, .brightness, .blackPoint, .vibrance, .temperature, .tint, .clarity:
+            return signed(value * 100)
         case .contrast: return signed((value - 1) * 200)
         case .saturation: return signed((value - 1) * 100)
         case .exposure: return signed(value, 1)
         case .hue: return signed(value) == "0" ? "0°" : signed(value) + "°"
-        case .temperature, .tint, .clarity: return signed(value * 100)
         case .sharpen, .noise: return String(format: "%.0f", value * 100)
-        case .blur: return String(format: "%.1f", value)
         case .vignette: return String(format: "%.0f", value * 50)
         }
     }

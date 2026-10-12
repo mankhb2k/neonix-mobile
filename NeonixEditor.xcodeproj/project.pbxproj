@@ -9,9 +9,11 @@
 /* Begin PBXBuildFile section */
 		02C5CEB1ECD069A903DDACD5 /* EditorBottomBarUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE18B3B4D9B27364AC56D115 /* EditorBottomBarUITests.swift */; };
 		05DB74C312A363AB8EA0D5A9 /* sfx-drumhit.wav in Resources */ = {isa = PBXBuildFile; fileRef = C186B8AE105B1E225EDC6E24 /* sfx-drumhit.wav */; };
+		07F498E69970EDA773B6A9BA /* ClipToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD66286804115B51EB50C6F /* ClipToolTests.swift */; };
 		0904A86AC7125DAC8B453684 /* SampleClipOverride.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC8AC3BAAECFB878512D7AD /* SampleClipOverride.swift */; };
 		098656AF94E8F8721B70BF24 /* AdjustControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8150598AE93D12F98ED7CD /* AdjustControl.swift */; };
 		0C0C918B625220A8D28E4F9B /* EditorTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B99F0FC8DE419D48EC0100B /* EditorTransform.swift */; };
+		0E0BA02B9C223EF5A96034CD /* AdjustToneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35A90A8D95FA85AB6A5D2636 /* AdjustToneTests.swift */; };
 		114ADC128A49A0F39C058EE2 /* EditorCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDFA25B1EA2496F8CF6C52C4 /* EditorCommandTests.swift */; };
 		1480F54A9703E43325A7981F /* RemotePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEDC4975144623ED160738B /* RemotePreview.swift */; };
 		19333283558952368FF23DA5 /* SlotRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD79933606C21EA9996EE5B /* SlotRules.swift */; };
@@ -93,6 +95,7 @@
 		999E3B356E32340487C94192 /* ProjectsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C25F5C94FEF5EF01246456C8 /* ProjectsView.swift */; };
 		9B56ABBE190A29A87E4E76EB /* EditorTransformTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C1DF97FFC8A04FDE95BEBA7 /* EditorTransformTests.swift */; };
 		9B6C74E8DF8F51A152E7FE54 /* TemplateCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84032E711677EB2A1EA37C12 /* TemplateCatalog.swift */; };
+		9C1C3B64E5D474979828580B /* ClipTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B5CDE1B3C927759AF9B44FF /* ClipTool.swift */; };
 		9DDA09E64E8EABB9A94E3F34 /* TimelineZoomTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CAA081C917BB97D2ACE23D9 /* TimelineZoomTests.swift */; };
 		9E071A0353F6C0D850B23263 /* ToolOptionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED21DD05696103B3ACDEC61 /* ToolOptionsPanel.swift */; };
 		9E84213FD663A446506A5309 /* PlaybackMetricsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E23260B42C76BEBE40AFA3 /* PlaybackMetricsHUD.swift */; };
@@ -200,6 +203,7 @@
 		32D3ACF9C23F4987B1B4BB03 /* V2Clip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Clip.swift; sourceTree = "<group>"; };
 		332FC2A46E174A516875592D /* TransformCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformCommandTests.swift; sourceTree = "<group>"; };
 		33457B761A01FEBD77AE967F /* FilterRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterRendererTests.swift; sourceTree = "<group>"; };
+		35A90A8D95FA85AB6A5D2636 /* AdjustToneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdjustToneTests.swift; sourceTree = "<group>"; };
 		36D560AEE41C2585BF3310DD /* MomentumDecayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MomentumDecayTests.swift; sourceTree = "<group>"; };
 		39252FDA6F22A855439532F7 /* TemplateFixturesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateFixturesTests.swift; sourceTree = "<group>"; };
 		3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyframeSamplerTests.swift; sourceTree = "<group>"; };
@@ -246,6 +250,7 @@
 		830ABB18B59E567909152D6C /* MediaImportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaImportServiceTests.swift; sourceTree = "<group>"; };
 		84032E711677EB2A1EA37C12 /* TemplateCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateCatalog.swift; sourceTree = "<group>"; };
 		8487C5E63DA5117D05F28D30 /* EditorBottomBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorBottomBar.swift; sourceTree = "<group>"; };
+		8B5CDE1B3C927759AF9B44FF /* ClipTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipTool.swift; sourceTree = "<group>"; };
 		8C1DF97FFC8A04FDE95BEBA7 /* EditorTransformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTransformTests.swift; sourceTree = "<group>"; };
 		8F6E061502D79EF0DD3FE2FF /* TemplatePackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplatePackage.swift; sourceTree = "<group>"; };
 		8F7B4FBF327999A80C04C2D5 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
@@ -257,6 +262,7 @@
 		A18B69AF5853B09DFC38E285 /* TransformSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformSheet.swift; sourceTree = "<group>"; };
 		A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLayoutCompiler.swift; sourceTree = "<group>"; };
 		AC3CFB9D222CA19F9F0D7038 /* V2Audio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Audio.swift; sourceTree = "<group>"; };
+		ACD66286804115B51EB50C6F /* ClipToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipToolTests.swift; sourceTree = "<group>"; };
 		AE31BAE2585747CDE2D57129 /* TemplateFiller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateFiller.swift; sourceTree = "<group>"; };
 		AF1FEC4569BE63D01FCD3EA8 /* DesignLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignLabView.swift; sourceTree = "<group>"; };
 		AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */ = {isa = PBXFileReference; path = 12253998_1920_1080_30fps.mp4; sourceTree = "<group>"; };
@@ -475,6 +481,7 @@
 		7DF72FF751B6775AD83AA838 /* BottomBar */ = {
 			isa = PBXGroup;
 			children = (
+				8B5CDE1B3C927759AF9B44FF /* ClipTool.swift */,
 				8487C5E63DA5117D05F28D30 /* EditorBottomBar.swift */,
 				2BC704D759B2AA1256B3DFAD /* EditorToolbarView.swift */,
 				FED21DD05696103B3ACDEC61 /* ToolOptionsPanel.swift */,
@@ -617,7 +624,9 @@
 		CA408B93BDFA3F7A2E4137BB /* AppModuleTests */ = {
 			isa = PBXGroup;
 			children = (
+				35A90A8D95FA85AB6A5D2636 /* AdjustToneTests.swift */,
 				03267DF57A00524D00C55A7E /* AudioMixEngineTests.swift */,
+				ACD66286804115B51EB50C6F /* ClipToolTests.swift */,
 				DDFA25B1EA2496F8CF6C52C4 /* EditorCommandTests.swift */,
 				B1C96D1B3B579EF0A78EE1A8 /* EditorPlaybackEngineTests.swift */,
 				8C1DF97FFC8A04FDE95BEBA7 /* EditorTransformTests.swift */,
@@ -858,6 +867,7 @@
 				493210D7E2B1546214C83954 /* AudioMixEngine.swift in Sources */,
 				BF0F7D24E17B79817B01EFEB /* AudioRecorderService.swift in Sources */,
 				FEE0B376F23169FA0D5E29D6 /* AuthTokenStore.swift in Sources */,
+				9C1C3B64E5D474979828580B /* ClipTool.swift in Sources */,
 				6C5C172767325CB5543240D4 /* CurveGraphView.swift in Sources */,
 				45B71391D2DDBEF6812767E6 /* DesignLabView.swift in Sources */,
 				34D668C3B54B55877C5EA02A /* DisplayLinkClock.swift in Sources */,
@@ -952,7 +962,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0E0BA02B9C223EF5A96034CD /* AdjustToneTests.swift in Sources */,
 				901995FEA2D8A79525915D83 /* AudioMixEngineTests.swift in Sources */,
+				07F498E69970EDA773B6A9BA /* ClipToolTests.swift in Sources */,
 				114ADC128A49A0F39C058EE2 /* EditorCommandTests.swift in Sources */,
 				E398A01B8EC9A8F5259AA3D5 /* EditorPlaybackEngineTests.swift in Sources */,
 				9B56ABBE190A29A87E4E76EB /* EditorTransformTests.swift in Sources */,

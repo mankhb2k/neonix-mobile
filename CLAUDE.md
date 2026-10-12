@@ -104,8 +104,11 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   authoring yet. Named easing (`easeIn/Out/InOut`) resolves to literal cubic-bezier in
   `PresetCompiler`.
 - **Deliberate non-SVG exceptions**: `feColorLUT` (+ `.lut` asset, `.cube` file, no
-  intensity field — partial strength = `feComposite` arithmetic) and `feVignette`
-  (`CIVignette`). End users never see "LUT" (the tool is "Bộ lọc").
+  intensity field — partial strength = `feComposite` arithmetic), `feVignette`
+  (`CIVignette`), `feVibrance` (`CIVibrance`), `feHighlightShadow` (`CIHighlightShadowAdjust`), `feTemperatureTint`
+  (`CITemperatureAndTint`) and `feUnsharpMask` (`CIUnsharpMask`) - all Swift-only like `feVignette`. **Rule: V2 stays
+  atomic, Editor names are high level, and the runtime calls the matching CIFilter; a formula is hand-written only where
+  Core Image has no filter.** End users never see "LUT" (the tool is "Bộ lọc").
 - Unimplemented in the renderer (silent no-op, no diagnostic): `composite.blendMode`/
   `isolation`, `enabled`, per-type animatable paths (shape `cornerRadius`, path
   `morph`, image crop, video `trimStart/trimEnd/playbackRate`).
@@ -145,8 +148,14 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   fast 480 pt/s, on-screen speed so zoom doesn't matter); the playhead runs with it and everything stops together at a limit.
 - **Bottom bar = always ONE row** (CapCut style, `EditorBottomBar.swift`, `EditorShellView.bottomMode`): main tools
   (`EditorToolbarView`) -> select a clip/photo/text/audio clip (tap it, or the Edit tool selects what is under the
-  playhead) and the row becomes that item's tools (`SelectionToolbarView`: Split, Extract Audio, Transform, Adjust,
-  Edit text, Volume, Delete) with a "«" back that deselects -> a tool that needs a control (Text field, Audio
+  playhead) and the row becomes that item's tools (`SelectionToolbarView`) with a "«" back that deselects on
+  the left and **Delete pinned on the right**; the tools between scroll. Which tools show and their order is
+  `ClipTool.tools(for:hasAudio:)` (the order of each kind is written out there, user list 2026-10-12). Video: Split, Volume*, Speed, Animation,
+  Adjust, Filter, Transform, Opacity, Crop, Replace, Duplicate, Overlay, Remove BG, Unlink* (*only with a sound track, probed per selection).
+  Text clip: Edit text, Split, Style, Animation, Duplicate, Lasting text, Transform. No Extract Audio any more (the service
+  `MediaImportService.extractAudio` stays). The **Text** main tool is a list first: Add text (-> text field) and Auto captions.
+  Built: Split, Transform, Adjust, Opacity (opens Transform on its Opacity ruler), Edit text, Delete, audio-clip Volume; every
+  other button only shows "<tool> is coming soon" until it is built -> a tool that needs a control (Text field, Audio
   volume, Aspect ratio, Background) replaces the row with `ToolOptionsPanel` and its own "«". Never stack a second row.
   Edit is not a panel any more (its actions are the selection row). UI tests: `EditorBottomBarUITests`.
 - **Tools** (`EditorTool`, panel = `ToolOptionsPanel`): Aspect ratio/Background (edit
@@ -160,15 +169,21 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   Adjust's last button is Curves). `AdjustControl`/`TransformControl` hold per-control keyPath, mapping, neutral. Transform
   writes through `SetTransformCommand` (keeps z/skew/anchor/perspective/tilt) with one undo step per ruler/stage gesture;
   `TransformGestureOverlay` on the stage = drag/pinch/twist. Tests: `TransformCommandTests`, `EditorBottomBarUITests`.
-- **Adjust (Tuỳ chỉnh)**: `AdjustValues` (17 fields) → `SetAdjustCommand` compiles only
-  the groups that moved off neutral into `EffectPresetKind` primitive chains under a stable
-  filter id `adjust-<layerId>` (cleared when neutral). Session-only `adjustIntents`
-  cache — reopening shows neutral sliders although the persisted filter is correct.
-  `FilterRenderer` (Core Image) implements `feColorMatrix`, `feComponentTransfer`
-  (identity/linear/5-point table), `feGaussianBlur`, `feComposite arithmetic` (k1 = 0),
-  3×3 `feConvolveMatrix`, `feTurbulence` (white noise approximation), `feMerge`,
-  `feVignette`. Clarity = blur + arithmetic composite. **Curves**: 5 draggable points at
-  fixed x (`CurveGraphView`, `CurveEditorSheet`); `curvePoints` map 1:1 to `CIToneCurve`.
+- **Adjust (Tuỳ chỉnh)** (list + order set by the user 2026-10-12): Exposure, Brilliance, Highlights, Shadows, Contrast,
+  Brightness, Black point | Saturation, Vibrance, Temperature, Hue, Tint | Vignette, Sharpen, Clarity, Noise, + Curves.
+  No Lightness, no Blur (Blur goes to the Effects tool; `EffectPresetKind.blur` stays). `AdjustValues` -> `SetAdjustCommand`
+  compiles only the groups that moved off neutral into `EffectPresetKind` primitive chains under a stable filter id
+  `adjust-<layerId>` (cleared when neutral): `toneAdjust` (linear exposure+black point, `feHighlightShadow`
+  for Highlights/Shadows/**Brilliance** - Brilliance has no CIFilter, it is folded into the other two with
+  `adjustBrillianceShadows/Highlights`; linear contrast; **gamma brightness** - the old additive brightness clipped to
+  white at +100), `colorGrade` (hueRotate, saturate, `feVibrance`), `whiteBalance` (`feTemperatureTint`), `toneCurve`,
+  `sharpen`/`clarity` (`feUnsharpMask`, radius 2.5 / 20 px, negative clarity softens), `vignette`, `noise`. Hand-written
+  in the runtime: highlights > 0 (CI only recovers) and negative unsharp. `colorAdjust` stays for documents that already
+  use it. Session-only `adjustIntents` cache - reopening
+  shows neutral sliders although the persisted filter is correct. `FilterRenderer` (Core Image) implements `feColorMatrix`,
+  `feComponentTransfer` (identity/linear/gamma/5-point table), `feGaussianBlur`, `feComposite arithmetic` (k1 = 0), 3×3
+  `feConvolveMatrix`, `feTurbulence` (white noise approximation), `feMerge`, `feVignette`, `feVibrance`, `feHighlightShadow`, `feTemperatureTint`, `feUnsharpMask`. **Curves**: 5
+  draggable points at fixed x (`CurveGraphView`, `CurveEditorSheet`); `curvePoints` map 1:1 to `CIToneCurve`.
 - **Templates** (`Network/`, `Templates/`, `UI/Home`, `UI/UseTemplate`, `Export/`; server: `api/`, spec
   `api/docs/template-package.md`, starter templates + `build.py`/`publish.py` in `templates/`): a template is a zip of
   `manifest.json` + `document.json` (an `EditorDocument`, incl. an `audio` domain for the music) + `assets/`, generated
@@ -206,7 +221,7 @@ editor; each experiment is a self-contained screen. Both experiments use one pat
 that pick the parameter + a Curves-style system sheet** (`.sheet`, title + Done, the ruler and the same round buttons
 inside, stage stays live via `presentationBackgroundInteraction`; height set in the lab menu, `LabSheetHeight`):
 *Transform controls* (`TransformLabView`: X, Y, Scale, Rotate, Opacity; drag/pinch/twist on the stage too) and *Adjust
-controls* (`AdjustLabView`: 13 scalar controls, live photo, hold to compare; **Scroll** = one scrolling row vs **Groups** =
+controls* (`AdjustLabView`: 16 scalar controls, live photo, hold to compare; **Scroll** = one scrolling row vs **Groups** =
 Light/Color/Detail tabs - still undecided). Inline panels and plain sliders were tried and dropped.
 `UI/Components/RulerDial` is the real, reusable ruler (`RulerMapping.linear/logarithmic`, `ScrollView` momentum; ticks stand on a
 baseline in three kinds of line - minor tick, major tick, centre mark (no fixed marker: the tick in the middle *becomes* the
@@ -255,7 +270,7 @@ Transform and Adjust sheets in production.
 - **`simctl` can't tap or drag.** `ios-editor/UITests` (XCUITest) is the only way to
   synthesize touches (`TimelineZoomUITests` does real pinches); `print` from the app
   under test doesn't reach `xcodebuild` — use `NSLog` + `simctl spawn … log show`.
-  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (193 passing).
+  Unit tests: `xcodebuild … test -only-testing:NeonixEditorTests` (215 passing).
 - No Node/pnpm in this sandbox: TS (`packages/motion-protocol`) can't be verified here.
 
 ## Key files

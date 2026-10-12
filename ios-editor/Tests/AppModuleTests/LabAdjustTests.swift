@@ -2,11 +2,14 @@ import XCTest
 @testable import NeonixEditor
 
 final class LabAdjustTests: XCTestCase {
-    func testThirteenControlsInThreeGroupsThatFitTheScreen() {
-        XCTAssertEqual(LabAdjustParam.allCases.count, 13)
+    func testSixteenControlsInThreeGroups() {
+        XCTAssertEqual(LabAdjustParam.allCases.count, 16)
         let sizes = LabAdjustGroup.allCases.map { group in LabAdjustParam.allCases.filter { $0.group == group }.count }
-        XCTAssertEqual(sizes, [4, 4, 5])
-        XCTAssertTrue(sizes.allSatisfy { $0 <= 5 }, "each group's buttons fit in one fixed row")
+        XCTAssertEqual(sizes, [7, 5, 4])
+        XCTAssertEqual(LabAdjustParam.allCases.map(\.title).first, "Exposure")
+        XCTAssertEqual(LabAdjustParam.blackPoint.title, "Black point")
+        XCTAssertFalse(LabAdjustParam.allCases.map(\.rawValue).contains("blur"), "Blur lives in Effects now")
+        XCTAssertFalse(LabAdjustParam.allCases.map(\.rawValue).contains("lightness"))
     }
 
     func testEveryControlStartsAtNeutralOnItsRulerAndRoundTrips() {
@@ -39,8 +42,10 @@ final class LabAdjustTests: XCTestCase {
 
     func testReadoutsLikePhotos() {
         XCTAssertEqual(LabAdjustParam.brightness.display(0), "0")
-        XCTAssertEqual(LabAdjustParam.brightness.display(0.1), "+20")
-        XCTAssertEqual(LabAdjustParam.brightness.display(-0.25), "-50")
+        XCTAssertEqual(LabAdjustParam.brightness.display(0.1), "+10")
+        XCTAssertEqual(LabAdjustParam.brightness.display(-0.25), "-25")
+        XCTAssertEqual(LabAdjustParam.vibrance.display(0.5), "+50")
+        XCTAssertEqual(LabAdjustParam.shadows.display(-1), "-100")
         XCTAssertEqual(LabAdjustParam.contrast.display(1), "0")
         XCTAssertEqual(LabAdjustParam.contrast.display(1.25), "+50")
         XCTAssertEqual(LabAdjustParam.saturation.display(0), "-100")
@@ -49,7 +54,6 @@ final class LabAdjustTests: XCTestCase {
         XCTAssertEqual(LabAdjustParam.hue.display(0), "0°")
         XCTAssertEqual(LabAdjustParam.hue.display(30), "+30°")
         XCTAssertEqual(LabAdjustParam.sharpen.display(0.4), "40")
-        XCTAssertEqual(LabAdjustParam.blur.display(2.5), "2.5")
         XCTAssertEqual(LabAdjustParam.vignette.display(2), "100")
     }
 }

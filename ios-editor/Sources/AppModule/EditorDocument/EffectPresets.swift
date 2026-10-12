@@ -37,11 +37,7 @@ enum EffectPresetKind: Codable {
     case outerGlow(radius: Double, color: V2Color, opacity: Double)
     case innerGlow(radius: Double, color: V2Color, opacity: Double)
     case noise(scale: Double, amount: Double, opacity: Double, seed: Int)
-    /// Tuỳ chỉnh — Temperature (warm/cool) + Tint (green/magenta), both a
-    /// simple per-channel bias shift — a reasonable, documented
-    /// approximation of white balance (not a true chromaticity/Planckian-
-    /// locus computation), same spirit as `sepia`'s own fixed CSS-standard
-    /// matrix.
+    /// Tuỳ chỉnh — Temperature (warm/cool) + Tint (green/magenta), -1...1: one `feTemperatureTint`.
     case whiteBalance(temperature: Double, tint: Double)
     /// Tuỳ chỉnh — Curves: a real draggable tone-curve editor
     /// (`UI/Editor/CurveGraphView.swift`), not a parametrized stand-in.
@@ -50,25 +46,28 @@ enum EffectPresetKind: Codable {
     /// UI only ever lets the user drag a point's own y (output) value, x
     /// stays fixed, so this is never any length but 5.
     case toneCurve(points: [Double])
-    /// Tuỳ chỉnh — Sharpen. A standard Laplacian unsharp 3×3 kernel scaled
-    /// by `amount`, not a blur-based unsharp mask (that's `clarity`below).
+    /// Tuỳ chỉnh — Sharpen: one `feUnsharpMask`, small radius.
     case sharpen(amount: Double)
-    /// Tuỳ chỉnh — Clarity (local contrast). The textbook unsharp-mask
-    /// technique: blur, then push the original away from the blurred
-    /// version (`feGaussianBlur` + `feComposite` `arithmetic`), at a wider
-    /// radius than `sharpen` so it reads as "punchier midtones," not edge
-    /// sharpening.
+    /// Tuỳ chỉnh — Clarity (local contrast): one `feUnsharpMask`, wide radius (negative `amount` softens).
     case clarity(amount: Double)
     /// Tuỳ chỉnh — Vignette. Compiles straight to the one `feVignette`
     /// primitive (see that case's own doc comment in `V2Filter.swift` for
     /// why this is a 2nd deliberate non-SVG exception alongside
     /// `feColorLUT`).
     case vignette(intensity: Double, radius: Double)
+    /// Adjust (2026-10-12) - the "light" group. Compiles to: a linear stage (exposure gain + black point),
+    /// `feHighlightShadow` (Highlights, Shadows, Brilliance), a linear contrast stage, a gamma brightness stage (never
+    /// clips white, unlike `colorAdjust`'s additive one; `colorAdjust` stays for documents that already use it).
+    case toneAdjust(exposure: Double, brilliance: Double, highlights: Double, shadows: Double, contrast: Double, brightness: Double, blackPoint: Double)
+    /// Adjust - the "colour" group: Hue (`hueRotate`), Saturation (`saturate`) and Vibrance (`feVibrance`, a non-SVG
+    /// exception like `feVignette`).
+    case colorGrade(saturation: Double, vibrance: Double, hue: Double)
 
     private enum CodingKeys: String, CodingKey {
         case kind, brightness, contrast, saturation, exposure, hueRotate, lightness, amount, radius
         case offset, blur, spread, color, inset, opacity, scale, seed
         case temperature, tint, points, intensity
+        case brilliance, highlights, shadows, blackPoint, vibrance, hue
     }
 
     init(from decoder: Decoder) throws {
@@ -108,6 +107,18 @@ enum EffectPresetKind: Codable {
         case "clarity": self = .clarity(amount: try c.decode(Double.self, forKey: .amount))
         case "vignette":
             self = .vignette(intensity: try c.decode(Double.self, forKey: .intensity), radius: try c.decode(Double.self, forKey: .radius))
+        case "toneAdjust":
+            self = .toneAdjust(
+                exposure: try c.decode(Double.self, forKey: .exposure), brilliance: try c.decode(Double.self, forKey: .brilliance),
+                highlights: try c.decode(Double.self, forKey: .highlights), shadows: try c.decode(Double.self, forKey: .shadows),
+                contrast: try c.decode(Double.self, forKey: .contrast), brightness: try c.decode(Double.self, forKey: .brightness),
+                blackPoint: try c.decode(Double.self, forKey: .blackPoint)
+            )
+        case "colorGrade":
+            self = .colorGrade(
+                saturation: try c.decode(Double.self, forKey: .saturation), vibrance: try c.decode(Double.self, forKey: .vibrance),
+                hue: try c.decode(Double.self, forKey: .hue)
+            )
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown effect preset: \(other)")
         }
@@ -145,6 +156,15 @@ enum EffectPresetKind: Codable {
         case .clarity(let amount): try c.encode("clarity", forKey: .kind); try c.encode(amount, forKey: .amount)
         case .vignette(let intensity, let radius):
             try c.encode("vignette", forKey: .kind); try c.encode(intensity, forKey: .intensity); try c.encode(radius, forKey: .radius)
+        case .toneAdjust(let exposure, let brilliance, let highlights, let shadows, let contrast, let brightness, let blackPoint):
+            try c.encode("toneAdjust", forKey: .kind)
+            try c.encode(exposure, forKey: .exposure); try c.encode(brilliance, forKey: .brilliance)
+            try c.encode(highlights, forKey: .highlights); try c.encode(shadows, forKey: .shadows)
+            try c.encode(contrast, forKey: .contrast); try c.encode(brightness, forKey: .brightness)
+            try c.encode(blackPoint, forKey: .blackPoint)
+        case .colorGrade(let saturation, let vibrance, let hue):
+            try c.encode("colorGrade", forKey: .kind)
+            try c.encode(saturation, forKey: .saturation); try c.encode(vibrance, forKey: .vibrance); try c.encode(hue, forKey: .hue)
         }
     }
 }
@@ -229,18 +249,72 @@ func filterPrimitives(for kind: EffectPresetKind, idPrefix: String, input: Strin
             tone.result!
         )
 
+    case .toneAdjust(let exposure, let brilliance, let highlights, let shadows, let contrast, let brightness, let blackPoint):
+        // One stage per slider family, in the order a photo editor applies them: exposure + black point (one linear
+        // stage), highlights/shadows/brilliance (`feHighlightShadow`), contrast (linear around 0.5), brightness (gamma).
+        var primitives: [V2FilterPrimitive] = []
+        var current = input
+        func linear(_ suffix: String, slope: Double, intercept: Double) {
+            let b = base(suffix, in: current)
+            let f = V2FilterTransferFunction.linear(slope: slope, intercept: intercept)
+            primitives.append(.feComponentTransfer(b, functions: V2ComponentTransferFunctions(r: f, g: f, b: f, a: nil)))
+            current = b.result!
+        }
+        if exposure != 0 || blackPoint != 0 {
+            // out = (x * 2^EV - a) / (1 - a); `a` > 0 deepens the blacks, < 0 lifts them.
+            let a = blackPoint * adjustBlackPointRange
+            linear("exposure", slope: pow(2, exposure) / (1 - a), intercept: -a / (1 - a))
+        }
+        // Brilliance has no CIFilter of its own: it lifts shadows and pulls highlights down on top of the two sliders.
+        let shadowAmount = min(max(shadows + brilliance * adjustBrillianceShadows, -1), 1)
+        let highlightAmount = min(max(highlights - brilliance * adjustBrillianceHighlights, -1), 1)
+        if shadowAmount != 0 || highlightAmount != 0 {
+            let b = base("highlightshadow", in: current)
+            primitives.append(.feHighlightShadow(b, highlights: highlightAmount, shadows: shadowAmount))
+            current = b.result!
+        }
+        if contrast != 1 {
+            linear("contrast", slope: contrast, intercept: 0.5 * (1 - contrast))
+        }
+        if brightness != 0 {
+            let b = base("brightness", in: current)
+            let f = V2FilterTransferFunction.gamma(amplitude: 1, exponent: pow(2, -brightness), offset: 0)   // never clips white
+            primitives.append(.feComponentTransfer(b, functions: V2ComponentTransferFunctions(r: f, g: f, b: f, a: nil)))
+            current = b.result!
+        }
+        if primitives.isEmpty {   // all neutral: an identity stage keeps the chain well-formed
+            linear("exposure", slope: 1, intercept: 0)
+        }
+        return (primitives, current)
+
+    case .colorGrade(let saturation, let vibrance, let hue):
+        var primitives: [V2FilterPrimitive] = []
+        var current = input
+        if hue != 0 {
+            let b = base("hue", in: current)
+            primitives.append(.feColorMatrix(b, kind: "hueRotate", values: [hue]))
+            current = b.result!
+        }
+        if saturation != 1 {
+            let b = base("sat", in: current)
+            primitives.append(.feColorMatrix(b, kind: "saturate", values: [saturation]))
+            current = b.result!
+        }
+        if vibrance != 0 {
+            let b = base("vibrance", in: current)
+            primitives.append(.feVibrance(b, amount: vibrance))
+            current = b.result!
+        }
+        if primitives.isEmpty {
+            let b = base("sat", in: current)
+            primitives.append(.feColorMatrix(b, kind: "saturate", values: [1]))
+            current = b.result!
+        }
+        return (primitives, current)
+
     case .whiteBalance(let temperature, let tint):
-        // A simple per-channel bias shift, not true chromaticity math (see
-        // this case's own doc comment on `EffectPresetKind`) — warm/cool
-        // moves R against B, green/magenta moves G against R+B.
-        let values: [Double] = [
-            1, 0, 0, 0, temperature * 0.15 - tint * 0.075,
-            0, 1, 0, 0, tint * 0.15,
-            0, 0, 1, 0, -temperature * 0.15 - tint * 0.075,
-            0, 0, 0, 1, 0,
-        ]
         let b = base("whitebalance", in: input)
-        return ([.feColorMatrix(b, kind: "matrix", values: values)], b.result!)
+        return ([.feTemperatureTint(b, temperature: temperature, tint: tint)], b.result!)
 
     case .toneCurve(let points):
         // The graph UI's 5 output values, applied verbatim to every
@@ -254,35 +328,13 @@ func filterPrimitives(for kind: EffectPresetKind, idPrefix: String, input: Strin
         return ([.feComponentTransfer(b, functions: functions)], b.result!)
 
     case .sharpen(let amount):
-        // Standard Laplacian unsharp 3×3 kernel, weights sum to 1 (preserves
-        // overall brightness): center `1 + 4k`, the 4 orthogonal neighbors
-        // `-k`, corners `0`.
-        let k = amount
-        let kernel: [Double] = [
-            0, -k, 0,
-            -k, 1 + 4 * k, -k,
-            0, -k, 0,
-        ]
         let b = base("sharpen", in: input)
-        return (
-            [.feConvolveMatrix(b, order: V2XYInt(x: 3, y: 3), kernelMatrix: kernel, divisor: nil, bias: nil, target: nil, edgeMode: "duplicate", preserveAlpha: true)],
-            b.result!
-        )
+        return ([.feUnsharpMask(b, radius: adjustSharpenRadius, intensity: amount)], b.result!)
 
     case .clarity(let amount):
-        // Textbook unsharp-mask local contrast: blur wide, then push the
-        // original away from the blurred version —
-        // `result = (1+amount)*original - amount*blurred`, i.e.
-        // `feComposite(operator: "arithmetic", k1: 0, k2: 1+amount, k3: -amount, k4: 0)`.
-        let blurBase = base("clarity-blur", in: input)
-        let compositeBase = base("clarity-composite", in: input)
-        return (
-            [
-                .feGaussianBlur(blurBase, stdDeviation: V2FilterStdDeviation(x: 20, y: 20)),
-                .feComposite(compositeBase, in2: blurBase.result!, operator_: "arithmetic", k1: 0, k2: 1 + amount, k3: -amount, k4: 0),
-            ],
-            compositeBase.result!
-        )
+        // Local contrast = the same unsharp mask at a much wider radius than Sharpen.
+        let b = base("clarity", in: input)
+        return ([.feUnsharpMask(b, radius: adjustClarityRadius, intensity: amount)], b.result!)
 
     case .vignette(let intensity, let radius):
         let b = base("vignette", in: input)
@@ -380,3 +432,11 @@ func compileFilter(id: String, presets: [EffectPresetKind]) -> V2Filter {
     }
     return V2Filter(id: id, x: nil, y: nil, width: nil, height: nil, filterUnits: nil, primitiveUnits: nil, colorInterpolationFilters: nil, primitives: primitives, tracks: nil)
 }
+
+// Adjust tuning constants (feel, set on the device; no benchmark). Black point: a = 0.25 at slider +-1. Brilliance is
+// folded into feHighlightShadow: +1 lifts shadows by 0.6 and pulls highlights by 0.4. Radii are in source pixels.
+let adjustBlackPointRange = 0.25
+let adjustBrillianceShadows = 0.6
+let adjustBrillianceHighlights = 0.4
+let adjustSharpenRadius = 2.5
+let adjustClarityRadius = 20.0
