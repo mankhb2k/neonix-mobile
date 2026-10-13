@@ -6,6 +6,7 @@ struct DesignLabView: View {
     @State private var showingTransform = false
     @State private var showingAdjust = false
     @State private var showingFilter = false
+    @State private var showingKeyframe = false
 
     var body: some View {
         List {
@@ -36,6 +37,15 @@ struct DesignLabView: View {
                     }
                 }
                 .accessibilityIdentifier("lab-filter")
+
+                Button { showingKeyframe = true } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Keyframes & graphs").font(.body.weight(.semibold)).foregroundColor(.primary)
+                        Text("Three keyframes on a moving layer; pick each segment's graph from a row of curves, a grid sheet or a big live curve, or edit it with two handles.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("lab-keyframe")
             } header: {
                 Text("Experiments")
             } footer: {
@@ -46,5 +56,6 @@ struct DesignLabView: View {
         .fullScreenCover(isPresented: $showingTransform) { TransformLabView() }
         .fullScreenCover(isPresented: $showingAdjust) { AdjustLabView() }
         .fullScreenCover(isPresented: $showingFilter) { FilterLabView() }
+        .fullScreenCover(isPresented: $showingKeyframe) { KeyframeLabView() }
     }
 }

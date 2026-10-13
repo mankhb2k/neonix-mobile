@@ -15,7 +15,7 @@ import SwiftUI
 /// Case order matches CapCut's own bottom nav order for the tools this app
 /// kept (confirmed with the user 2026-10-07 when the nav was redesigned).
 enum EditorTool: String, CaseIterable, Identifiable {
-    case edit, audio, text, effects, filter, aspectRatio, background, adjust
+    case edit, audio, text, stickers, effects, filter, aspectRatio, background, adjust
 
     var id: String { rawValue }
 
@@ -24,6 +24,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
         case .edit: return "Edit"
         case .audio: return "Audio"
         case .text: return "Text"
+        case .stickers: return "Stickers"
         case .effects: return "Effects"
         case .filter: return "Filter"
         case .aspectRatio: return "Aspect Ratio"
@@ -37,6 +38,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
         case .edit: return "scissors"
         case .audio: return "music.note"
         case .text: return "textformat"
+        case .stickers: return "face.smiling"
         case .effects: return "wand.and.stars"
         case .filter: return "camera.filters"
         case .aspectRatio: return "aspectratio"

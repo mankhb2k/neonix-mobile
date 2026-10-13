@@ -14,9 +14,21 @@ struct TransformValues: Equatable {
     init(layer: V2Layer) {
         x = layer.transform.translate.x
         y = layer.transform.translate.y
-        scale = layer.transform.scale.x
+        scale = abs(layer.transform.scale.x)
         rotation = layer.transform.rotate.z
         opacity = layer.opacity ?? 1
+    }
+
+    /// The values at the playhead: a keyframed layer is sampled, any other is its static transform.
+    init(layer: V2Layer, atMs: Double) {
+        self.init(layer: layer)
+        guard TransformKeyframes.isKeyframed(layer) else { return }
+        let frame = sampleLayer(layer, atMs: atMs)
+        x = frame.translateX
+        y = frame.translateY
+        scale = abs(frame.scaleX)
+        rotation = frame.rotateZ
+        opacity = frame.opacity
     }
 }
 
@@ -26,14 +38,28 @@ struct TransformValues: Equatable {
 struct SetTransformCommand: EditorCommand {
     let layerId: String
     let values: TransformValues
+    /// The playhead (timeline ms). On a keyframed layer the values become a keyframe there (created if needed, like
+    /// CapCut's auto-keyframe) instead of the static transform, which the tracks would override anyway.
+    var atMs: Double? = nil
 
     func apply(to project: V2Project) -> V2Project {
         var layers = project.layers
         guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
+        if let atMs, TransformKeyframes.isKeyframed(layers[index]) {
+            let layer = layers[index]
+            let local = min(max(atMs - layer.timing.start, 0), layer.timing.duration)
+            let mirrored = sampleLayer(layer, atMs: atMs).scaleX < 0 ? -1.0 : 1.0
+            layers[index] = TransformKeyframes.upserting(layer, local: local, overrides: [
+                "transform.translate.x": values.x, "transform.translate.y": values.y,
+                "transform.scale.x": values.scale * mirrored, "transform.scale.y": values.scale,
+                "transform.rotate.z": values.rotation, "opacity": values.opacity,
+            ])
+            return project.withLayers(layers)
+        }
         let old = layers[index].transform
         layers[index].transform = V2Transform(
             translate: V2Vec3(x: values.x, y: values.y, z: old.translate.z),
-            scale: V2Vec3(x: values.scale, y: values.scale, z: old.scale.z),
+            scale: V2Vec3(x: values.scale * (old.scale.x < 0 ? -1 : 1), y: values.scale, z: old.scale.z),   // a mirrored layer stays mirrored
             rotate: V2Vec3(x: old.rotate.x, y: old.rotate.y, z: values.rotation),
             skew: old.skew, anchor: old.anchor, perspective: old.perspective
         )

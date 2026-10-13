@@ -4,41 +4,41 @@ import UIKit
 
 /// Which tools the Edit row shows for each kind of selection, and in what order (`ClipTool`).
 final class ClipToolTests: XCTestCase {
-    func testAVideoWithSoundShowsEverythingInPriorityOrder() {
-        XCTAssertEqual(ClipTool.tools(for: .video, hasAudio: true), [
-            .split, .volume, .speed, .animation, .adjust, .filter, .transform, .opacity, .crop,
+    func testAVideoFollowsTheUsersList() {
+        XCTAssertEqual(ClipTool.tools(for: .video), [
+            .split, .transform, .volume, .delete, .animation, .graph, .speed, .adjust, .filter, .opacity, .crop,
             .replace, .duplicate, .overlay, .removeBackground, .unlink,
         ])
     }
 
-    func testAVideoWithoutSoundHasNoVolumeOrUnlink() {
-        let tools = ClipTool.tools(for: .video, hasAudio: false)
-        for hidden in [ClipTool.volume, .unlink] { XCTAssertFalse(tools.contains(hidden), "\(hidden)") }
-        XCTAssertEqual(tools.first, .split)
-        XCTAssertTrue(tools.contains(.speed))
-    }
-
     func testAPhotoHasNoSoundOrSpeedTools() {
         XCTAssertNil(ClipTool(rawValue: "extract-audio"), "Extract Audio was removed from the row (user 2026-10-12)")
-        XCTAssertEqual(ClipTool.tools(for: .image, hasAudio: true), [
-            .split, .animation, .adjust, .filter, .transform, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground,
+        XCTAssertEqual(ClipTool.tools(for: .image), [
+            .split, .transform, .animation, .delete, .graph, .adjust, .filter, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground,
         ])
     }
 
     func testATextClipFollowsTheUsersList() {
-        // Split, Style, Animation, Duplicate, Transform (Delete pinned); Edit text stays first.
-        XCTAssertEqual(ClipTool.tools(for: .text, hasAudio: false), [.editText, .split, .style, .animation, .duplicate, .transform])
+        // Edit text stays first (the only way to change the words), then Split, Transform, Delete 4th.
+        XCTAssertEqual(ClipTool.tools(for: .text), [.editText, .split, .transform, .delete, .style, .animation, .graph, .duplicate])
         XCTAssertNil(ClipTool(rawValue: "lasting-text"), "Lasting text was dropped (user 2026-10-12)")
         XCTAssertFalse(ClipTool.style.isBuilt(for: .text))
     }
 
     func testAnAudioClipHasSoundTools() {
-        XCTAssertEqual(ClipTool.tools(for: .audio, hasAudio: false), [.split, .volume, .speed, .duplicate])
+        XCTAssertEqual(ClipTool.tools(for: .audio), [.split, .volume, .speed, .delete, .duplicate])
     }
 
-    func testDeleteIsPinnedNotPartOfTheScrollingRow() {
-        for kind in [ClipKind.video, .image, .text, .audio, .other] {
-            XCTAssertFalse(ClipTool.tools(for: kind, hasAudio: true).contains(.delete), "\(kind)")
+    func testGraphIsOnEveryRowButAudio() {
+        for kind in [ClipKind.video, .image, .text, .sticker, .other] {
+            XCTAssertTrue(ClipTool.tools(for: kind).contains(.graph), "\(kind)")
+        }
+        XCTAssertFalse(ClipTool.tools(for: .audio).contains(.graph))
+    }
+
+    func testDeleteIsAlwaysTheFourthTool() {
+        for kind in [ClipKind.video, .image, .text, .sticker, .audio, .other] {
+            XCTAssertEqual(ClipTool.tools(for: kind).firstIndex(of: .delete), 3, "\(kind)")
         }
     }
 

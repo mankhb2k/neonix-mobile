@@ -671,6 +671,45 @@ Ngân sách: trễ ≤ 25 ms ⇒ lệch nội dung ≤ 25 ms × tốc độ(s/s)
 `DragGesture.velocity` / ước lượng 100 ms cuối lần này trung vị **0.45** (lần trước 0.75): `.velocity` báo thấp hơn nhiều.
 Giới hạn: một nhánh, một lần chạy; ngón vuốt nhẹ hơn lần trước (760 px/s).
 
+### Mô hình thời gian: Double ms → `CMTime(seconds:, 600)` → khung hình (2026-10-13, trên Mac, KHÔNG phải iPhone)
+
+`scripts/time_model_bench.swift` (`swiftc -parse-as-library -O scripts/time_model_bench.swift -o tb && ./tb <file.MOV>`). Tạo clip tổng hợp 240 khung
+(chỉ số khung vẽ vào ảnh) ở 24/25/30/23.976/29.97/59.94/60 fps, PTS chính xác (`mediaTimeScale = fps`), rồi hỏi `AVAssetImageGenerator`
+với dung sai 0 và đếm khung sai. Bảng này là đường ảnh tĩnh trên Mac; **đã lặp lại bằng `AVPlayer.seek` trên iPhone 13 (iOS 26.7.1) — xem bên dưới.**
+
+| Cách dựng thời gian đích | 24 | 25 | 30 | 29.97 | 59.94 | 60 |
+|---|---|---|---|---|---|---|
+| (a) `CMTime(seconds:, 600)` — **hiện tại** | 0 | 14 | 10 | **238** | **239** | 10 |
+| (b) làm tròn lên lưới 600 | 0 | 0 | 0 | 121 | 138 | 0 |
+| (c) ms nguyên | 80 | 0 | 80 | 113 | 117 | 80 |
+| (d) CMTime hữu tỉ chính xác | 0 | 0 | 0 | 0 | 0 | 0 |
+| (e) giữa khung (PTS + ½ khung), cách (a) | 0 | 0 | 0 | 0 | 0 | 0 |
+
+(số khung sai / 240). **Nguyên nhân:** `CMTime(seconds:, preferredTimescale: 600)` *cắt xuống* (41/25 s → 983/600, đúng là 984/600), và
+mọi đích thấp hơn PTS một chút với dung sai 0 sẽ trả khung *trước*. 29.97/59.94 không nằm trên lưới 600 nên gần như mọi biên khung
+sai. **Footage iPhone thật** (`iphone-footage.MOV`): `nominalFrameRate` 59.98, timescale 1 000 000, bước PTS 16667/16666 µs,
+vài khoảng 18333 µs (khung rớt/VFR) — không nằm trên lưới 600 hay ms; composition mặc định 30 fps nên "1 khung" của editor ≠ khung nguồn.
+**Cộng dồn:** Double ms lệch ~1e-5 ms sau 1 giờ (không đáng kể); *độ dài khung lưu bằng ms nguyên* lệch 36 s/giờ ở 30 fps — không dùng.
+**Hệ quả:** seek chính xác lúc nghỉ vào đúng biên khung (phóng to 1 khung, snap keyframe) có thể hiện khung trước; việc cần làm là đích
+giữa khung hoặc timescale theo footage, quyết định ở §10 sau khi đo lại bằng `AVPlayer` trên máy thật.
+
+**Lặp lại trên iPhone 13, đúng đường `AVPlayer.seek` dung sai 0** (`SeekTimeBench`, Debug, `SEEK_BENCH=1`, kết quả `Documents/seek_bench.txt`;
+khung đọc qua `AVPlayerItemVideoOutput`), clip tổng hợp 120 khung, số khung sai:
+
+| Cách dựng | 24 | 30 | 29.97 | 59.94 | 60 |
+|---|---|---|---|---|---|
+| (a) `CMTime(seconds:, 600)` — hiện tại | 0 | 5 | **119** | **119** | 5 |
+| (b) làm tròn lên lưới 600 | 0 | 0 | 68 | 69 | 0 |
+| (c) hữu tỉ chính xác | 0 | 0 | 0 | 0 | 0 |
+| (e) giữa khung | 0 | 0 | 0 | 0 | 0 |
+
+→ khớp phép đo trên Mac: lỗi cắt xuống có thật trên `AVPlayer`. **Nhưng footage iPhone thật không bị**: cả 4 cách đều hiện cùng một khung ở 120
+khung hỏi đúng PTS. Quét biên (hỏi PTS + d, hữu tỉ, µs): khung chỉ đổi ở d ≈ **−4.0…−4.7 ms** (d = −5 ms → 100% khung trước; d = −4 → 95% đúng;
+d ≥ −3 → 100% đúng), tức biên khung của player nằm ~4.3 ms *trước* PTS của file (lệch hằng số, khả năng do edit list / độ lệch
+composition của iPhone), nên cắt xuống ≤ 1.67 ms không bao giờ vượt biên. **Kết luận:** với footage quay bằng iPhone mã hiện tại an
+toàn; lỗi chỉ lộ với file PTS nằm đúng biên (29.97/59.94 fps, clip dựng/xuất lại không có độ lệch này — gồm cả exporter sau này, ảnh nguồn
+từ máy quay khác). Chưa đo: clip stock 30 fps trong app, và `AVPlayer` khi coasting.
+
 ### Baseline trên máy thật — tiến độ
 - [ ] T0 · [ ] T1 · [ ] T2 · [~] **T3** (mới có bản coasting-heavy, 2026-10-09) · [ ] T4 · [ ] T5 · [ ] T6 · [ ] T7
 

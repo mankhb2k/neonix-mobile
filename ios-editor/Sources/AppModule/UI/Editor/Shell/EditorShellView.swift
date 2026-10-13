@@ -59,6 +59,11 @@ struct EditorShellView: View {
     @State private var filterIntents: [String: AppliedFilter] = [:]
     @State private var filterDragOriginal: V2Project?
     @State private var showingFilterSheet = false
+    @State private var showingStickerSheet = false
+    @State private var showingGraphSheet = false
+    /// The Transform values last synced from the playhead on a keyframed layer: an edit that equals them writes nothing.
+    @State private var transformSynced: TransformValues?
+    @State private var stickerStore = StickerStore()
     /// The selected video has a sound track (probed when the selection changes) - decides Volume / Extract Audio / Unlink.
     @State private var selectedHasAudio = false
     /// A tool that is only a button so far: the short "<tool> is coming soon" note over the stage.
@@ -207,6 +212,55 @@ struct EditorShellView: View {
         setProject(SetAdjustCommand(layerId: layerId, values: values, filter: filterIntents[layerId]).apply(to: project))
     }
 
+    // MARK: Keyframes (Transform only; model in `Keyframes/TransformKeyframes.swift`)
+
+    /// One frame of the composition: a keyframe within it of the playhead counts as "on" the playhead.
+    private var keyframeSnapMs: Double { 1000 / max(project.composition.fps, 1) }
+
+    /// The selected layer's keyframe at the playhead (clip-local ms), if there is one.
+    private var keyframeAtPlayhead: Double? {
+        selectedLayer.flatMap { TransformKeyframes.keyframe(of: $0, atMs: currentTimeMs, toleranceMs: keyframeSnapMs) }
+    }
+
+    /// A keyframe can be set while a layer is selected and the playhead is inside it.
+    private var canToggleKeyframe: Bool {
+        guard let layer = selectedLayer else { return false }
+        return currentTimeMs >= layer.timing.start && currentTimeMs <= layer.timing.start + layer.timing.duration
+    }
+
+    /// One undo step each way.
+    private func toggleKeyframe() {
+        guard let id = selectedLayerId, canToggleKeyframe else { return }
+        if keyframeAtPlayhead != nil {
+            apply(RemoveKeyframeCommand(layerId: id, atMs: currentTimeMs, toleranceMs: keyframeSnapMs))
+        } else {
+            apply(AddKeyframeCommand(layerId: id, atMs: currentTimeMs, toleranceMs: keyframeSnapMs))
+        }
+    }
+
+    /// Graph is live only while the playhead sits between two keyframes of the selection (clip-local start of that segment).
+    private var graphSegmentStart: Double? {
+        selectedLayer.flatMap { TransformKeyframes.segmentStart(of: $0, atMs: currentTimeMs) }
+    }
+
+    // MARK: Stickers
+
+    /// Tapping a sticker copies its picture into the project's media (once) and puts it on the canvas at the playhead,
+    /// selected, so Transform / Opacity / Delete are one tap away. The sheet stays open to add more.
+    private func addSticker(_ sticker: APIStickerCatalogue.Sticker) {
+        Task {
+            guard let asset = try? await stickerStore.importAsset(for: sticker) else { return }
+            let layerId = "\(stickerLayerIdPrefix)\(UUID().uuidString.prefix(8).lowercased())"
+            apply(AddStickerCommand(layerId: layerId, asset: asset, atMs: currentTimeMs))
+            selectedLayerId = layerId
+            selectedAudioClipId = nil
+        }
+    }
+
+    @ViewBuilder private var stickerSheet: some View {
+        StickerSheet(store: stickerStore, onPick: addSticker)
+    }
+
     // MARK: Filter
 
     private func beginFilter() {
@@ -248,7 +302,8 @@ struct EditorShellView: View {
     private func openTransformSheet(focus: TransformControl = .x) {
         guard let layer = selectedLayer else { return }
         transformFocus = focus
-        transformValues = TransformValues(layer: layer)   // before the flag, so `onChange` below ignores it
+        transformValues = TransformValues(layer: layer, atMs: currentTimeMs)   // before the flag, so `onChange` below ignores it
+        transformSynced = transformValues
         showingTransformSheet = true
     }
 
@@ -259,8 +314,9 @@ struct EditorShellView: View {
 
     /// Live: every change goes straight to the project (bypassing `apply(_:)`), like `updateAdjust`.
     private func updateTransform(_ values: TransformValues) {
-        guard showingTransformSheet, let id = selectedLayerId else { return }
-        setProject(SetTransformCommand(layerId: id, values: values).apply(to: project))
+        guard showingTransformSheet, let id = selectedLayerId, values != transformSynced else { return }
+        transformSynced = nil
+        setProject(SetTransformCommand(layerId: id, values: values, atMs: currentTimeMs).apply(to: project))
     }
 
     private func endTransform() {
@@ -314,8 +370,24 @@ struct EditorShellView: View {
         }
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
         .sheet(isPresented: $showingFilterSheet) { filterSheet }
+        .sheet(isPresented: $showingStickerSheet) { stickerSheet }
+        .sheet(isPresented: $showingGraphSheet) {
+            if let id = selectedLayerId, let layer = selectedLayer, let start = graphSegmentStart {
+                GraphSheet(easing: LabEasing(v2: TransformKeyframes.easing(of: layer, segmentStart: start))) {
+                    apply(SetKeyframeEasingCommand(layerId: id, segmentStartMs: start, easing: $0.v2))
+                }
+            }
+        }
         .sheet(isPresented: $showingTransformSheet) { transformSheet }
         .onChange(of: transformValues) { _, new in updateTransform(new) }
+        // Scrubbing with the Transform sheet open on a keyframed layer: show the values at the new playhead (no write).
+        .onChange(of: currentTimeMs) { _, time in
+            guard showingTransformSheet, let layer = selectedLayer, TransformKeyframes.isKeyframed(layer) else { return }
+            let sampled = TransformValues(layer: layer, atMs: time)
+            guard sampled != transformValues else { return }
+            transformSynced = sampled
+            transformValues = sampled
+        }
         .task(id: selectedLayerId) { await probeSelectedAudio() }
         .overlay(alignment: .bottom) {
             if let title = comingSoonTitle {
@@ -353,6 +425,7 @@ struct EditorShellView: View {
                 subject: subject,
                 hasAudio: selectedHasAudio,
                 canSplit: canSplitSelection,
+                canGraph: graphSegmentStart != nil,
                 onBack: { selectedLayerId = nil; selectedAudioClipId = nil },
                 onTool: handleClipTool
             )
@@ -375,10 +448,19 @@ struct EditorShellView: View {
             apply(SplitClipCommand(layerId: id, atMs: currentTimeMs))
             selectedLayerId = nil
         case .transform: openTransformSheet()
+        case .graph: if graphSegmentStart != nil { showingGraphSheet = true }
         case .opacity: openTransformSheet(focus: .opacity)
         case .adjust: showingAdjustSheet = true
         case .filter: showingFilterSheet = true
         case .editText: selectedTool = .text
+        case .mirror:
+            guard let id = selectedLayerId else { return }
+            apply(MirrorLayerCommand(layerId: id))
+        case .duplicate where selectedLayerId?.hasPrefix(stickerLayerIdPrefix) == true:
+            guard let id = selectedLayerId else { return }
+            let copyId = "\(id)-copy-\(UUID().uuidString.prefix(6).lowercased())"
+            apply(DuplicateOverlayCommand(layerId: id, newLayerId: copyId))
+            selectedLayerId = copyId
         case .volume:
             if selectedAudioClipId != nil { selectedTool = .audio } else { comingSoonTitle = tool.title }
         case .delete:
@@ -419,6 +501,7 @@ struct EditorShellView: View {
             if let layer = project.layers.first(where: { $0.id == selectedLayerId }), layer.type == "video" || layer.type == "image" {
                 showingAdjustSheet = true
             }
+        case .stickers: showingStickerSheet = true
         case .filter:
             // Filter, like Adjust, needs a picture or a clip: pick the one under the playhead, then open its sheet.
             selectClipAtPlayhead()
@@ -519,7 +602,8 @@ struct EditorShellView: View {
                         onTrimBegin: beginTrim,
                         onTrimUpdate: updateTrim,
                         onTrimEnd: endTrim,
-                        fps: project.composition.fps
+                        fps: project.composition.fps,
+                        keyframeTimes: selectedLayer.map(TransformKeyframes.visibleTimelineTimes) ?? []
                     )
                     .frame(height: timelineHeight)
                     .clipped()
@@ -756,14 +840,21 @@ struct EditorShellView: View {
 
                 Spacer()
 
-                Button {
-                    isFullscreen = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.headline)
-                        .fontWeight(.regular)
+                HStack(spacing: 22) {
+                    Button(action: toggleKeyframe) {
+                        KeyframeIcon(hasKeyframeHere: keyframeAtPlayhead != nil)
+                    }
+                    .disabled(!canToggleKeyframe)
+                    .accessibilityIdentifier("keyframe-toggle")
+                    Button {
+                        isFullscreen = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.headline)
+                            .fontWeight(.regular)
+                    }
+                    .accessibilityIdentifier("enter-fullscreen")
                 }
-                .accessibilityIdentifier("enter-fullscreen")
             }
         }
         .foregroundColor(.primary)

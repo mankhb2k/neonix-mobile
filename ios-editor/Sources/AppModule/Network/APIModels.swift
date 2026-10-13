@@ -88,3 +88,20 @@ enum APIError: LocalizedError {
         return false
     }
 }
+
+/// `GET /v1/stickers`: the built-in sticker library (images live in R2; `url` is public or presigned).
+struct APIStickerCatalogue: Decodable, Equatable {
+    struct License: Decodable, Equatable { let name: String; let holder: String; let source: String; let file: String }
+    struct Category: Decodable, Equatable, Identifiable { let id: String; let title: String }
+    struct Sticker: Decodable, Equatable, Identifiable {
+        let id: String
+        let name: String
+        let category: String
+        let url: URL
+        let width: Double
+        let height: Double
+    }
+    let license: License
+    let categories: [Category]
+    let stickers: [Sticker]
+}

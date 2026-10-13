@@ -71,6 +71,8 @@ struct TimelineView: View {
     let onTrimEnd: (HorizontalEdge, String) -> Void
     /// Composition frame rate — the finest zoom step is one frame.
     var fps: Double = 30
+    /// The selected clip's keyframe times (ms), drawn as diamonds on that clip. UI only for now.
+    var keyframeTimes: [Double] = []
 
     /// Pinch-to-zoom scale. The playhead is pinned to the centre of the
     /// panel and the content slides under it (`contentOffsetX`), so changing
@@ -395,6 +397,7 @@ struct TimelineView: View {
             resolveAsset: { layer in (assetId(for: layer), assetURL(for: layer)) },
             resolveAudioURL: { layer in audioDerivativeURL(for: layer) },
             selectedLayerId: selectedLayerId,
+            keyframeTimes: keyframeTimes,
             onSelectLayer: { id in
                 selectedLayerId = (selectedLayerId == id) ? nil : id
                 selectedAudioClipId = nil
@@ -525,6 +528,8 @@ private struct LaneRowView: View {
     let resolveAsset: (V2Layer) -> (id: String?, url: URL?)
     let resolveAudioURL: (V2Layer) -> URL?
     let selectedLayerId: String?
+    /// Keyframes of the selected clip, drawn on it when it lives in this lane.
+    let keyframeTimes: [Double]
     let onSelectLayer: (String) -> Void
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
@@ -590,7 +595,8 @@ private struct LaneRowView: View {
                         onTrimBegin: onTrimBegin,
                         onTrimUpdate: onTrimUpdate,
                         onTrimEnd: onTrimEnd,
-                        allowsNegativeStart: showsCoverAndMute   // true only for the main lane
+                        allowsNegativeStart: showsCoverAndMute,   // true only for the main lane
+                        keyframeTimes: isSelected ? keyframeTimes : []
                     )
                     .onTapGesture { onSelectLayer(layer.id) }
                 } else {
@@ -602,13 +608,38 @@ private struct LaneRowView: View {
                         isSelected: isSelected,
                         onTrimBegin: onTrimBegin,
                         onTrimUpdate: onTrimUpdate,
-                        onTrimEnd: onTrimEnd
+                        onTrimEnd: onTrimEnd,
+                        keyframeTimes: isSelected ? keyframeTimes : []
                     )
                     .onTapGesture { onSelectLayer(layer.id) }
                 }
             }
         }
         .frame(height: rowHeight, alignment: .topLeading)
+    }
+}
+
+/// The diamonds of a selected clip, positioned from the clip's leading edge. Drawn inside the clip view, below its selection
+/// frame and trim handles (z-order), so a keyframe on an edge is half covered by them exactly like in CapCut.
+private func keyframeMarkerRow(times: [Double], clipStartMs: Double, pxPerMs: Double) -> some View {
+    ZStack(alignment: .leading) {
+        ForEach(times, id: \.self) { time in
+            KeyframeMarker().offset(x: CGFloat(time - clipStartMs) * pxPerMs - KeyframeMarker.size / 2)
+        }
+    }
+}
+
+/// A keyframe on the selected clip: a white diamond with a dark outline, readable over a filmstrip and over a flat colour.
+private struct KeyframeMarker: View {
+    static let size: CGFloat = 14
+
+    var body: some View {
+        Image(systemName: "diamond.fill")
+            .font(.system(size: Self.size))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.8), radius: 0.8)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("keyframeMarker")
     }
 }
 
@@ -823,6 +854,8 @@ private struct FilmstripClipView: View {
     let onTrimEnd: (HorizontalEdge, String) -> Void
     /// Main lane only: the left edge (and the clips it pushes) may go below 0 during the drag.
     var allowsNegativeStart = false
+    /// Timeline times (ms) of this clip's keyframes, only when selected: drawn under the frame and the handles.
+    var keyframeTimes: [Double] = []
 
     /// The clip's own layer state at the moment a trim drag began — deltas
     /// are computed against this fixed origin every `onChanged` tick
@@ -904,6 +937,10 @@ private struct FilmstripClipView: View {
         return nil
     }
 
+    private var keyframeMarkers: some View {
+        keyframeMarkerRow(times: keyframeTimes, clipStartMs: layer.timing.start, pxPerMs: pxPerMs)
+    }
+
     var body: some View {
         let base = assetId.flatMap { VideoFrameCache.shared.baseThumbs[$0] } ?? [:]
         return ZStack(alignment: .bottom) {
@@ -935,6 +972,7 @@ private struct FilmstripClipView: View {
         // 2026-10-08). Selection is communicated by the handles plus this
         // thin gray frame connecting them (iOS Photos trim style, added
         // 2026-10-08, replacing the earlier plain white wash).
+        .overlay(alignment: .leading) { keyframeMarkers }   // under the frame and the handles (like CapCut)
         .overlay(isSelected ? Rectangle().strokeBorder(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
         .overlay(alignment: .leading) {
             if isSelected {
@@ -1219,6 +1257,12 @@ func isPushLaneType(_ type: String) -> Bool {
     type == "video" || type == "image"
 }
 
+/// Like `isPushLaneType`, for one clip: stickers are free overlays (gaps allowed, trimming never pushes a neighbour), so
+/// they behave like text although they are image layers.
+func isPushLane(_ layer: V2Layer) -> Bool {
+    isPushLaneType(layer.type) && !layer.id.hasPrefix(stickerLayerIdPrefix)
+}
+
 /// The "ripple reflow" — given a push-lane's clips in their *current*
 /// (pre-this-tick) form and one clip's freshly-dragged `start`/`duration`,
 /// computes the `timing.start` every *other* clip in the lane must adopt
@@ -1428,12 +1472,17 @@ private struct TimelineClipView: View {
     let onTrimBegin: () -> Void
     let onTrimUpdate: (EditorCommand) -> Void
     let onTrimEnd: (HorizontalEdge, String) -> Void
+    var keyframeTimes: [Double] = []
 
     /// Same fixed-origin-per-gesture pattern as `FilmstripClipView`'s own
     /// drag handles — see its doc comment.
     @State private var dragStartLayer: V2Layer?
     @Environment(\.trimAutoScroll) private var autoScroll
     private let minDurationMs: Double = 200
+
+    private var keyframeMarkers: some View {
+        keyframeMarkerRow(times: keyframeTimes, clipStartMs: layer.timing.start, pxPerMs: pxPerMs)
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: isSelected ? 0 : 6, style: .continuous)
@@ -1444,12 +1493,13 @@ private struct TimelineClipView: View {
             // stroke anymore either; the type is communicated by the fill
             // + icon/label alone.
             .fill(color)
+            .overlay(alignment: .leading) { keyframeMarkers }   // under the frame and the handles
             .overlay(isSelected ? Rectangle().strokeBorder(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
             .overlay(alignment: .leading) {
                 HStack(spacing: 4) {
                     Image(systemName: icon)
                         .font(.caption2)
-                    Text(layer.type.capitalized)
+                    Text(layer.id.hasPrefix(stickerLayerIdPrefix) ? "Sticker" : layer.type.capitalized)
                         .font(.caption2)
                         .lineLimit(1)
                 }
@@ -1515,7 +1565,7 @@ private struct TimelineClipView: View {
 
         var siblingStarts: [String: Double] = [:]
         var resolvedStart = candidateStart
-        if isPushLaneType(original.type) {
+        if isPushLane(original) {
             let result = reflowLane(
                 laneClips: laneClips,
                 draggedLayerId: original.id,
@@ -1567,7 +1617,7 @@ private struct TimelineClipView: View {
 
         var siblingStarts: [String: Double] = [:]
         var resolvedStart = original.timing.start
-        if isPushLaneType(original.type) {
+        if isPushLane(original) {
             let result = reflowLane(
                 laneClips: laneClips,
                 draggedLayerId: original.id,
@@ -1587,6 +1637,7 @@ private struct TimelineClipView: View {
     }
 
     private var color: Color {
+        if layer.id.hasPrefix(stickerLayerIdPrefix) { return Color(red: 0xF5 / 255, green: 0xB5 / 255, blue: 0x2E / 255) }   // sticker clips: #F5B52E
         switch layer.type {
         case "video": return .blue
         case "image": return .green
@@ -1598,6 +1649,7 @@ private struct TimelineClipView: View {
     }
 
     private var icon: String {
+        if layer.id.hasPrefix(stickerLayerIdPrefix) { return "face.smiling" }
         switch layer.type {
         case "video": return "video.fill"
         case "image": return "photo.fill"

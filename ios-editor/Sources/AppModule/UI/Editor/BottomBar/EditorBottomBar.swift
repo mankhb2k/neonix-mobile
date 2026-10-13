@@ -21,7 +21,7 @@ struct BottomBarBackButton: View {
 
 /// The one row shown while a clip, photo, text or audio clip is selected: what can be done with *that* thing, with
 /// a back button that deselects it on the left and Delete pinned on the right. The tools in between scroll sideways;
-/// which ones appear, and in what order, is `ClipTool.tools(for:hasAudio:)`. A tool that is not built yet shows a short
+/// which ones appear, and in what order, is `ClipTool.tools(for:)`. A tool that is not built yet shows a short
 /// "coming soon" note instead of doing anything (`EditorShellView.handleClipTool`).
 struct SelectionToolbarView: View {
     enum Subject {
@@ -33,12 +33,14 @@ struct SelectionToolbarView: View {
     /// The selected video has a sound track (decides Volume / Extract Audio / Unlink).
     let hasAudio: Bool
     let canSplit: Bool
+    /// The playhead is between two keyframes of the selection: only then is Graph live (otherwise it shows dimmed).
+    var canGraph = false
     let onBack: () -> Void
     let onTool: (ClipTool) -> Void
 
     private var kind: ClipKind {
         switch subject {
-        case .layer(let layer): return ClipKind(layerType: layer.type)
+        case .layer(let layer): return ClipKind(layer: layer)
         case .audioClip: return .audio
         }
     }
@@ -53,14 +55,10 @@ struct SelectionToolbarView: View {
                 .padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 22) {
-                    ForEach(ClipTool.tools(for: kind, hasAudio: hasAudio)) { tool in button(tool) }
+                    ForEach(ClipTool.tools(for: kind)) { tool in button(tool) }
                 }
             }
             .contentMargins(.horizontal, 8, for: .scrollContent)
-            Divider().frame(height: 28)
-                .padding(.leading, 4)
-            button(.delete)
-                .padding(.leading, 8)
         }
         .padding(.horizontal, 12)
         .accessibilityElement(children: .contain)
@@ -68,14 +66,15 @@ struct SelectionToolbarView: View {
     }
 
     private func button(_ tool: ClipTool) -> some View {
-        let enabled = tool != .split || canSplit
+        let needsSound = kind == .video && (tool == .volume || tool == .unlink)
+        let enabled = (tool != .split || canSplit) && (tool != .graph || canGraph) && (!needsSound || hasAudio)
         return Button { onTool(tool) } label: {
             VStack(spacing: 4) {
                 Image(systemName: tool.symbol).font(.title3)
                 Text(tool.title).font(.caption2).lineLimit(1)
             }
             .frame(minWidth: 48)
-            .foregroundColor(!enabled ? .secondary : (tool == .delete ? .red : .primary))
+            .foregroundColor(!enabled ? .secondary : .primary)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

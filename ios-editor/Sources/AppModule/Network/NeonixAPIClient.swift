@@ -58,6 +58,10 @@ struct NeonixAPIClient {
         return try await send("GET", "v1/templates", query: items, as: APITemplatePage.self)
     }
 
+    func stickers() async throws -> APIStickerCatalogue {
+        try await send("GET", "v1/stickers", as: APIStickerCatalogue.self)
+    }
+
     /// Free: credits are spent at export, not at download.
     func packageInfo(templateId: String, versionId: String? = nil) async throws -> APIPackageInfo {
         let items = versionId.map { [URLQueryItem(name: "versionId", value: $0)] } ?? []

@@ -12,6 +12,17 @@ final class EditorBottomBarUITests: XCTestCase {
         try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
     }
 
+    /// Delete is the last button of the scrolling row: swipe the row until it can be hit.
+    private func revealDelete(_ app: XCUIApplication) {
+        let row = app.descendants(matching: .any)["selectionToolbar"]
+        var tries = 0
+        while !app.buttons["action-delete"].isHittable && tries < 6 {
+            row.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)))
+            tries += 1
+        }
+    }
+
     private func openTripToParis() -> XCUIApplication {
         let app = XCUIApplication()
         app.launch()
@@ -117,6 +128,7 @@ final class EditorBottomBarUITests: XCTestCase {
         let app = openTripToParis()
         app.buttons["tool-edit"].tap()
         XCTAssertTrue(app.buttons["action-delete"].waitForExistence(timeout: 5))
+        revealDelete(app)
         app.buttons["action-delete"].tap()
         XCTAssertTrue(app.buttons["tool-aspectRatio"].waitForExistence(timeout: 5), "with nothing selected any more the main row is back")
     }
@@ -127,10 +139,14 @@ final class EditorBottomBarUITests: XCTestCase {
         let app = openTripToParis()
         app.buttons["tool-edit"].tap()
         XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["action-delete"].isHittable, "Delete is pinned, always reachable")
-        let split = app.buttons["action-split"].frame.minX
-        XCTAssertLessThan(split, app.buttons["action-delete"].frame.minX)
+        revealDelete(app)
+        XCTAssertTrue(app.buttons["action-delete"].isHittable, "Delete is the row's last button")
         saveShot(app, "bar-7-clip-row")
+        for _ in 0..<4 {
+            let row = app.descendants(matching: .any)["selectionToolbar"]
+            row.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        }   // back to the start of the row
 
         // A tool that is not built yet.
         let row = app.descendants(matching: .any)["selectionToolbar"]
@@ -171,6 +187,7 @@ final class EditorBottomBarUITests: XCTestCase {
         for id in ["volume", "adjust", "opacity", "crop", "lasting-text"] {
             XCTAssertFalse(app.buttons["action-\(id)"].exists, "\(id) is not a text tool")
         }
+        revealDelete(app)
         XCTAssertTrue(app.buttons["action-delete"].isHittable)
         saveShot(app, "bar-9-text-clip-row")
 
@@ -212,8 +229,56 @@ final class EditorBottomBarUITests: XCTestCase {
     /// The main toolbar's Filter tool selects the clip under the playhead and opens the same sheet.
     func testTheMainFilterToolOpensTheSheet() throws {
         let app = openTripToParis()
+        // The main row scrolls: Stickers pushed Filter off the right edge.
+        let edit = app.buttons["tool-edit"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        edit.press(forDuration: 0.05, thenDragTo: edit.withOffset(CGVector(dx: -300, dy: 0)))
         app.buttons["tool-filter"].tap()
         XCTAssertTrue(app.buttons["filterCell-none"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["filterDone"].exists)
     }
+}
+
+extension EditorBottomBarUITests {
+    /// Needs the local API (`DEV_AUTH_BYPASS=true`, port 8080) with the sticker catalogue on R2.
+    func testStickerSheetAddsAStickerToTheStage() throws {
+        let app = openTripToParis()
+        app.buttons["tool-stickers"].tap()
+        let cell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'stickerCell-'")).firstMatch
+        XCTAssertTrue(cell.waitForExistence(timeout: 20), "the grid should load from the API")
+        sleep(2)
+        saveShot(app, "stickers-small")
+        cell.tap()
+        sleep(1)
+        saveShot(app, "stickers-added")
+        app.swipeUp()
+        sleep(1)
+        saveShot(app, "stickers-large")
+        app.buttons["stickerDone"].tap()
+        XCTAssertTrue(app.buttons["toolbarBack"].waitForExistence(timeout: 5), "the new sticker is selected, so its tools show")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.80)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.64)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        sleep(1)
+        saveShot(app, "sticker-selected")
+        app.buttons["action-mirror"].tap()
+        sleep(1)
+        saveShot(app, "sticker-mirrored")
+    }
+
+    /// The keyframe icon sits next to fullscreen: off with nothing selected, a diamond toggle on a clip; the clip row's
+    /// Graph tool is dimmed until the playhead is between two keyframes.
+    func testKeyframeIconTogglesAndGraphStaysDimmedWithoutASegment() throws {
+        let app = openTripToParis()
+        let toggle = app.buttons["keyframe-toggle"]
+        XCTAssertTrue(toggle.exists)
+        XCTAssertFalse(toggle.isEnabled, "nothing selected")
+        app.buttons["tool-edit"].tap()
+        XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
+        XCTAssertTrue(toggle.isEnabled)
+        XCTAssertFalse(app.buttons["action-graph"].isEnabled, "no segment yet")
+        toggle.tap()
+        XCTAssertTrue(app.images["keyframeMarker"].waitForExistence(timeout: 3), "the keyframe is drawn on the selected clip")
+        XCTAssertFalse(app.buttons["action-graph"].isEnabled, "one keyframe is not a segment \(app.images["keyframeMarker"].frame) \(app.descendants(matching: .any)["timeline"].frame)")
+        saveShot(app, "keyframe-icon-on")
+    }
+
+
 }

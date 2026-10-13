@@ -83,6 +83,11 @@ struct SplitClipCommand: EditorCommand {
             second.payload = .video(payload)
         }
 
+        // Keyframes: each half only keeps its own (the second one re-timed to its own start).
+        let halves = TransformKeyframes.splitting(original, at: firstDuration)
+        first.tracks = halves.first.tracks
+        second.tracks = halves.second.tracks
+
         layers[index] = first
         layers.insert(second, at: index + 1)
         return project.withLayers(layers)
@@ -122,6 +127,9 @@ struct TrimClipCommand: EditorCommand {
         var layers = project.layers
         guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
         var layer = layers[index]
+        // A left trim (the end stays, the head moves): keyframes stay with the picture, so their local times move the other way.
+        let oldEnd = layer.timing.start + layer.timing.duration
+        if abs(oldEnd - (start + duration)) < 0.5 { layer = TransformKeyframes.shifting(layer, by: start - layer.timing.start) }
         layer.timing = V2Timing(start: start, duration: duration)
         if case .video(var payload) = layer.payload {
             payload.trimStart = trimStart
@@ -387,6 +395,89 @@ struct AddTextLayerCommand: EditorCommand {
         newLayer.order = existingOrders.first(where: { !overlaps($0) }) ?? ((project.layers.map(\.order).max() ?? -1) + 1)
 
         return project.withLayers(project.layers + [newLayer])
+    }
+}
+
+/// Layer ids of stickers start with this (`isPushLane` treats them as free overlays); their asset ids start with `stickerAssetIdPrefix`.
+let stickerLayerIdPrefix = "sticker-"
+let stickerAssetIdPrefix = "sticker-"
+
+/// Stickers - drops a sticker picture on the canvas at the playhead: one image layer, centred, sized from the canvas,
+/// 3 s long (`defaultDurationMs`), in its own lane. **Lane placement** reuses a lane of *stickers* that does not overlap
+/// in time, else opens a new `order`: a sticker never shares a lane with a photo overlay (those are push lanes).
+/// The asset is added to the project once however many stickers use it. No-op (fail closed) for a sticker whose asset
+/// is not an image.
+struct AddStickerCommand: EditorCommand {
+    let layerId: String
+    let asset: V2ImageAsset
+    let atMs: Double
+    var durationMs: Double = AddStickerCommand.defaultDurationMs
+    /// Width of the sticker as a fraction of the canvas' shorter side.
+    var sizeFraction: Double = 0.35
+    static let defaultDurationMs: Double = 3000
+
+    func apply(to project: V2Project) -> V2Project {
+        let side = min(project.composition.width, project.composition.height) * sizeFraction
+        let aspect = asset.height > 0 ? asset.width / asset.height : 1
+        let frame = aspect >= 1 ? V2Frame(width: side, height: side / aspect) : V2Frame(width: side * aspect, height: side)
+        let document = EditorDocument(
+            id: "doc-\(layerId)",
+            composition: project.composition,
+            assets: [.image(asset)],
+            layers: [EditorLayer(id: layerId, kind: "image", assetId: asset.id, frame: frame, timing: V2Timing(start: atMs, duration: durationMs))]
+        )
+        guard var layer = compile(document).layers.first else { return project }
+
+        let stickers = project.layers.filter { $0.id.hasPrefix(stickerLayerIdPrefix) }
+        func overlaps(_ order: Int) -> Bool {
+            stickers.contains { other in
+                other.order == order && layer.timing.start < other.timing.start + other.timing.duration
+                    && other.timing.start < layer.timing.start + layer.timing.duration
+            }
+        }
+        let usedOrders = Set(stickers.map(\.order))
+        layer.order = usedOrders.sorted().first(where: { !overlaps($0) }) ?? ((project.layers.map(\.order).max() ?? -1) + 1)
+
+        let assets = project.assets.contains { $0.id == asset.id } ? project.assets : project.assets + [.image(asset)]
+        return project.withAssets(assets).withLayers(project.layers + [layer])
+    }
+}
+
+/// Flips a layer left-right by negating `scale.x` (Transform keeps the sign, see `SetTransformCommand`).
+struct MirrorLayerCommand: EditorCommand {
+    let layerId: String
+
+    func apply(to project: V2Project) -> V2Project {
+        var layers = project.layers
+        guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
+        let old = layers[index].transform
+        layers[index].transform = V2Transform(
+            translate: old.translate, scale: V2Vec3(x: -old.scale.x, y: old.scale.y, z: old.scale.z),
+            rotate: old.rotate, skew: old.skew, anchor: old.anchor, perspective: old.perspective
+        )
+        layers[index] = TransformKeyframes.mirroring(layers[index])
+        return project.withLayers(layers)
+    }
+}
+
+/// Copies a free-overlay layer (a sticker) to start where the original ends, on the same lane when it is free there.
+struct DuplicateOverlayCommand: EditorCommand {
+    let layerId: String
+    let newLayerId: String
+
+    func apply(to project: V2Project) -> V2Project {
+        var layers = project.layers
+        guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
+        var copy = layers[index]
+        copy.id = newLayerId
+        copy.timing = V2Timing(start: copy.timing.start + copy.timing.duration, duration: copy.timing.duration)
+        let busy = layers.contains {
+            $0.order == copy.order && $0.id != layerId && copy.timing.start < $0.timing.start + $0.timing.duration
+                && $0.timing.start < copy.timing.start + copy.timing.duration
+        }
+        if busy { copy.order = (layers.map(\.order).max() ?? 0) + 1 }
+        layers.insert(copy, at: index + 1)
+        return project.withLayers(layers)
     }
 }
 

@@ -215,4 +215,50 @@ final class DesignLabUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["filterStageName"].label, "Cool 100%")
         saveShot(app, "filter-C-row")
     }
+
+    /// Keyframe lab: the three graph pickers change the segment's graph; the editor opens full screen from each.
+    func testKeyframeLabPicksGraphsInAllThreeLayouts() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Keyframes & graphs"]
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["keyframeClose"].waitForExistence(timeout: 10))
+
+        // A: row
+        app.buttons["keyframeAction-Graphs"].tap()
+        XCTAssertTrue(app.buttons["graphTile-cubic-in"].waitForExistence(timeout: 5))
+        saveShot(app, "keyframe-A-row")
+        app.buttons["graphTile-cubic-in"].tap()
+        XCTAssertTrue(app.staticTexts["Cubic In"].exists, "the strip names the segment's graph")
+        app.buttons["graphDone"].tap()
+
+        // B: grid
+        app.buttons["B Grid+"].tap()
+        app.buttons["keyframeAction-Graphs"].tap()
+        XCTAssertTrue(app.buttons["graphChip-Back"].waitForExistence(timeout: 5))
+        app.buttons["graphChip-Back"].tap()
+        XCTAssertTrue(app.buttons["graphTile-back-out"].waitForExistence(timeout: 5))
+        saveShot(app, "keyframe-B-grid")
+        app.buttons["graphTile-back-out"].tap()
+        app.buttons["graphDone"].tap()
+
+        // C: big curve
+        app.buttons["C Big curve"].tap()
+        app.buttons["keyframeAction-Graphs"].tap()
+        XCTAssertTrue(app.buttons["graphEdit"].waitForExistence(timeout: 5))
+        saveShot(app, "keyframe-C-big")
+
+        // Editor
+        app.buttons["graphEdit"].tap()
+        XCTAssertTrue(app.buttons["graphEditorDone"].waitForExistence(timeout: 5))
+        saveShot(app, "keyframe-editor")
+        app.buttons["graphEditorDone"].tap()
+        XCTAssertTrue(app.staticTexts["Custom"].waitForExistence(timeout: 5), "the edited graph is named Custom")
+    }
 }

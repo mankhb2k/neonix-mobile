@@ -215,6 +215,24 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   (later) are separate purchases, not a per-export fee. **There is no video renderer yet** (`UnavailableExporter`):
   Debug builds charge anyway so the flow can be tried, Release refuses without charging. Debug talks to the API with the
   `X-Dev-User` header (server `DEV_AUTH_BYPASS=true`); Release uses the Keychain bearer token (sign-in not built).
+- **Stickers** (`UI/Editor/StickerSheet`): main-nav tool, "B Grid+" sheet (340 pt + large, category chips, 4-col grid). Catalogue =
+  `GET /v1/stickers` (manifest + PNGs in R2 `neonix-system-assets/stickers/`, 50 Fluent Emoji 3D, MIT notice stored there;
+  `scripts/publish_stickers.mjs`). Bucket is private -> API hands out 1 h presigned URLs (set `R2_SYSTEM_ASSETS_URL` once public).
+  `StickerStore` caches images by id on disk; a pick copies the PNG into `ImportedMedia` and `AddStickerCommand` adds an image
+  layer (id `sticker-*`, 3 s, 35 % of the short side). `sticker-*` layers are free overlays (stop lanes, `isPushLane`).
+  A sticker is its own **kind** in the editor (`ClipKind.sticker`, told by the id prefix; still an image layer in Protocol V2): timeline clip
+  colour #F5B52E, tools Split, Animation*, Duplicate (`DuplicateOverlayCommand`), Mirror (`MirrorLayerCommand`, negative `scale.x`;
+  Transform keeps the sign), Transform, Delete pinned (*coming soon).
+- **Keyframes** (Transform only; `UI/Editor/Keyframes/TransformKeyframes.swift`, 2026-10-13): one Protocol V2 track per property
+  (`transform.translate.x/y`, `scale.x/y`, `rotate.z`, `opacity`; ids `kf-<path>`), keyframe times are **clip-local ms** (V2's own
+  convention), and the six tracks always share the same times - one ◆ = one time on all of them. A graph (easing) lives on the keyframe
+  where its segment starts (`SetKeyframeEasingCommand`; "Original" = no easing). Keyframe icon next to fullscreen = `AddKeyframeCommand` /
+  `RemoveKeyframeCommand` (one undo step each; removing the last bakes its values into the static transform); Graph tool is live only
+  between two keyframes. On a keyframed layer a Transform edit becomes a keyframe at the playhead (`SetTransformCommand(atMs:)`, auto-
+  keyframe) and the sheet shows the sampled values; Mirror negates the `scale.x` keyframes. **Split** (CapCut's way, confirmed by the user): each half keeps only its own
+  keyframes (the second re-timed) and, when the cut is inside the animated range, gets a keyframe at the cut (end of the first, start of
+  the second) holding the interpolated value; a bezier graph on the cut segment is divided exactly (`splitEasing`, de Casteljau). **Left trim** shifts the keyframes' local times so they stay with the
+  picture (may go negative). Adjust/Filter are not keyframed. The graph picker still uses the Design Lab's `LabEasing` (style not final).
 - **Text tool**: add/edit goes through the real `compile(_:)` text pipeline
   (`AddTextLayerCommand`, `SetTextContentCommand`), never hand-built chunks. Fixed
   defaults (Helvetica 32, white, centred, no wrap, 3 s); no font/colour picker or
@@ -240,6 +258,7 @@ controls* (`AdjustLabView`: 16 scalar controls, live photo, hold to compare; **S
 Light/Color/Detail tabs - still undecided). Inline panels and plain sliders were tried and dropped. A third experiment, *Filter picker* (`FilterLabView`, 16 fake filters, SwiftUI look
 stand-ins, `LabFilter`), compares a 4-column grid sheet (A), the same with a pull-up detent (B) and one row of thumbnails (C), with the Intensity
 as a ruler or a slider, shown only once a filter is picked: the ruler (~120 pt with its readout) leaves only one clipped grid row in a 340 pt sheet, the slider leaves a full row + a peeking one.
+A fourth, *Keyframes & graphs* (`KeyframeLabView`, `LabEasing`; 2026-10-13, style not chosen yet), shows 3 keyframes on a moving layer with one graph (cubic-bezier) per segment and compares A Row of curve tiles (CapCut), B Grid+ (family chips + grid, pull-up detent) and C Big live curve (family + In/Out/In Out); all open the same full-screen two-handle `GraphEditorView`. Fake data only; no keyframe model in the editor yet.
 `UI/Components/RulerDial` is the real, reusable ruler (`RulerMapping.linear/logarithmic`, `ScrollView` momentum; ticks stand on a
 baseline in three kinds of line - minor tick, major tick, centre mark (no fixed marker: the tick in the middle *becomes* the
 centre mark, accent colour and a little taller than a major tick); all three are 1.5 pt wide (minor grey, major dark); a dot marks the neutral value; soft
