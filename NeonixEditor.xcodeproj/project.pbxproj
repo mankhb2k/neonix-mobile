@@ -8,8 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		02C5CEB1ECD069A903DDACD5 /* EditorBottomBarUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE18B3B4D9B27364AC56D115 /* EditorBottomBarUITests.swift */; };
+		03628E03385488BA41211753 /* TextStyleValues.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F1F01D5C1F1253A3CA0935 /* TextStyleValues.swift */; };
 		05DB74C312A363AB8EA0D5A9 /* sfx-drumhit.wav in Resources */ = {isa = PBXBuildFile; fileRef = C186B8AE105B1E225EDC6E24 /* sfx-drumhit.wav */; };
 		07F498E69970EDA773B6A9BA /* ClipToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD66286804115B51EB50C6F /* ClipToolTests.swift */; };
+		0807416AA4CD550761F52B53 /* TextBackgroundTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50DF5E7A278574CD0393DE8D /* TextBackgroundTests.swift */; };
 		0904A86AC7125DAC8B453684 /* SampleClipOverride.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC8AC3BAAECFB878512D7AD /* SampleClipOverride.swift */; };
 		098656AF94E8F8721B70BF24 /* AdjustControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E8150598AE93D12F98ED7CD /* AdjustControl.swift */; };
 		0C0C918B625220A8D28E4F9B /* EditorTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B99F0FC8DE419D48EC0100B /* EditorTransform.swift */; };
@@ -28,6 +30,7 @@
 		284EF2398C0F9EB7B888EC6E /* TemplatesDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE3A6079FF1084EAA949669 /* TemplatesDebugView.swift */; };
 		28982F1265CECE3BB20AB82D /* TemplateEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0223614065076811425A970D /* TemplateEditView.swift */; };
 		28F039FFD2364D57160E405F /* PlaybackMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 818E82FB143D62989976330B /* PlaybackMetrics.swift */; };
+		292C8185D8FDF8A97C5D62CB /* TextLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B404E46422FA34C6E18D9409 /* TextLabView.swift */; };
 		2DA58207A2A8482C0B64D400 /* VideoTimeMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1022079063DC28326625623 /* VideoTimeMappingTests.swift */; };
 		30384148C1554F0464BC6471 /* pexels-followingnyc-38428141.jpg in Resources */ = {isa = PBXBuildFile; fileRef = D994D0D691533F1E434109E3 /* pexels-followingnyc-38428141.jpg */; };
 		3225FFEBEFE74143F4F68A72 /* FilterLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F91AAF6841193B6FB69E420 /* FilterLabView.swift */; };
@@ -66,6 +69,7 @@
 		63B504C4D874036D667578C2 /* TemplateBuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E249CA14FE84F1790F0E19 /* TemplateBuild.swift */; };
 		64020EDCC2401EC4284C245A /* audio-demo.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D9E70A15D3842A682D889363 /* audio-demo.mp3 */; };
 		6507BB4C62B268B6EF6B9AF6 /* ExportGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FD3C9FA5A9D222D92D0AD0 /* ExportGate.swift */; };
+		66D3CDD28B95A01E0E484E60 /* TextBackgroundGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D05D2237D84525941911CA2 /* TextBackgroundGeometry.swift */; };
 		6B299B9E2D3618F4BD539ADA /* TextPathResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10EB5DD2C25BEA220BC35B0 /* TextPathResolver.swift */; };
 		6B911C155A96A67E7EADA3DC /* StickerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E758485A7EA6591C536898 /* StickerStore.swift */; };
 		6BCA840408775E9E25D393BF /* StickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC390B75CDB89C0C355B6314 /* StickerTests.swift */; };
@@ -112,6 +116,7 @@
 		9E84213FD663A446506A5309 /* PlaybackMetricsHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E23260B42C76BEBE40AFA3 /* PlaybackMetricsHUD.swift */; };
 		9F2A51D3465DE2BED173A791 /* KeyframeSamplerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3973B088EF6ABB20404385A9 /* KeyframeSamplerTests.swift */; };
 		9F6072C27E312D5FFEC4622A /* KeyframeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21150444C8AE3B279CF8234 /* KeyframeTests.swift */; };
+		A061CC2B09FB550F0A0F683A /* EditorFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = 715E3F072D47E68BC4C7815B /* EditorFont.swift */; };
 		A23DCF5C06A965FE127FAF65 /* EditorBottomBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8487C5E63DA5117D05F28D30 /* EditorBottomBar.swift */; };
 		A258A05A12BFE28F81E065DB /* SlotPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65F6DF40BB8C41BA4EB4A54E /* SlotPickerView.swift */; };
 		A44C96AB722F465F420BEDD9 /* TemplateFiller.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE31BAE2585747CDE2D57129 /* TemplateFiller.swift */; };
@@ -156,6 +161,7 @@
 		E63B52EE8409A73A9A0E8D01 /* fade-out-end-anchor.json in Resources */ = {isa = PBXBuildFile; fileRef = E3064C32E6E6307A75AF9323 /* fade-out-end-anchor.json */; };
 		EA0537739D79A1C18930BAA9 /* TransformCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 332FC2A46E174A516875592D /* TransformCommandTests.swift */; };
 		EA2F5897BCCFC0F71E32A786 /* TemplateUseFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF0CD52FB9E11995B3ED309 /* TemplateUseFlowView.swift */; };
+		EA64742E9F852C766575BB61 /* TextSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E07B73FE4D52434CC58EE20 /* TextSheet.swift */; };
 		EB8B4BDBA722BE6E18272DDB /* FilterRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A6C340F0E2C27CE18C361C /* FilterRenderer.swift */; };
 		F0CC41D3B0A457CCA7CDC0B1 /* AdjustLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE5C83143105CA9380F0C30 /* AdjustLabView.swift */; };
 		F579D3AD292BF31B144329DE /* 12253998_1920_1080_30fps.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = AF9CDCEAFA851087D6BEAA95 /* 12253998_1920_1080_30fps.mp4 */; };
@@ -241,8 +247,10 @@
 		4282E3502362639603E1394C /* ProtocolCodableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolCodableTests.swift; sourceTree = "<group>"; };
 		42ADDB57CCF1F189438B3026 /* FilterThumbnails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterThumbnails.swift; sourceTree = "<group>"; };
 		478806477AE38B039F8CC97F /* SoundEffectCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundEffectCatalog.swift; sourceTree = "<group>"; };
+		47F1F01D5C1F1253A3CA0935 /* TextStyleValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextStyleValues.swift; sourceTree = "<group>"; };
 		4CE8EB9E43A85B9C7BA3DFB9 /* flip-3d.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "flip-3d.json"; sourceTree = "<group>"; };
 		4FEDC4975144623ED160738B /* RemotePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePreview.swift; sourceTree = "<group>"; };
+		50DF5E7A278574CD0393DE8D /* TextBackgroundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBackgroundTests.swift; sourceTree = "<group>"; };
 		548B742AB86640A899046455 /* AudioRecorderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorderService.swift; sourceTree = "<group>"; };
 		555805F8A619C3C32AD3E66F /* FilterCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterCatalog.swift; sourceTree = "<group>"; };
 		5C225712655A94C79B4615D3 /* NeonixAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeonixAPIClient.swift; sourceTree = "<group>"; };
@@ -262,12 +270,14 @@
 		6D43718159CC04817D72D983 /* V2Paint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Paint.swift; sourceTree = "<group>"; };
 		70AA1E57A8B728F5FA4A6562 /* AssetDurationCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetDurationCache.swift; sourceTree = "<group>"; };
 		70F04ADA701054AB417519B7 /* V2Layers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Layers.swift; sourceTree = "<group>"; };
+		715E3F072D47E68BC4C7815B /* EditorFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorFont.swift; sourceTree = "<group>"; };
 		72536F9BFD6AACF3C88928C0 /* sfx-ding.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "sfx-ding.wav"; sourceTree = "<group>"; };
 		758CC3C14EA2B53DEF4D58C2 /* LabTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabTransform.swift; sourceTree = "<group>"; };
 		765759A1DF4D1E7A6CA84983 /* MotionPathResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionPathResolver.swift; sourceTree = "<group>"; };
 		7854F3CD8360ED3E31A148C8 /* EditorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTool.swift; sourceTree = "<group>"; };
 		7B4640ADC5C35705D1D47BBC /* V2Markers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Markers.swift; sourceTree = "<group>"; };
 		7C7AFC3D6D6E17A5BE225890 /* TemplateCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateCatalogTests.swift; sourceTree = "<group>"; };
+		7D05D2237D84525941911CA2 /* TextBackgroundGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextBackgroundGeometry.swift; sourceTree = "<group>"; };
 		7F39E4D6A23812EB175EC4C6 /* NeonixEditorUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NeonixEditorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F9EFB02765AB0B822A32273 /* TimelineZoomUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineZoomUITests.swift; sourceTree = "<group>"; };
 		818E82FB143D62989976330B /* PlaybackMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMetrics.swift; sourceTree = "<group>"; };
@@ -276,6 +286,7 @@
 		8487C5E63DA5117D05F28D30 /* EditorBottomBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorBottomBar.swift; sourceTree = "<group>"; };
 		8B5CDE1B3C927759AF9B44FF /* ClipTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipTool.swift; sourceTree = "<group>"; };
 		8C1DF97FFC8A04FDE95BEBA7 /* EditorTransformTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorTransformTests.swift; sourceTree = "<group>"; };
+		8E07B73FE4D52434CC58EE20 /* TextSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextSheet.swift; sourceTree = "<group>"; };
 		8F1793CB46E237A1BCAFDAC0 /* SeekTimeBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeekTimeBench.swift; sourceTree = "<group>"; };
 		8F6E061502D79EF0DD3FE2FF /* TemplatePackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplatePackage.swift; sourceTree = "<group>"; };
 		8F7B4FBF327999A80C04C2D5 /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineView.swift; sourceTree = "<group>"; };
@@ -298,6 +309,7 @@
 		B2363D7C42EBC7317717A6C0 /* StagePlayerSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StagePlayerSession.swift; sourceTree = "<group>"; };
 		B2A180F5AFAB6FBE7464DB9F /* MomentumDecay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MomentumDecay.swift; sourceTree = "<group>"; };
 		B2AF944383DC1F4B494FF42F /* AdjustSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdjustSheet.swift; sourceTree = "<group>"; };
+		B404E46422FA34C6E18D9409 /* TextLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLabView.swift; sourceTree = "<group>"; };
 		B7E249CA14FE84F1790F0E19 /* TemplateBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateBuild.swift; sourceTree = "<group>"; };
 		B82E6D52EFB383C20FFACA31 /* NeonixEditor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = NeonixEditor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B9197A91305F90154B911A8E /* TransformControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformControl.swift; sourceTree = "<group>"; };
@@ -457,6 +469,16 @@
 			path = TransformSheet;
 			sourceTree = "<group>";
 		};
+		57441146EB2B514BDDE6C7BE /* TextSheet */ = {
+			isa = PBXGroup;
+			children = (
+				715E3F072D47E68BC4C7815B /* EditorFont.swift */,
+				8E07B73FE4D52434CC58EE20 /* TextSheet.swift */,
+				47F1F01D5C1F1253A3CA0935 /* TextStyleValues.swift */,
+			);
+			path = TextSheet;
+			sourceTree = "<group>";
+		};
 		585DE13FC4473578B454C66D /* FilterSheet */ = {
 			isa = PBXGroup;
 			children = (
@@ -479,6 +501,7 @@
 				74016E1875C3E6F6F0804A35 /* Keyframes */,
 				5DF1BB851667FAF5C99412B9 /* Shell */,
 				0500EEBF28A961BF24AB918F /* StickerSheet */,
+				57441146EB2B514BDDE6C7BE /* TextSheet */,
 				C624743EFDD761E05291B60A /* Timeline */,
 				4AD08072C0EE106AAFA9A549 /* TransformSheet */,
 			);
@@ -601,6 +624,7 @@
 				F18D74797CCB472185F3854A /* LabSheetHeight.swift */,
 				D26B63CE862F68D97E246999 /* LabStage.swift */,
 				758CC3C14EA2B53DEF4D58C2 /* LabTransform.swift */,
+				B404E46422FA34C6E18D9409 /* TextLabView.swift */,
 				25C97F891A4E89E794E5431A /* TransformLabView.swift */,
 			);
 			path = DesignLab;
@@ -728,6 +752,7 @@
 				7C7AFC3D6D6E17A5BE225890 /* TemplateCatalogTests.swift */,
 				39252FDA6F22A855439532F7 /* TemplateFixturesTests.swift */,
 				6BF818F374877435D95A61AE /* TemplateFlowTests.swift */,
+				50DF5E7A278574CD0393DE8D /* TextBackgroundTests.swift */,
 				0CAA081C917BB97D2ACE23D9 /* TimelineZoomTests.swift */,
 				332FC2A46E174A516875592D /* TransformCommandTests.swift */,
 				3C6F161EA054A5D20A8CF0F2 /* TrimAutoScrollTests.swift */,
@@ -780,6 +805,7 @@
 				5C5F719E12D1DB789F812AD9 /* PresetCompiler.swift */,
 				0FC8AC3BAAECFB878512D7AD /* SampleClipOverride.swift */,
 				BFA06E739731D91BEE43A5C2 /* SampleProjectBuilder.swift */,
+				7D05D2237D84525941911CA2 /* TextBackgroundGeometry.swift */,
 				A861FB582B08DA846A564E09 /* TextLayoutCompiler.swift */,
 				A10EB5DD2C25BEA220BC35B0 /* TextPathResolver.swift */,
 			);
@@ -959,6 +985,7 @@
 				34D668C3B54B55877C5EA02A /* DisplayLinkClock.swift in Sources */,
 				A23DCF5C06A965FE127FAF65 /* EditorBottomBar.swift in Sources */,
 				5C83CD0A44A83392B5C67888 /* EditorCommand.swift in Sources */,
+				A061CC2B09FB550F0A0F683A /* EditorFont.swift in Sources */,
 				6F589B47C3709F104BE87A3B /* EditorHistory.swift in Sources */,
 				2274CDACE4770E0D463A8E38 /* EditorPlaybackEngine.swift in Sources */,
 				969B439C0050318DCB39E22C /* EditorShellView.swift in Sources */,
@@ -1026,8 +1053,12 @@
 				EA2F5897BCCFC0F71E32A786 /* TemplateUseFlowView.swift in Sources */,
 				AEE3F3BA6A9FBBBD043E7121 /* TemplateViewerView.swift in Sources */,
 				284EF2398C0F9EB7B888EC6E /* TemplatesDebugView.swift in Sources */,
+				66D3CDD28B95A01E0E484E60 /* TextBackgroundGeometry.swift in Sources */,
+				292C8185D8FDF8A97C5D62CB /* TextLabView.swift in Sources */,
 				3E7102B373D4E0D354EE8413 /* TextLayoutCompiler.swift in Sources */,
 				6B299B9E2D3618F4BD539ADA /* TextPathResolver.swift in Sources */,
+				EA64742E9F852C766575BB61 /* TextSheet.swift in Sources */,
+				03628E03385488BA41211753 /* TextStyleValues.swift in Sources */,
 				CF16555468A5AAE83A8380CD /* TimelineView.swift in Sources */,
 				54786E3FD05A0F0362374ED4 /* TimelineZoom.swift in Sources */,
 				9E071A0353F6C0D850B23263 /* ToolOptionsPanel.swift in Sources */,
@@ -1086,6 +1117,7 @@
 				6FE2F812634749D11DE7B24B /* TemplateCatalogTests.swift in Sources */,
 				CA13868E0D07326EBA4F39B5 /* TemplateFixturesTests.swift in Sources */,
 				5A34AB5AA68C54A582DF1DDA /* TemplateFlowTests.swift in Sources */,
+				0807416AA4CD550761F52B53 /* TextBackgroundTests.swift in Sources */,
 				9DDA09E64E8EABB9A94E3F34 /* TimelineZoomTests.swift in Sources */,
 				EA0537739D79A1C18930BAA9 /* TransformCommandTests.swift in Sources */,
 				51166BCA4FB39020725E7A56 /* TrimAutoScrollTests.swift in Sources */,

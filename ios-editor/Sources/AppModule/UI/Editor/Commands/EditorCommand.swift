@@ -362,9 +362,13 @@ struct AddTextLayerCommand: EditorCommand {
     let layerId: String
     let text: String
     let atMs: Double
+    /// Font, size and colour of the new clip; nil = the fixed defaults (Helvetica 32, white).
+    var style: TextStyleValues? = nil
     static let defaultDurationMs: Double = 3000
 
     func apply(to project: V2Project) -> V2Project {
+        var textValues = style ?? TextStyleValues()
+        textValues.text = text
         let document = EditorDocument(
             id: "doc-\(layerId)",
             composition: project.composition,
@@ -372,11 +376,12 @@ struct AddTextLayerCommand: EditorCommand {
             layers: [
                 EditorLayer(
                     id: layerId, kind: "text",
-                    frame: V2Frame(width: project.composition.width, height: 80),
+                    frame: V2Frame(width: project.composition.width, height: TextStyleValues.frameHeight(for: textValues, width: project.composition.width)),
                     timing: V2Timing(start: atMs, duration: Self.defaultDurationMs),
                     text: EditorTextLayer(
-                        text: text, fontFamily: "Helvetica", fontSize: 32, color: "#FFFFFFff",
-                        layout: EditorTextLayoutIntent(textAlign: "center", wrap: "none")
+                        text: text, fontFamily: textValues.fontFamily, fontSize: textValues.fontSize, color: textValues.color,
+                        layout: EditorTextLayoutIntent(textAlign: textValues.align, wrap: "none"),
+                        background: textValues.backgroundColor.map { EditorTextBackground(color: $0) }
                     )
                 )
             ]
@@ -494,11 +499,27 @@ struct SetTextContentCommand: EditorCommand {
     let text: String
 
     func apply(to project: V2Project) -> V2Project {
+        guard let layer = project.layers.first(where: { $0.id == layerId }), layer.textPayload != nil else { return project }
+        var values = TextStyleValues(layer: layer, composition: project.composition)   // the words change, the look stays
+        values.text = text
+        return SetTextCommand(layerId: layerId, values: values).apply(to: project)
+    }
+}
+
+/// Rewrites a text clip's words and look (font, size, colour, alignment, background) through the real text pipeline; position, duration
+/// and lane never move. The frame is re-fitted to the text block (around the clip's centre). No-op (fail closed) for an unknown
+/// layer or one that is not text.
+struct SetTextCommand: EditorCommand {
+    let layerId: String
+    let values: TextStyleValues
+
+    func apply(to project: V2Project) -> V2Project {
         var layers = project.layers
         guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
         let original = layers[index]
         guard case .text = original.payload else { return project }
 
+        let frame = V2Frame(width: original.frame.width, height: TextStyleValues.frameHeight(for: values, width: original.frame.width))
         let document = EditorDocument(
             id: "doc-edit-\(original.id)",
             composition: project.composition,
@@ -506,11 +527,12 @@ struct SetTextContentCommand: EditorCommand {
             layers: [
                 EditorLayer(
                     id: original.id, kind: "text",
-                    frame: original.frame,
+                    frame: frame,
                     timing: original.timing,
                     text: EditorTextLayer(
-                        text: text, fontFamily: "Helvetica", fontSize: 32, color: "#FFFFFFff",
-                        layout: EditorTextLayoutIntent(textAlign: "center", wrap: "none")
+                        text: values.text, fontFamily: values.fontFamily, fontSize: values.fontSize, color: values.color,
+                        layout: EditorTextLayoutIntent(textAlign: values.align, wrap: "none"),
+                        background: values.backgroundColor.map { EditorTextBackground(color: $0) }
                     )
                 )
             ]
@@ -519,6 +541,7 @@ struct SetTextContentCommand: EditorCommand {
 
         var updated = original
         updated.payload = recompiled.payload
+        updated.frame = frame
         layers[index] = updated
         return project.withLayers(layers)
     }

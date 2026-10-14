@@ -7,6 +7,7 @@ struct DesignLabView: View {
     @State private var showingAdjust = false
     @State private var showingFilter = false
     @State private var showingKeyframe = false
+    @State private var showingText = false
 
     var body: some View {
         List {
@@ -46,6 +47,15 @@ struct DesignLabView: View {
                     }
                 }
                 .accessibilityIdentifier("lab-keyframe")
+
+                Button { showingText = true } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Text picker").font(.body.weight(.semibold)).foregroundColor(.primary)
+                        Text("Two tabs, Font and Style, on a live photo; the text field heads the sheet (CapCut) or sits at the bottom like Filter's Intensity bar.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("lab-text")
             } header: {
                 Text("Experiments")
             } footer: {
@@ -57,5 +67,6 @@ struct DesignLabView: View {
         .fullScreenCover(isPresented: $showingAdjust) { AdjustLabView() }
         .fullScreenCover(isPresented: $showingFilter) { FilterLabView() }
         .fullScreenCover(isPresented: $showingKeyframe) { KeyframeLabView() }
+        .fullScreenCover(isPresented: $showingText) { TextLabView() }
     }
 }

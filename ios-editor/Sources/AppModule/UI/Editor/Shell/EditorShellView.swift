@@ -61,6 +61,13 @@ struct EditorShellView: View {
     @State private var showingFilterSheet = false
     @State private var showingStickerSheet = false
     @State private var showingGraphSheet = false
+    /// The Text sheet session: one undo step for everything done in it (like Transform), `textSessionOriginal` is the project before it.
+    @State private var showingTextSheet = false
+    @State private var textValues = TextStyleValues()
+    @State private var textSessionOriginal: V2Project?
+    @State private var textSessionInitial = TextStyleValues()
+    @State private var textSessionLayerId: String?
+    @State private var textSessionIsNew = false
     /// The Transform values last synced from the playhead on a keyframed layer: an edit that equals them writes nothing.
     @State private var transformSynced: TransformValues?
     @State private var stickerStore = StickerStore()
@@ -153,11 +160,51 @@ struct EditorShellView: View {
     /// the command) so it can be selected immediately after — typing again
     /// right away edits the clip just added instead of creating a second
     /// one.
-    private func addText(_ text: String) {
-        let layerId = "text-\(UUID().uuidString.prefix(8))"
-        apply(AddTextLayerCommand(layerId: layerId, text: text, atMs: currentTimeMs))
-        selectedLayerId = layerId
-        selectedAudioClipId = nil
+    // MARK: Text sheet
+
+    /// "Add text" (new = true) puts a clip with the default words ("Hello") at the playhead and edits it live; "Edit text" opens the selected
+    /// text clip. Closing the sheet with empty words undoes the whole session (a new clip disappears, an old one keeps its words).
+    private func openTextSheet(new: Bool) {
+        let composition = project.composition
+        textSessionOriginal = project
+        textSessionIsNew = new
+        if new {
+            let layerId = "text-\(UUID().uuidString.prefix(8))"
+            var values = TextStyleValues(composition: composition)
+            values.text = TextStyleValues.defaultText
+            setProject(AddTextLayerCommand(layerId: layerId, text: values.text, atMs: currentTimeMs, style: values).apply(to: project))
+            selectedLayerId = layerId
+            selectedAudioClipId = nil
+            selectedTool = nil
+            textValues = values
+            textSessionLayerId = layerId
+        } else {
+            guard let layer = selectedLayer, layer.type == "text" else { textSessionOriginal = nil; return }
+            textValues = TextStyleValues(layer: layer, composition: composition)
+            textSessionLayerId = layer.id
+        }
+        textSessionInitial = textValues
+        showingTextSheet = true
+    }
+
+    /// Live: every change goes straight to the clip (bypassing `apply(_:)`); empty words show the placeholder.
+    private func updateText(_ values: TextStyleValues) {
+        guard showingTextSheet, let id = textSessionLayerId else { return }
+        var shown = values
+        if shown.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { shown.text = TextStyleValues.placeholder }
+        setProject(SetTextCommand(layerId: id, values: shown).apply(to: project))
+    }
+
+    private func finishTextSession() {
+        guard let original = textSessionOriginal else { return }
+        defer { textSessionOriginal = nil; textSessionLayerId = nil }
+        let empty = textValues.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if empty {
+            setProject(original)
+            if textSessionIsNew { selectedLayerId = nil }
+            return
+        }
+        if textSessionIsNew || textValues != textSessionInitial { history.record(current: original) }
     }
 
     /// Called once when a trim-handle drag starts — snapshots the
@@ -371,6 +418,7 @@ struct EditorShellView: View {
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
         .sheet(isPresented: $showingFilterSheet) { filterSheet }
         .sheet(isPresented: $showingStickerSheet) { stickerSheet }
+        .sheet(isPresented: $showingTextSheet, onDismiss: finishTextSession) { TextSheet(values: $textValues, composition: project.composition, selectAllOnFirstFocus: textSessionIsNew) }
         .sheet(isPresented: $showingGraphSheet) {
             if let id = selectedLayerId, let layer = selectedLayer, let start = graphSegmentStart {
                 GraphSheet(easing: LabEasing(v2: TransformKeyframes.easing(of: layer, segmentStart: start))) {
@@ -380,6 +428,7 @@ struct EditorShellView: View {
         }
         .sheet(isPresented: $showingTransformSheet) { transformSheet }
         .onChange(of: transformValues) { _, new in updateTransform(new) }
+        .onChange(of: textValues) { _, new in updateText(new) }
         // Scrubbing with the Transform sheet open on a keyframed layer: show the values at the new playhead (no write).
         .onChange(of: currentTimeMs) { _, time in
             guard showingTransformSheet, let layer = selectedLayer, TransformKeyframes.isKeyframed(layer) else { return }
@@ -452,7 +501,7 @@ struct EditorShellView: View {
         case .opacity: openTransformSheet(focus: .opacity)
         case .adjust: showingAdjustSheet = true
         case .filter: showingFilterSheet = true
-        case .editText: selectedTool = .text
+        case .editText: openTextSheet(new: false)
         case .mirror:
             guard let id = selectedLayerId else { return }
             apply(MirrorLayerCommand(layerId: id))
@@ -547,8 +596,7 @@ struct EditorShellView: View {
             onAddSoundEffect: { preset in
                 apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
             },
-            onAddText: { text in addText(text) },
-            onSetTextContent: { layerId, text in apply(SetTextContentCommand(layerId: layerId, text: text)) },
+            onAddText: { openTextSheet(new: true) },
             onComingSoon: { title in comingSoonTitle = title }
         )
     }

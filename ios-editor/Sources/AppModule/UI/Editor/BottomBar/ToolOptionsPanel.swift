@@ -21,10 +21,8 @@ struct ToolOptionsPanel: View {
     /// Hiệu ứng âm thanh — see `SoundEffectCatalog`'s own doc comment: this
     /// is a one-tap sound-effect library, not a DSP processing effect.
     let onAddSoundEffect: (SoundEffectPreset) -> Void
-    /// Văn bản — add a new text clip at the playhead, or edit the selected
-    /// one's content (same `selectedLayer` Chỉnh sửa already reads).
-    let onAddText: (String) -> Void
-    let onSetTextContent: (String, String) -> Void
+    /// Văn bản — "Add text": the shell adds a clip at the playhead and opens the Text sheet on it.
+    let onAddText: () -> Void
     /// A feature that is only a button so far (Auto captions): the shell shows its "coming soon" note.
     let onComingSoon: (String) -> Void
 
@@ -45,7 +43,7 @@ struct ToolOptionsPanel: View {
         case .effects:
             SoundEffectsOptionsRow(onSelect: onAddSoundEffect)
         case .text:
-            TextOptionsRow(selectedLayer: selectedLayer, onAddText: onAddText, onSetTextContent: onSetTextContent, onComingSoon: onComingSoon)
+            TextOptionsRow(onAddText: onAddText, onComingSoon: onComingSoon)
         default:
             EmptyView()
         }
@@ -61,54 +59,17 @@ extension EditorTool {
     }
 }
 
-/// Văn bản. With no text clip selected the Text tool first offers a short list - **Add text** and **Auto captions**
-/// (user 2026-10-12); Add text then shows the text field (`AddTextLayerCommand`, a new clip at the playhead). With a
-/// text clip selected ("Edit text" in its row) it goes straight to the field and rewrites just that clip's content
-/// (`SetTextContentCommand`; its position and duration never move).
+/// Văn bản. The Text tool is a short list (user 2026-10-12): **Add text** (adds a clip at the playhead and opens the Text sheet on
+/// it) and **Auto captions**. Editing an existing text clip goes through its own row ("Edit text") to the same sheet.
 private struct TextOptionsRow: View {
-    let selectedLayer: V2Layer?
-    let onAddText: (String) -> Void
-    let onSetTextContent: (String, String) -> Void
+    let onAddText: () -> Void
     let onComingSoon: (String) -> Void
 
-    @State private var draftText: String = ""
-    @State private var isTyping = false
-
-    private var selectedTextLayer: V2Layer? {
-        guard let selectedLayer, selectedLayer.type == "text" else { return nil }
-        return selectedLayer
-    }
-
-    private var currentText: String? {
-        guard case .text(let payload) = selectedTextLayer?.payload else { return nil }
-        return payload.source.text
-    }
-
-    private var canCommit: Bool {
-        !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     var body: some View {
-        Group {
-            if isTyping || selectedTextLayer != nil {
-                HStack(spacing: 12) {
-                    TextField(selectedTextLayer == nil ? "Enter text..." : "Edit text...", text: $draftText)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(commit)
-                        .accessibilityIdentifier("editorTextField")
-                    Button(selectedTextLayer == nil ? "Add Text" : "Done", action: commit)
-                        .disabled(!canCommit)
-                }
-                .padding(.horizontal)
-            } else {
-                HStack(spacing: 28) {
-                    choice("Add text", symbol: "text.badge.plus", id: "text-add") { isTyping = true }
-                    choice("Auto captions", symbol: "captions.bubble", id: "text-captions") { onComingSoon("Auto captions") }
-                }
-            }
+        HStack(spacing: 28) {
+            choice("Add text", symbol: "text.badge.plus", id: "text-add", action: onAddText)
+            choice("Auto captions", symbol: "captions.bubble", id: "text-captions") { onComingSoon("Auto captions") }
         }
-        .onAppear { draftText = currentText ?? "" }
-        .onChange(of: selectedLayer?.id) { _, _ in draftText = currentText ?? ""; isTyping = false }
     }
 
     private func choice(_ title: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
@@ -122,18 +83,6 @@ private struct TextOptionsRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
-    }
-
-    private func commit() {
-        let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if let layer = selectedTextLayer {
-            onSetTextContent(layer.id, trimmed)
-        } else {
-            onAddText(trimmed)
-            draftText = ""
-            isTyping = false
-        }
     }
 }
 

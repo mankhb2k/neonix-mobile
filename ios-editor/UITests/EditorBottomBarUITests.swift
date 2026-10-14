@@ -118,10 +118,47 @@ final class EditorBottomBarUITests: XCTestCase {
         saveShot(app, "bar-4-text")
         app.buttons["text-captions"].tap()
         XCTAssertTrue(app.staticTexts["Auto captions is coming soon"].waitForExistence(timeout: 3))
-        app.buttons["text-add"].tap()
-        XCTAssertTrue(app.textFields["editorTextField"].waitForExistence(timeout: 5), "Add text shows the text field")
+        app.buttons["text-captions"].tap()
         app.buttons["toolbarBack"].tap()
         XCTAssertTrue(app.buttons["tool-audio"].waitForExistence(timeout: 5))
+    }
+
+    /// Add text opens the Text sheet (Font / Style tabs, the field at the bottom); typing, a font and a colour reach the clip;
+    /// closing it with empty words leaves nothing behind.
+    func testAddTextOpensTheTextSheetAndEditsTheNewClipLive() throws {
+        let app = openTripToParis()
+        app.buttons["tool-text"].tap()
+        app.buttons["text-add"].tap()
+        let field = app.textFields["textField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Add text opens the sheet with the field at the bottom")
+        XCTAssertTrue(app.buttons["textTab-Font"].exists && app.buttons["textTab-Style"].exists)
+        XCTAssertEqual(field.value as? String, "Hello", "a new clip starts with default words")
+        field.tap()
+        field.typeText("Bye")
+        XCTAssertEqual(field.value as? String, "Bye", "the first tap selected the default words, so typing replaced them")
+        XCTAssertFalse(app.buttons["fontCell-Georgia-Bold"].exists, "while typing the sheet shrinks to the field and the tabs")
+        app.buttons["textTab-Font"].tap()   // ends the editing and brings the fonts back
+        XCTAssertTrue(app.buttons["fontCell-Georgia-Bold"].waitForExistence(timeout: 5))
+        app.buttons["fontCell-Georgia-Bold"].tap()
+        app.buttons["textTab-Style"].tap()
+        XCTAssertTrue(app.buttons["textColor-#FF3B30ff"].waitForExistence(timeout: 5))
+        app.buttons["textColor-#FF3B30ff"].tap()
+        app.buttons["textBackground-#FFFFFFff"].tap()
+        app.buttons["textColor-#000000ff"].tap()
+        saveShot(app, "text-sheet")
+        app.buttons["textDone"].tap()
+        XCTAssertTrue(app.buttons["action-edit-text"].waitForExistence(timeout: 5), "the new text clip is selected, with its own tools")
+
+        // Empty words: the session is undone, no clip is left.
+        app.buttons["toolbarBack"].tap()
+        app.buttons["tool-text"].tap()
+        app.buttons["text-add"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(XCUIKeyboardKey.delete.rawValue)   // the default words are selected: one delete empties the field
+        XCTAssertEqual(field.value as? String ?? "", "Enter text", "an empty field reports its placeholder")
+        app.buttons["textDone"].tap()
+        XCTAssertFalse(app.buttons["action-edit-text"].waitForExistence(timeout: 2), "an empty new text clip is discarded")
     }
 
     func testDeleteRemovesTheClipAndReturnsToTheMainRow() throws {
@@ -192,8 +229,8 @@ final class EditorBottomBarUITests: XCTestCase {
         saveShot(app, "bar-9-text-clip-row")
 
         app.buttons["action-edit-text"].tap()
-        XCTAssertTrue(app.textFields["editorTextField"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.textFields["editorTextField"].value as? String == "", "the field holds the clip's words")
+        XCTAssertTrue(app.textFields["textField"].waitForExistence(timeout: 5), "Edit text opens the Text sheet")
+        XCTAssertFalse(app.textFields["textField"].value as? String == "", "the field holds the clip's words")
     }
 
     /// Filter opens from the clip row: a grid with None first, no Intensity until a filter is picked, then the slider.
@@ -281,4 +318,40 @@ extension EditorBottomBarUITests {
     }
 
 
+
+    /// Two lines of different length with a white label: the label steps with the lines (Facebook story style).
+    func testTextBackgroundStepsAcrossTwoLines() throws {
+        let app = openTripToParis()
+        app.buttons["tool-text"].tap()
+        app.buttons["text-add"].tap()
+        let field = app.textFields["textField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("This is the\nFacebook style")
+        app.buttons["textTab-Style"].tap()
+        XCTAssertTrue(app.buttons["textBackground-#FFFFFFff"].waitForExistence(timeout: 5))
+        app.buttons["textBackground-#FFFFFFff"].tap()
+        app.buttons["textColor-#000000ff"].tap()
+        sleep(1)
+        saveShot(app, "text-background")
+        app.buttons["textDone"].tap()
+        XCTAssertTrue(app.buttons["action-edit-text"].waitForExistence(timeout: 5))
+    }
+
+    /// While the field is edited the sheet is only the field and the tabs (the keyboard sits right under them); the stage stays visible.
+    func testTextSheetShrinksToFieldAndTabsWhileTyping() throws {
+        let app = openTripToParis()
+        app.buttons["tool-text"].tap()
+        app.buttons["text-add"].tap()
+        let field = app.textFields["textField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["fontCell-Georgia-Bold"].waitForExistence(timeout: 5), "at rest the fonts are there")
+        saveShot(app, "text-sheet-rest")
+        field.tap()
+        sleep(2)
+        saveShot(app, "text-sheet-typing")
+        XCTAssertFalse(app.buttons["fontCell-Georgia-Bold"].exists)
+        XCTAssertTrue(app.buttons["textTab-Font"].exists && app.buttons["textTab-Style"].exists, "the tabs stay")
+        XCTAssertLessThan(field.frame.minY, app.windows.firstMatch.frame.height, "the field is on screen")
+    }
 }

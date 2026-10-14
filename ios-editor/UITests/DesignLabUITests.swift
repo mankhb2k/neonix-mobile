@@ -261,4 +261,59 @@ final class DesignLabUITests: XCTestCase {
         app.buttons["graphEditorDone"].tap()
         XCTAssertTrue(app.staticTexts["Custom"].waitForExistence(timeout: 5), "the edited graph is named Custom")
     }
+
+    /// Text lab: both layouts, the Font and Style tabs, a font and a preset change the stage text.
+    func testTextLabShowsFontAndStyleTabsInBothLayouts() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Text picker"]
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["textLabClose"].waitForExistence(timeout: 10))
+
+        app.buttons["textAction-Edit text"].tap()
+        XCTAssertTrue(app.textFields["textField"].waitForExistence(timeout: 5))
+        saveShot(app, "text-A-font")
+        app.buttons["textTab-Style"].tap()
+        XCTAssertTrue(app.buttons["stylePreset-red-outline"].waitForExistence(timeout: 5))
+        app.buttons["stylePreset-red-outline"].tap()
+        saveShot(app, "text-A-style")
+        app.buttons["textTab-Font"].tap()
+        XCTAssertTrue(app.buttons["fontCell-Georgia-Bold"].waitForExistence(timeout: 5))
+        app.buttons["fontCell-Georgia-Bold"].tap()
+        app.buttons["textDone"].tap()
+
+        app.buttons["B Field at bottom"].tap()
+        app.buttons["textAction-Edit text"].tap()
+        XCTAssertTrue(app.textFields["textField"].waitForExistence(timeout: 5))
+        saveShot(app, "text-B-font")
+        app.buttons["textTab-Style"].tap()
+        sleep(1)
+        saveShot(app, "text-B-style")
+    }
+
+    func testTextLabFieldAcceptsTyping() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        link.tap()
+        app.staticTexts["Text picker"].tap()
+        app.buttons["textAction-Edit text"].tap()
+        let field = app.textFields["textField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        sleep(1)
+        saveShot(app, "text-typing-focus")
+        field.typeText("Hello")
+        sleep(1)
+        saveShot(app, "text-typing-after")
+        XCTAssertEqual(field.value as? String, "Hello", "the field starts empty, so typing is not appended to a default")
+    }
 }

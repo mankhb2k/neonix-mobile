@@ -439,4 +439,48 @@ final class EditorCommandTests: XCTestCase {
         }
         XCTAssertEqual(values, [0, 0.3, 0.5, 0.6, 1])
     }
+
+    // MARK: Text sheet (SetTextCommand, TextStyleValues)
+
+    func testAddTextLayerCommandUsesTheGivenStyle() {
+        let project = makeProject()
+        var style = TextStyleValues(composition: project.composition)
+        style.fontFamily = "Georgia-Bold"; style.fontSize = 60; style.color = "#FF3B30ff"; style.text = "Hi"
+        let layer = AddTextLayerCommand(layerId: "t", text: "Hi", atMs: 0, style: style).apply(to: project).layers.first
+        let read = TextStyleValues(layer: layer!, composition: project.composition)
+        XCTAssertEqual(read.fontFamily, "Georgia-Bold")
+        XCTAssertEqual(read.fontSize, 60)
+        XCTAssertEqual(read.color.lowercased(), "#ff3b30ff")
+        XCTAssertEqual(read.text, "Hi")
+        XCTAssertGreaterThanOrEqual(layer!.frame.height, 60 * 1.2, "the frame fits one line of a big font")
+    }
+
+    func testSetTextCommandChangesTheLookWithoutMovingTheClip() {
+        let project = makeProject()
+        let added = AddTextLayerCommand(layerId: "t", text: "Hello", atMs: 500).apply(to: project)
+        var values = TextStyleValues(layer: added.layers[0], composition: project.composition)
+        values.fontFamily = "Didot-Bold"; values.fontSize = 70; values.color = "#007AFFff"; values.text = "Bye"
+        let result = SetTextCommand(layerId: "t", values: values).apply(to: added).layers[0]
+        let read = TextStyleValues(layer: result, composition: project.composition)
+        XCTAssertEqual([read.fontFamily, read.text], ["Didot-Bold", "Bye"])
+        XCTAssertEqual(read.fontSize, 70)
+        XCTAssertEqual(result.timing.start, 500)
+        XCTAssertEqual(result.order, added.layers[0].order)
+        XCTAssertEqual(result.frame.width, added.layers[0].frame.width)
+    }
+
+    func testSetTextContentKeepsTheStyle() {
+        let project = makeProject()
+        var style = TextStyleValues(composition: project.composition); style.fontFamily = "Futura-CondensedExtraBold"; style.color = "#34C759ff"
+        let added = AddTextLayerCommand(layerId: "t", text: "A", atMs: 0, style: style).apply(to: project)
+        let read = TextStyleValues(layer: SetTextContentCommand(layerId: "t", text: "B").apply(to: added).layers[0], composition: project.composition)
+        XCTAssertEqual(read.text, "B")
+        XCTAssertEqual(read.fontFamily, "Futura-CondensedExtraBold")
+        XCTAssertEqual(read.color.lowercased(), "#34c759ff")
+    }
+
+    func testTheDefaultTextSizeScalesWithTheCanvas() {
+        XCTAssertEqual(TextStyleValues.defaultSize(for: V2Composition(width: 360, height: 640, fps: 30, background: "#000000")), 32)
+        XCTAssertEqual(TextStyleValues.defaultSize(for: V2Composition(width: 1080, height: 1920, fps: 30, background: "#000000")), 96)
+    }
 }

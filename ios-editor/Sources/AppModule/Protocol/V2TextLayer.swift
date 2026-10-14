@@ -148,6 +148,16 @@ struct V2TextLayout: Codable {
     var contentHeight: Double?
     var contentOffsetX: Double?
     var contentOffsetY: Double?
+    /// A filled shape behind the text, already resolved (see `V2TextBackground`). Optional: absent = no background.
+    var background: V2TextBackground?
+}
+
+/// The background label of a text layer (rounded, hugging every line - Facebook / Instagram story style). Atomic and renderer-neutral:
+/// plain path geometry in the layer's own coordinates (the same space as the chunks' `x`/`y`) and a fill. The Editor tier keeps the
+/// intent (colour, "story style"); the compiler resolves the corners, so no renderer ever re-derives them.
+struct V2TextBackground: Codable {
+    var contours: [V2PathContour]
+    var fill: V2Paint
 }
 
 /// Authoring shorthand for a typewriter/stagger effect. Kept compact and

@@ -227,6 +227,9 @@ private struct LayerContentView: View {
             // anchoring it at the resolved `x`/`y` this view already
             // computed, which would make every `x`/`y` below meaningless.
             ZStack(alignment: .topLeading) {
+                if let background = frame.textBackground, let fill = background.fill.flatColor {
+                    Path(MotionPathResolver.buildCGPath(contours: background.contours)).fill(Color(hex: fill))
+                }
                 ForEach(Array((frame.textRuns ?? []).enumerated()), id: \.offset) { _, run in
                     Text(run.text)
                         .font(.custom(run.fontFamily, size: run.fontSize))

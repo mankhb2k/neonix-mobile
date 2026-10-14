@@ -61,12 +61,19 @@ struct EditorTextPathIntent: Codable {
     var startOffset: Double
 }
 
+/// A rounded label behind the text that hugs every line (story style). Size-dependent geometry (padding, radius) is derived from the
+/// font size in `TextBackgroundGeometry`; only the colour is authored.
+struct EditorTextBackground: Codable, Equatable {
+    var color: String
+}
+
 struct EditorTextLayer: Codable {
     var text: String
     var fontFamily: String
     var fontSize: Double
     var color: String
     var layout: EditorTextLayoutIntent
+    var background: EditorTextBackground?
     var typewriter: EditorTypewriterIntent?
     var wave: EditorTextWaveIntent?
     var textPath: EditorTextPathIntent?

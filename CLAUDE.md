@@ -233,10 +233,25 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   keyframes (the second re-timed) and, when the cut is inside the animated range, gets a keyframe at the cut (end of the first, start of
   the second) holding the interpolated value; a bezier graph on the cut segment is divided exactly (`splitEasing`, de Casteljau). **Left trim** shifts the keyframes' local times so they stay with the
   picture (may go negative). Adjust/Filter are not keyframed. The graph picker still uses the Design Lab's `LabEasing` (style not final).
-- **Text tool**: add/edit goes through the real `compile(_:)` text pipeline
-  (`AddTextLayerCommand`, `SetTextContentCommand`), never hand-built chunks. Fixed
-  defaults (Helvetica 32, white, centred, no wrap, 3 s); no font/colour picker or
-  repositioning yet.
+- **Text tool** (`UI/Editor/TextSheet`, 2026-10-13, layout B of the Design Lab's *Text picker*): "Add text" (Text tool list) puts a clip with
+  the default words "Hello" at the playhead (selected on the first tap of the field, so typing replaces them) and opens the **Text sheet** on it; "Edit text" in a text clip's row opens the same sheet. Two tabs,
+  **Font** (22 iOS system fonts, `EditorFont`, each name drawn in its font) and **Style** (12 colour swatches + Size), the text field
+  heading the sheet (CapCut's layout; ✓ closes). **While the field is edited the content is hidden and the sheet shrinks to the field + tabs
+  (130 pt)**, because the system lifts a sheet by the keyboard's height and a full sheet would cover the stage; a tab tap ends the editing and
+  brings the content back. Every change is live (`SetTextCommand`, bypassing `apply`) and the whole session is **one undo step**;
+  closing with empty words discards it (a new clip disappears, an old one keeps its words). `TextStyleValues` reads the look back from
+  the clip's first span; sizes are canvas-relative (default 8.9 % of the width = the old 32 on 360). Everything goes through the real
+  `compile(_:)` text pipeline (`AddTextLayerCommand(style:)`, `SetTextCommand`, `SetTextContentCommand` keeps the look), never
+  hand-built chunks. **Multi-line** (Return = new line, the check mark closes) with **alignment** (left/centre/right; V2 keeps only each
+  line's resolved x, so `TextStyleValues` reads it back by asking which alignment reproduces those x's). **Background label** (Facebook /
+  Instagram story style, user's reference 2026-10-14): one rounded shape hugging every line - convex corners outside, concave fillets where
+  lines of different length meet. Intent = `EditorTextBackground {color}`; `TextBackgroundGeometry` resolves it at compile time into
+  `V2TextLayout.background` = `{contours: [V2PathContour] (lines + arcs), fill}` (atomic, layer-local coordinates, the same space as the chunks'
+  x/y; padding 0.32 / 0.10 and radius 0.30 of the font size). The lines are laid out in a box narrowed by the padding and shifted in, and the
+  clip's frame is exactly the text block (+ padding), so a text clip is centred where it was added (it used to be top-anchored in a fixed
+  80 pt frame). **The TS side (`packages/motion-protocol`) has not got `layout.background` yet** (the user removed that folder from the working
+  tree on 2026-10-14 to focus on Swift; the deletion is not committed - restore it from git when the protocol is worked on again). Not built yet: stroke (V2 already has `stroke`/`strokeWidth`/`paintOrder`; the renderer draws none), wrap, shadow,
+  letter spacing, repositioning on the stage. Unverified: the keyboard's effect on the 360 pt sheet on a small iPhone.
 - **Audio**: `AudioMixEngine` (`AVAudioEngine` + one node per active clip) plays only
   during Play, resyncs on every `play(atMs:)`, no sample-accurate master clock. **Never
   call `engine.start()` without a source** (it hung the test runner for 600 s). Import:

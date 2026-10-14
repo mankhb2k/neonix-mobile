@@ -208,6 +208,8 @@ struct ResolvedLayerFrame {
     /// `ResolvedTextRun`. Always already-shaped (no wrap/align left to
     /// decide); the renderer only ever draws these numbers.
     var textRuns: [ResolvedTextRun]?
+    /// The text layer's background label, as authored (resolved geometry; drawn behind the runs).
+    var textBackground: V2TextBackground?
 }
 
 /// One already-positioned, already-substringed piece of text ready to draw —
@@ -343,7 +345,8 @@ func sampleLayer(_ layer: V2Layer, atMs: Double) -> ResolvedLayerFrame {
         perspective: layer.transform.perspective,
         elapsedMs: min(max(atMs - layer.timing.start, 0), layer.timing.duration),
         sourceMs: VideoTimeMapping(layer: layer)?.sourceMs(atTimelineMs: atMs),
-        textRuns: layer.textPayload.map { resolveTextRuns($0, layer: layer, atMs: atMs) }
+        textRuns: layer.textPayload.map { resolveTextRuns($0, layer: layer, atMs: atMs) },
+        textBackground: layer.textPayload?.layout?.background
     )
 
     var motionOffsetDistance = layer.motion?.offsetDistance ?? 0

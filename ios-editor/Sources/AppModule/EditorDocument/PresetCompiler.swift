@@ -171,11 +171,25 @@ private func compileTextPayload(_ editorLayer: EditorLayer) -> V2TextLayerPayloa
     guard let intent = editorLayer.text else {
         return V2TextLayerPayload(source: V2TextSource(text: ""), layout: nil, chunks: [])
     }
-    let (layout, lines) = TextLayoutCompiler.compile(
+    // A background label needs room around the text: the lines are laid out in a narrower box and shifted in by the padding, so the
+    // label stays inside the layer frame (the layer clips to it).
+    let padX = intent.background == nil ? 0 : TextBackgroundGeometry.padX(fontSize: intent.fontSize)
+    let padY = intent.background == nil ? 0 : TextBackgroundGeometry.padY(fontSize: intent.fontSize)
+    var (layout, lines) = TextLayoutCompiler.compile(
         text: intent.text, fontFamily: intent.fontFamily, fontSize: intent.fontSize,
         textAlign: intent.layout.textAlign, wrap: intent.layout.wrap,
-        maxWidth: editorLayer.frame.width
+        maxWidth: editorLayer.frame.width - 2 * padX
     )
+    if let background = intent.background {
+        let boxes = lines.map { (left: $0.x, right: $0.x + $0.width + 2 * padX) }
+        let edges = (0...lines.count).map { i -> Double in
+            i == 0 ? 0 : (i == lines.count ? 2 * padY + Double(lines.count) * layout.lineHeight : padY + Double(i) * layout.lineHeight)
+        }
+        if let contour = TextBackgroundGeometry.contour(lines: boxes, boundaries: edges, radius: TextBackgroundGeometry.radius(fontSize: intent.fontSize)) {
+            layout.background = V2TextBackground(contours: [contour], fill: .color(background.color))
+        }
+        lines = lines.map { ResolvedTextLine(range: $0.range, x: $0.x + padX, y: $0.y + padY, width: $0.width) }
+    }
     // Matches real SVG `<tspan>` flexibility: font lives on the span, not
     // the layer — every span this compiler emits today happens to use the
     // same font (`EditorTextLayer` only authors one), but Protocol V2 keeps
