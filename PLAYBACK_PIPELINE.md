@@ -710,6 +710,33 @@ composition của iPhone), nên cắt xuống ≤ 1.67 ms không bao giờ vư�
 toàn; lỗi chỉ lộ với file PTS nằm đúng biên (29.97/59.94 fps, clip dựng/xuất lại không có độ lệch này — gồm cả exporter sau này, ảnh nguồn
 từ máy quay khác). Chưa đo: clip stock 30 fps trong app, và `AVPlayer` khi coasting.
 
+### 2026-10-15 · Tốc độ phát 0.1x–10x · iPhone 13 thật (iPhone14,5, iOS 26.7.1) · `SpeedBench` (Debug, `SPEED_BENCH=1`)
+
+Footage thật `iphone-footage.MOV` (89.8 s, 1080x1920, **60 fps, HEVC**, 200 MB). Cách phát đúng như app: `AVPlayer`, `automaticallyWaitsToMinimizeStalling = false`,
+tắt tiếng, đặt `rate` trực tiếp. `canPlaySlowForward`/`canPlayFastForward` đều true. Thermal 0, không Low Power. Mỗi mức 4.5–6 s, hai đường: `AVPlayerLayer` (video thẳng)
+và `AVPlayerItemVideoOutput` copy (đường video có filter, chưa có Core Image).
+
+| tốc độ yêu cầu | tốc độ đồng hồ thực | bắt đầu chạy (ms) | tick p95 / max (ms) | đứng hình | CPU % | khung/s thật (đường Output) |
+|---|---|---|---|---|---|---|
+| 0.1x | 0.10x | 246–356 | 16.7 / 73 (layer) | 0 | 3–5 | 6 |
+| 0.25x | 0.25x | 155–171 | 16.7–18.1 | 0 | 2–3 | 15 |
+| 0.5x | 0.50x | 130–151 | 16.7–18.2 | 0 | 2–4 | 30 |
+| 1x | 1.00x | 156–191 | 16.9 / 20 | 0 | 2–6 | 60 |
+| 2x – 8x | đúng | 107–174 | ≤ 17.5 / ≤ 20.4 | 0 | 1–8 | 59–60 |
+| 9x, 9.5x | đúng | 121–127 | 17.2 / 18.5 | 0 | 7 | 59–60 |
+| **10x** | 10.00x | 164–176 | 18.1 / 21.5 | 0 | 3 | **10** |
+| 12x, 16x | đúng | 188–200 | 18.2 / 19.2 | 0 | 3 | **10** |
+
+- **Đồng hồ luôn đúng** ở mọi mức (0.10x … 16x), không đứng hình, CPU rất thấp (bộ giải mã phần cứng), tick màn hình đều (p95 ≈ 16.7 ms).
+- **Vách đá ở đúng 10x**: tới 9.5x vẫn ~60 khung/s khác nhau; từ 10x trở lên chỉ còn **10 khung/s** (đồng hồ vẫn chạy đúng 10x) - AVFoundation chuyển sang
+  phát theo khung **keyframe** (CPU rơi từ 7 % xuống 3 % cùng lúc). Đây là slideshow, không phải giật do thiếu CPU.
+- **0.1x** chỉ có 6 khung khác nhau mỗi giây (60 fps × 0.1): hình đứt quãng vì không có nội suy khung (chưa có "Smooth slow-mo").
+- **Đổi tốc độ khi đang phát** (1x → 10x → 0.1x → 1x → 0.25x, cửa sổ 100 ms): đồng hồ đạt tốc độ mới sau **142–311 ms** (đã gồm ~100 ms của cửa sổ đo),
+  hai lần (→10x và →0.1x) đồng hồ **lùi 1 nhịp** (nhỏ, > 1 ms). Cho Speed Curve: playhead nên bị chặn không lùi.
+- Bắt đầu chạy từ lúc đặt `rate`: 107–356 ms (0.1x chậm nhất, lần đầu).
+
+Chưa đo: footage 30 fps/4K/HDR, đường có Core Image, âm thanh theo tốc độ (`AudioMixEngine`), clip có keyframe thưa.
+
 ### Baseline trên máy thật — tiến độ
 - [ ] T0 · [ ] T1 · [ ] T2 · [~] **T3** (mới có bản coasting-heavy, 2026-10-09) · [ ] T4 · [ ] T5 · [ ] T6 · [ ] T7
 
@@ -745,6 +772,11 @@ từ máy quay khác). Chưa đo: clip stock 30 fps trong app, và `AVPlayer` kh
 - **Momentum không phải nguyên nhân** (quan sát của người dùng khi tách vào sandbox).
 - Sơ đồ clock từng chặn bởi `framesReady` (đường `VideoFrameServer` cũ) đã bị thay bằng
   `AVPlayer` + `PlayerSeekCoordinator`; `VideoFrameServer` giờ chỉ là dự phòng.
+
+### 2026-10-15 · Quyết định: Speed giới hạn **0.1x – 9x**
+
+Bằng chứng: bảng tốc độ ở §9 (iPhone 13, footage 1080p60 HEVC): tới 9.5x vẫn ~60 khung khác nhau/s, từ **10x chỉ còn 10 khung/s** (hệ thống chuyển sang phát keyframe), đồng hồ vẫn đúng.
+Người dùng chọn trần **9x** (an toàn, vẫn mượt) thay vì giữ 10x. Thang đo (người dùng chọn sau đó): **tuyến tính, mỗi vạch = 0.1x**, mở ở 1x (trái 0.9x … 0.1x, phải 1.1x … 9x) (`SpeedScale`). Chưa kiểm: footage 30 fps/4K/HDR, đường có Core Image, âm thanh.
 
 ### Nhật ký thay đổi (một dòng/thay đổi: giả thuyết · số trước · số sau · kết luận)
 

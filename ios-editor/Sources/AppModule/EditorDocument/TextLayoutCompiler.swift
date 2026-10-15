@@ -22,17 +22,20 @@ struct ResolvedTextLine {
 enum TextLayoutCompiler {
     static func compile(
         text: String, fontFamily: String, fontSize: Double,
-        textAlign: String, wrap: String, maxWidth: Double
+        textAlign: String, wrap: String, maxWidth: Double,
+        bold: Bool = false, italic: Bool = false, letterSpacing: Double = 0, lineSpacing: Double = 0
     ) -> (layout: V2TextLayout, lines: [ResolvedTextLine]) {
-        let font = resolveFont(family: fontFamily, size: fontSize)
-        let attributed = NSAttributedString(string: text, attributes: [.font: font])
+        let font = resolveFont(family: fontFamily, size: fontSize, bold: bold, italic: italic)
+        var attributes: [NSAttributedString.Key: Any] = [.font: font]
+        if letterSpacing != 0 { attributes[.kern] = letterSpacing }
+        let attributed = NSAttributedString(string: text, attributes: attributes)
         let typesetter = CTTypesetterCreateWithAttributedString(attributed)
         let length = attributed.length
 
         let ascent = Double(font.ascender)
         let descent = Double(-font.descender)
         let leading = Double(font.leading)
-        let lineHeight = ascent + descent + leading
+        let lineHeight = ascent + descent + leading + lineSpacing
         let effectiveWidth = wrap == "none" ? Double.greatestFiniteMagnitude : maxWidth
 
         var lines: [ResolvedTextLine] = []
@@ -83,6 +86,31 @@ enum TextLayoutCompiler {
         UIFont(name: family, size: CGFloat(size)) ?? UIFont.systemFont(ofSize: CGFloat(size))
     }
 
+    /// The face for a bold / italic toggle: the same family's bold / italic variant when it has one (Georgia -> Georgia-Bold), else the
+    /// font as it is. Light switch only - no synthetic slant or smear.
+    static func resolveFont(family: String, size: Double, bold: Bool, italic: Bool) -> UIFont {
+        let base = resolveFont(family: family, size: size)
+        guard bold || italic else { return base }
+        var traits = base.fontDescriptor.symbolicTraits
+        if bold { traits.insert(.traitBold) }
+        if italic { traits.insert(.traitItalic) }
+        guard let descriptor = base.fontDescriptor.withSymbolicTraits(traits) else { return base }
+        return UIFont(descriptor: descriptor, size: CGFloat(size))
+    }
+
+    /// `text-transform` applied to the words: the transformed string only when it keeps the same UTF-16 length (so the source ranges
+    /// stay valid; true for every Latin and Vietnamese letter, not for the German sharp s).
+    static func transformed(_ text: String, _ transform: String?) -> String {
+        let result: String
+        switch transform {
+        case "uppercase": result = text.uppercased()
+        case "lowercase": result = text.lowercased()
+        case "capitalize": result = text.capitalized
+        default: return text
+        }
+        return result.utf16.count == text.utf16.count ? result : text
+    }
+
     /// The x offset (from the start of `lineText`) of the character at
     /// `localIndex` (UTF-16, relative to `lineText`'s own start) once shaped
     /// with `font` — used by the Runtime to place individually staggered
@@ -91,8 +119,10 @@ enum TextLayoutCompiler {
     /// as the line-breaking above — not an approximation (e.g. not a flat
     /// `index * averageCharWidth`), so staggered characters land exactly
     /// where the unstaggered line would have drawn them, including kerning.
-    static func offsetForCharacter(in lineText: String, font: UIFont, localIndex: Int) -> Double {
-        let attributed = NSAttributedString(string: lineText, attributes: [.font: font])
+    static func offsetForCharacter(in lineText: String, font: UIFont, localIndex: Int, letterSpacing: Double = 0) -> Double {
+        var attributes: [NSAttributedString.Key: Any] = [.font: font]
+        if letterSpacing != 0 { attributes[.kern] = letterSpacing }
+        let attributed = NSAttributedString(string: lineText, attributes: attributes)
         let line = CTLineCreateWithAttributedString(attributed)
         return Double(CTLineGetOffsetForStringIndex(line, localIndex, nil))
     }

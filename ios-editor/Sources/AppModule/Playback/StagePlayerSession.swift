@@ -53,6 +53,13 @@ final class StagePlayerSession {
         player.rate = rate
     }
 
+    /// Keeps a playing clip on its speed curve: the rate is only touched when it is off by more than 3 % (each change costs the system ~150-300 ms
+    /// to show in the clock, PLAYBACK_PIPELINE.md §9 2026-10-15), so a gentle curve changes it a few times a second at most.
+    func follow(rate: Float) {
+        guard player.rate != 0, rate > 0, abs(player.rate - rate) / rate > 0.03 else { return }
+        player.rate = rate
+    }
+
     func pause() {
         player.pause()
     }

@@ -213,6 +213,19 @@ enum TransformKeyframes {
         return layer
     }
 
+    /// A speed change stretches the clip's own timeline by `ratio` (new duration / old): every keyframe keeps its place in the picture,
+    /// so its local time scales with it.
+    static func scalingTimes(_ layer: V2Layer, by ratio: Double) -> V2Layer {
+        guard ratio != 1, ratio > 0, isKeyframed(layer) else { return layer }
+        var layer = layer
+        layer.tracks = (layer.tracks ?? []).map { track in
+            guard paths.contains(track.path) else { return track }
+            let scaled = track.keyframes.map { V2Keyframe(time: .absolute(resolved($0, in: layer) * ratio), value: $0.value, easing: $0.easing) }
+            return V2Track(id: track.id, path: track.path, keyframes: scaled, animation: track.animation)
+        }
+        return layer
+    }
+
     /// A left trim moves the clip's head by `delta` ms: the content stays where it is, so the keyframes' local times move
     /// the other way (they may go negative; the sampler holds the first value until they are reached).
     static func shifting(_ layer: V2Layer, by delta: Double) -> V2Layer {

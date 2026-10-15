@@ -74,6 +74,15 @@ struct V2TextRange: Codable {
     var end: Int
 }
 
+/// A text shadow (CSS `text-shadow`): a blurred copy of the glyphs behind them. Atomic: colour with its own alpha, offset and blur in
+/// layer units. A glow is the same thing with a zero offset - the Editor tier keeps the names, V2 only ever sees these numbers.
+struct V2TextShadow: Codable, Equatable {
+    var color: V2Color
+    var offsetX: Double
+    var offsetY: Double
+    var blur: Double
+}
+
 struct V2TextSpan: Codable {
     var id: String
     var sourceRange: V2TextRange
@@ -98,6 +107,11 @@ struct V2TextSpan: Codable {
     var kerning: String?
     var opticalSizing: String?
     var smallCaps: Bool?
+    /// Back to front. Absent = no shadow.
+    var shadows: [V2TextShadow]?
+    /// CSS `text-transform`: `"uppercase"` | `"lowercase"` | `"capitalize"`. The source text keeps what was typed; the renderer (and the
+    /// layout compiler, which measures the transformed words) applies it.
+    var textTransform: String?
 }
 
 struct V2TextPath: Codable {

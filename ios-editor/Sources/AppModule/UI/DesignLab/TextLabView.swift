@@ -4,16 +4,20 @@ import SwiftUI
 /// font) and **Style** (CapCut-like presets, a colour row, Size). The question the lab answers is where the text field goes: on top
 /// of the sheet like CapCut (A), or at the bottom like the Filter sheet's Intensity bar (B). A live photo with the text on it, fake
 /// styling, real iOS fonts. The text field only shows a keyboard on a device or a simulator with the software keyboard on.
+/// **C Docked panel** (2026-10-14) is not a system sheet: the system lifts a sheet by the keyboard and shrinks it in two steps (a gap shows),
+/// so here the panel sits in the keyboard's safe area - the system moves its bottom with the keyboard - and its content collapses
+/// in the same animation, leaving only the head (field + tabs) on top of the keyboard.
 struct TextLabView: View {
     @Environment(\.dismiss) private var dismiss
 
     enum Variant: String, CaseIterable, Identifiable {
-        case top = "A Field on top", bottom = "B Field at bottom"
+        case top = "A Field on top", bottom = "B Field at bottom", docked = "C Docked"
         var id: String { rawValue }
         var summary: String {
             switch self {
             case .top: return "CapCut: the text field heads the sheet, the tabs and their grid below it"
             case .bottom: return "Like Filter's Intensity bar: tabs and grid first, the text field pinned at the bottom"
+            case .docked: return "Not a sheet: sits on the keyboard, content collapses with it so the head hardly moves"
             }
         }
     }
@@ -27,10 +31,40 @@ struct TextLabView: View {
     @State private var preset: LabTextPreset = .plain
     @State private var size = 0.5
     @State private var sheetOpen = false
+    @State private var contentMode: DockedContent = .collapse
+    @State private var keyboardHeight: CGFloat = UserDefaults.standard.double(forKey: "labKeyboardHeight") > 0 ? UserDefaults.standard.double(forKey: "labKeyboardHeight") : 335
+    @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
     @State private var photo: UIImage?
     @FocusState private var fieldFocused: Bool
 
+    /// **Collapse**: content 260 pt, the keyboard lifts the panel and the content folds away (measured on an iPhone 13: the head dips
+    /// to the screen bottom for ~300 ms before the keyboard lifts it - the folding is instant, the lift is not). **Pinned**: the panel
+    /// ignores the keyboard and its content is exactly as tall as the area the keyboard covers, so the keyboard slides over the content
+    /// and the head never moves.
+    enum DockedContent: String, CaseIterable, Identifiable { case collapse = "Collapse", pinned = "Pinned"; var id: String { rawValue } }
+
     var body: some View {
+        ZStack(alignment: .bottom) {
+            labContent.ignoresSafeArea(.keyboard)
+            if variant == .docked && sheetOpen { dockedPanel }
+        }
+        .ignoresSafeArea(.keyboard, edges: contentMode == .pinned ? .bottom : [])   // pinned: the panel's parent must ignore it, not the panel
+        .background(Color(.systemBackground).ignoresSafeArea())
+        .task { photo = await AdjustLabView.loadPhoto() }
+        .onChange(of: variant) { _, _ in sheetOpen = false; fieldFocused = false }
+        .sheet(isPresented: Binding(get: { sheetOpen && variant != .docked }, set: { sheetOpen = $0 })) { textSheet }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+            keyboardAnimation = .easeInOut(duration: duration)   // the panel's own change rides the keyboard's duration
+            if end.height > 0 && end.minY < UIScreen.main.bounds.height {
+                keyboardHeight = end.height
+                UserDefaults.standard.set(end.height, forKey: "labKeyboardHeight")
+            }
+        }
+    }
+
+    private var labContent: some View {
         VStack(spacing: 0) {
             topBar
             Picker("Layout", selection: $variant) { ForEach(Variant.allCases) { Text($0.rawValue).tag($0) } }
@@ -38,13 +72,58 @@ struct TextLabView: View {
                 .accessibilityIdentifier("textVariantPicker")
             Text(variant.summary).font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
                 .padding(.horizontal).padding(.top, 4)
+            if variant == .docked {
+                Picker("Content", selection: $contentMode) { ForEach(DockedContent.allCases) { Text($0.rawValue).tag($0) } }
+                    .pickerStyle(.segmented).padding(.horizontal).padding(.top, 4)
+                    .accessibilityIdentifier("dockedContentPicker")
+            }
             stage.padding(.horizontal, 44).padding(.vertical, 8).frame(maxHeight: .infinity)
             mockSelectionRow
         }
-        .background(Color(.systemBackground).ignoresSafeArea())
-        .task { photo = await AdjustLabView.loadPhoto() }
-        .onChange(of: variant) { _, _ in sheetOpen = false }
-        .sheet(isPresented: $sheetOpen) { textSheet }
+    }
+
+    // MARK: Docked panel (variant C)
+
+    private var homeInset: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.safeAreaInsets.bottom ?? 0
+    }
+
+    /// Height of the content area: 260, or the part of the keyboard above the home area - then the head sits exactly where the
+    /// keyboard's top will be and does not move when the keyboard comes.
+    private var dockedContentHeight: CGFloat { contentMode == .collapse ? 260 : max(keyboardHeight - homeInset, 200) }
+
+    private var dockedPanel: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                field.padding(.top, 14).padding(.bottom, 4)
+                tabBar
+                Divider()
+            }
+            .background(HeadProbe())
+            Group {
+                switch tab {
+                case .font: fontGrid
+                case .style: stylePanel
+                }
+            }
+            .frame(height: fieldFocused && contentMode == .collapse ? 0 : dockedContentHeight, alignment: .top)
+            .opacity(fieldFocused ? 0 : 1)
+            .clipped()
+        }
+        // The panel's bottom is the safe area's: above the home indicator at rest, on the keyboard when it is up (the system moves it).
+        .background(
+            UnevenRoundedRectangle(topLeadingRadius: 16, topTrailingRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground)).ignoresSafeArea(edges: .bottom)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: -2)
+        )
+        .animation(keyboardAnimation, value: fieldFocused)
+        #if DEBUG
+        .onChange(of: fieldFocused) { _, focused in KeyboardBench.trace(focused ? "focus" : "blur") }
+        #endif
+        .transition(.move(edge: .bottom))
+        #if DEBUG
+        .onAppear { KeyboardBench.tag = "docked-\(contentMode.rawValue.lowercased())"; KeyboardBench.start() }
+        #endif
     }
 
     // MARK: Stage
@@ -128,10 +207,12 @@ struct TextLabView: View {
                 .padding(.horizontal, 14).frame(height: 44)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .accessibilityIdentifier("textField")
-            Button { fieldFocused = false; sheetOpen = false } label: {
-                Image(systemName: "checkmark").font(.title3.weight(.semibold)).frame(width: 40, height: 44)
+            Button { if fieldFocused { fieldFocused = false } else { sheetOpen = false } } label: {
+                Image(systemName: fieldFocused ? "keyboard.chevron.compact.down" : "checkmark").font(.title3.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 40, height: 44)
             }
-            .accessibilityIdentifier("textDone")
+            .accessibilityIdentifier(fieldFocused ? "textHideKeyboard" : "textDone")
         }
         .padding(.horizontal, 16)
     }
@@ -139,7 +220,7 @@ struct TextLabView: View {
     private var tabBar: some View {
         HStack(spacing: 28) {
             ForEach(Tab.allCases) { item in
-                Button { tab = item } label: {
+                Button { fieldFocused = false; tab = item } label: {
                     VStack(spacing: 6) {
                         Text(item.rawValue).font(.subheadline.weight(tab == item ? .semibold : .regular))
                             .foregroundColor(tab == item ? .primary : .secondary)

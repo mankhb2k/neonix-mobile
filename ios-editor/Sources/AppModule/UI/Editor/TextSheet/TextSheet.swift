@@ -10,26 +10,82 @@ struct TextSheet: View {
     let composition: V2Composition
     /// A new clip's default words are selected the first time the field is tapped, so typing replaces them.
     var selectAllOnFirstFocus = false
+    /// The tab the sheet opens on (the Style tool of a text clip opens it on Style).
+    var initialTab: Tab = .font
 
     @Environment(\.dismiss) private var dismiss
     @State private var pendingSelectAll = false
     @State private var tab: Tab = .font
+    @State var section: StyleSection = .text
     @State private var detent: PresentationDetent = Self.fullHeight
+    @State private var headHeight: CGFloat = 90
+    /// The custom colour screen, when open: it takes over the whole sheet (CapCut).
+    @State var picker: ColorTarget?
+    @State var recentColors = UserDefaults.standard.stringArray(forKey: "textRecentColors") ?? []
     @FocusState private var fieldFocused: Bool
 
     /// The sheet's two sizes: with the content, and just the field + tabs while typing.
-    private static let fullHeight = PresentationDetent.height(360)
-    private static let typingHeight = PresentationDetent.height(130)
+    private static let fullHeight = PresentationDetent.height(320)
+    /// The Background badge has four sliders under its tiles and colours, so its sheet is taller (user 2026-10-14; Shadow the same).
+    private static let backgroundHeight = PresentationDetent.height(520)
+    /// Shadow too: colours and four sliders, no style tiles, so a little lower than Background.
+    private static let shadowHeight = PresentationDetent.height(460)
+
+    /// The sheet's size at rest for what it shows now.
+    private var restingHeight: PresentationDetent {
+        guard tab == .style else { return Self.fullHeight }
+        switch section {
+        case .background: return Self.backgroundHeight
+        case .shadow: return Self.shadowHeight
+        default: return Self.fullHeight
+        }
+    }
+    /// While typing the sheet is exactly its head (field + tabs): measured, so a longer field grows it and no blank shows
+    /// above the keyboard (iPhone 13: keyboard 335 pt, head ~90 pt; a fixed 130 left 62 pt of blank - `KeyboardBench`).
+    private var typingHeight: PresentationDetent { .height(headHeight) }
 
     enum Tab: String, CaseIterable, Identifiable { case font = "Font", style = "Style"; var id: String { rawValue } }
 
-    static let swatches = ["#FFFFFFff", "#BFBFBFff", "#808080ff", "#404040ff", "#000000ff", "#FFD60Aff", "#FF9500ff", "#FF3B30ff", "#FF2D55ff", "#AF52DEff", "#007AFFff", "#34C759ff"]
+    /// The badges of the Style tab, in the user's order. `symbol`s are checked by `TextSheetTests`.
+    enum StyleSection: String, CaseIterable, Identifiable {
+        case text = "Text", colors = "Colors", stroke = "Stroke", glow = "Glow", background = "Background", shadow = "Shadow"
+        case curve = "Curve", spacing = "Spacing", letterCase = "Case"
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .text: "textformat.size"
+            case .colors: "paintpalette"
+            case .stroke: "pencil.and.outline"
+            case .glow: "sparkles"
+            case .background: "rectangle.inset.filled"
+            case .shadow: "shadow"
+            case .curve: "point.topleft.down.to.point.bottomright.curvepath"
+            case .spacing: "arrow.left.and.right"
+            case .letterCase: "bold"
+            }
+        }
+    }
+
+    /// What the custom colour screen is editing, and the colour to go back to on ✕.
+    enum ColorTarget: Equatable { case text(from: String), background(from: String?), stroke(from: String?), glow(from: String?), shadow(from: String?) }
 
     var body: some View {
         VStack(spacing: 0) {
-            field.padding(.top, 14).padding(.bottom, 4)
-            tabBar
-            Divider()
+          if let target = picker {
+            colorScreen(target)
+          } else {
+            VStack(spacing: 0) {
+                field.padding(.top, 14).padding(.bottom, 4)
+                tabBar
+                Divider().keyboardProbe(tabsBottom: true)
+            }
+            .background(HeadProbe())
+            .background(GeometryReader { proxy in
+                Color.clear.onChange(of: proxy.size.height, initial: true) { _, h in
+                    headHeight = h.rounded(.up) + 3   // the system gives ~2.5 pt less than asked (measured)
+                    if fieldFocused { detent = .height(headHeight) }
+                }
+            })
             if !fieldFocused {
                 Group {
                     switch tab {
@@ -42,13 +98,25 @@ struct TextSheet: View {
             } else {
                 Spacer(minLength: 0)
             }
+          }
         }
-        .presentationDetents(fieldFocused ? [Self.typingHeight] : [Self.fullHeight, .large], selection: $detent)
+        .keyboardProbe(tabsBottom: false)
+        #if DEBUG
+        .onAppear { KeyboardBench.tag = "sheet"; KeyboardBench.start() }
+        #endif
+        .presentationDetents(fieldFocused ? [typingHeight] : [restingHeight, .large], selection: $detent)
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled)   // the stage stays live at every size, also while typing
         .animation(.easeOut(duration: 0.2), value: fieldFocused)
-        .onChange(of: fieldFocused) { _, focused in detent = focused ? Self.typingHeight : Self.fullHeight }
-        .onAppear { pendingSelectAll = selectAllOnFirstFocus }
+        .onChange(of: section) { _, _ in if !fieldFocused { detent = restingHeight } }
+        .onChange(of: tab) { _, _ in if !fieldFocused { detent = restingHeight } }
+        .onChange(of: fieldFocused) { _, focused in
+            detent = focused ? typingHeight : restingHeight
+            #if DEBUG
+            KeyboardBench.trace(focused ? "focus" : "blur")
+            #endif
+        }
+        .onAppear { pendingSelectAll = selectAllOnFirstFocus; tab = initialTab }
         // A multi-line field is a UITextView underneath (a one-line one is a UITextField): listen to both.
         .onReceive(NotificationCenter.default.publisher(for: UITextView.textDidBeginEditingNotification)) { selectAllOnce($0.object) }
         .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification)) { selectAllOnce($0.object) }
@@ -69,12 +137,15 @@ struct TextSheet: View {
                 .lineLimit(1...3)   // Return starts a new line; the check mark closes
                 .focused($fieldFocused)
                 .padding(.horizontal, 14).padding(.vertical, 11).frame(minHeight: 44)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))   // a capsule on one line
                 .accessibilityIdentifier("textField")
-            Button { fieldFocused = false; dismiss() } label: {
-                Image(systemName: "checkmark").font(.title3.weight(.semibold)).frame(width: 40, height: 44)
+            // While typing the button folds the keyboard (CapCut); otherwise the check mark closes the sheet.
+            Button { if fieldFocused { fieldFocused = false } else { dismiss() } } label: {
+                Image(systemName: fieldFocused ? "keyboard.chevron.compact.down" : "checkmark").font(.title3.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 40, height: 44)
             }
-            .accessibilityIdentifier("textDone")
+            .accessibilityIdentifier(fieldFocused ? "textHideKeyboard" : "textDone")
         }
         .padding(.horizontal, 16)
     }
@@ -119,63 +190,82 @@ struct TextSheet: View {
         .accessibilityIdentifier("fontGrid")
     }
 
+    /// Style tab = a scrolling row of badges (one per kind of styling) and, under it, that badge's own controls. Text, Colors and
+    /// Background work; the rest show a placeholder until their tools and sliders are built (user 2026-10-14).
     private var stylePanel: some View {
-        let range = TextStyleValues.sizeRange(for: composition)
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Alignment of the lines (matters with more than one line).
-                HStack(spacing: 8) {
-                    ForEach([("left", "text.alignleft"), ("center", "text.aligncenter"), ("right", "text.alignright")], id: \.0) { align, symbol in
-                        Button { values.align = align } label: {
-                            Image(systemName: symbol).font(.body)
-                                .frame(maxWidth: .infinity).frame(height: 40)
-                                .background(values.align == align ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .foregroundColor(values.align == align ? .accentColor : .primary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("textAlign-\(align)")
-                    }
-                }
-                swatchRow(title: "Text", selected: values.color, includesNone: false, idPrefix: "textColor") { values.color = $0 ?? values.color }
-                swatchRow(title: "Background", selected: values.backgroundColor, includesNone: true, idPrefix: "textBackground") { values.backgroundColor = $0 }
-                HStack(spacing: 12) {
-                    Text("Size").font(.subheadline).foregroundColor(.secondary)
-                    Slider(value: $values.fontSize, in: range).accessibilityIdentifier("textSize")
-                    Text("\(Int((values.fontSize / composition.width * 360).rounded()))").font(.subheadline.monospacedDigit()).frame(width: 30, alignment: .trailing)
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 14)
+        VStack(spacing: 0) {
+            badgeRow
+            ScrollView { styleSectionContent.padding(.horizontal, 16).padding(.vertical, 12) }
         }
     }
 
-    /// A labelled row of colour dots; the background row starts with a "none" dot (a slash).
-    private func swatchRow(title: String, selected: String?, includesNone: Bool, idPrefix: String, pick: @escaping (String?) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    if includesNone {
-                        Button { pick(nil) } label: {
-                            Image(systemName: "nosign").font(.system(size: 22)).foregroundColor(.secondary)
-                                .frame(width: 34, height: 34)
-                                .overlay(Circle().strokeBorder(selected == nil ? Color.accentColor : .clear, lineWidth: 3).padding(-4))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("\(idPrefix)-none")
+    /// CapCut's row of "Aa" tiles, the content of the Text badge: one tap sets a whole look (`TextPreset`).
+    var presetRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(TextPreset.all) { preset in
+                    let on = preset.matches(values)
+                    // The tile stands for the stage: a label's colour, else a dark or light card so the words always read.
+                    let card = preset.background.map { Color(hex: $0) } ?? (preset.textIsLight ? Color(white: 0.2) : Color(white: 0.9))
+                    Button { preset.apply(to: &values) } label: {
+                        Text("Aa").font(.system(size: 20, weight: .heavy)).foregroundColor(Color(hex: preset.color))
+                            .frame(width: 52, height: 40)
+                            .background(card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(on ? Color.accentColor : .clear, lineWidth: 2.5))
                     }
-                    ForEach(Self.swatches, id: \.self) { hex in
-                        let on = selected?.lowercased() == hex.lowercased()
-                        Button { pick(hex) } label: {
-                            Circle().fill(Color(hex: hex)).frame(width: 34, height: 34)
-                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1))
-                                .overlay(Circle().strokeBorder(on ? Color.accentColor : .clear, lineWidth: 3).padding(-4))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("\(idPrefix)-\(hex)")
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("textPreset-\(preset.id)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
-                .padding(.horizontal, 4).padding(.vertical, 6)
             }
+            .padding(.horizontal, 16).padding(.vertical, 2)
         }
+        .accessibilityIdentifier("textPresets")
+    }
+
+    private var badgeRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(StyleSection.allCases) { item in
+                    let on = section == item
+                    Button { section = item } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: item.symbol).font(.system(size: 20, weight: .regular)).frame(height: 24)
+                            Text(item.rawValue).font(.caption2.weight(on ? .semibold : .regular)).lineLimit(1)
+                        }
+                        .frame(width: 72, height: 56)
+                        .background(on ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(on ? Color.accentColor : .clear, lineWidth: 1.5))
+                        .foregroundColor(on ? .accentColor : .primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("styleBadge-\(item.rawValue)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .accessibilityIdentifier("styleBadges")
+    }
+
+    /// The custom colour screen for whatever colour is being edited. ✕ puts back the colour it opened with, ✓ keeps the new one (and
+    /// remembers it first in the grid unless it is a palette colour).
+    private func colorScreen(_ target: ColorTarget) -> some View {
+        let start: String, apply: (String) -> Void, restore: () -> Void
+        switch target {
+        case .text(let from): start = from; apply = { values.color = $0 }; restore = { values.color = from }
+        case .background(let from): start = from ?? "#FFFFFFff"; apply = { values.backgroundColor = $0 }; restore = { values.backgroundColor = from }
+        case .stroke(let from): start = from ?? "#000000ff"; apply = { values.strokeColor = $0 }; restore = { values.strokeColor = from }
+        case .glow(let from): start = from ?? "#FFD60Aff"; apply = { values.glowColor = $0 }; restore = { values.glowColor = from }
+        case .shadow(let from): start = from ?? "#000000ff"; apply = { values.shadowColor = $0 }; restore = { values.shadowColor = from }
+        }
+        return ColorPickerPanel(initial: start, onChange: apply, onCancel: { restore(); picker = nil }, onDone: { hex in
+            apply(hex)
+            if !ColorPalette.colors.contains(hex) && !recentColors.contains(hex) {
+                recentColors = Array(([hex] + recentColors).prefix(4))
+                UserDefaults.standard.set(recentColors, forKey: "textRecentColors")
+            }
+            picker = nil
+        })
     }
 }

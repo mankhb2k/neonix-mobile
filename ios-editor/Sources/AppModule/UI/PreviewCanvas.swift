@@ -96,8 +96,23 @@ private struct LayerNodeView: View {
     let filters: [V2Filter]
     let playerEngine: EditorPlaybackEngine
 
+    /// A layer exists only inside its own `timing` window (a text clip must vanish at its end). Video is left as it was: its player
+    /// is prepared ahead of the clip and tearing it down at the window's edge would be a playback change (CLAUDE.md "Playback").
+    private var isOutsideItsTime: Bool {
+        guard node.layer.type != "video" else { return false }
+        return atMs < node.layer.timing.start || atMs > node.layer.timing.start + node.layer.timing.duration
+    }
+
     var body: some View {
         let _ = PlaybackMetrics.shared.count(.layerBodyEvals)
+        if isOutsideItsTime {
+            Color.clear.frame(width: 0, height: 0)
+        } else {
+            drawn
+        }
+    }
+
+    @ViewBuilder private var drawn: some View {
         let frame = PlaybackMetrics.shared.measure(.sampleLayerMs) { sampleLayer(node.layer, atMs: atMs) }
         Group {
             if node.layer.type == "group" {
@@ -120,7 +135,7 @@ private struct LayerNodeView: View {
                     playerEngine: playerEngine
                 )
                 .frame(width: frame.frameWidth, height: frame.frameHeight)
-                .clipped()
+                .modifier(ClipUnlessText(isText: node.layer.type == "text"))
             }
         }
         // `anchor` is an offset from the layer's own center (see CLAUDE.md's
@@ -231,17 +246,11 @@ private struct LayerContentView: View {
                     Path(MotionPathResolver.buildCGPath(contours: background.contours)).fill(Color(hex: fill))
                 }
                 ForEach(Array((frame.textRuns ?? []).enumerated()), id: \.offset) { _, run in
-                    Text(run.text)
-                        .font(.custom(run.fontFamily, size: run.fontSize))
-                        .foregroundColor(Color(hex: run.color))
-                        .opacity(run.opacity)
-                        .fixedSize()
-                        .rotationEffect(.degrees(run.rotation))
-                        .offset(x: run.x, y: run.y)
+                    TextRunView(run: run)
                 }
             }
+            // Not clipped to the frame: outlines, shadows and glows reach past the text block.
             .frame(width: frame.frameWidth, height: frame.frameHeight, alignment: .topLeading)
-            .clipped()
         default:
             Rectangle().fill(Color(hex: frame.fill ?? "#000000"))
         }
@@ -559,5 +568,13 @@ extension Color {
             a = 1
         }
         self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+}
+
+/// Every layer is clipped to its frame except text: a text layer's outline, shadow and glow bleed past the text block.
+private struct ClipUnlessText: ViewModifier {
+    let isText: Bool
+    func body(content: Content) -> some View {
+        if isText { content } else { content.clipped() }
     }
 }

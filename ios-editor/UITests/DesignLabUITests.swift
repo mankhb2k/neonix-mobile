@@ -316,4 +316,36 @@ final class DesignLabUITests: XCTestCase {
         saveShot(app, "text-typing-after")
         XCTAssertEqual(field.value as? String, "Hello", "the field starts empty, so typing is not appended to a default")
     }
+
+    /// Device measurement helper (docked panel, variant C): open the field, type, show a tab, open the field again, close.
+    /// `KeyboardBench` writes the head's y per frame into `Documents/keyboard_bench.txt`.
+    func testTextLabDockedPanelCycle() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        link.tap()
+        app.staticTexts["Text picker"].tap()
+        XCTAssertTrue(app.buttons["textLabClose"].waitForExistence(timeout: 10))
+        app.buttons["C Docked"].tap()
+        for mode in ["Collapse", "Pinned"] {
+            app.buttons[mode].tap()
+            app.buttons["textAction-Edit text"].tap()
+            let field = app.descendants(matching: .any).matching(identifier: "textField").firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+            saveShot(app, "docked-rest-\(mode)")
+            field.tap()
+            sleep(2)
+            saveShot(app, "docked-typing-\(mode)")
+            app.buttons["textTab-Font"].tap()   // keyboard down, content back
+            sleep(2)
+            field.tap()
+            sleep(2)
+            app.buttons["textHideKeyboard"].tap()   // the check mark became "fold the keyboard" while typing
+            XCTAssertTrue(app.buttons["textDone"].waitForExistence(timeout: 5))
+            app.buttons["textDone"].tap()
+            sleep(1)
+        }
+    }
 }

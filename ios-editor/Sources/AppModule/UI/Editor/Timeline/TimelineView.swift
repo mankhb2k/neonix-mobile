@@ -106,7 +106,10 @@ struct TimelineView: View {
     /// secondary). `otherRowHeight` is its own constant, not `rowHeight /
     /// 2` — set independently once 26 (not exactly half of 48) was asked for.
     private let rowHeight: CGFloat = 48
-    private let otherRowHeight: CGFloat = 26
+    /// Text, sticker and audio rows (user 2026-10-16: 30).
+    private let otherRowHeight: CGFloat = 30
+    /// Overlay (non-main) video/photo lanes: smaller than the main lane but still with pictures.
+    private let overlayRowHeight: CGFloat = 38
     private let rowSpacing: CGFloat = 6
     private let rulerHeight: CGFloat = 20
     private let rowsTopPadding: CGFloat = 6
@@ -142,7 +145,7 @@ struct TimelineView: View {
     /// (lowest `order`) that contains a video clip, matching the single
     /// "main track" this app supports authoring today.
     private var primaryVideoLaneOrder: Int? {
-        laneOrders.first { lane(for: $0).contains { $0.type == "video" } }
+        NeonixEditor.primaryVideoLaneOrder(of: tracks)   // the same rule the commands use (video or photo, never a sticker / overlay)
     }
 
     private var contentWidth: CGFloat {
@@ -153,20 +156,24 @@ struct TimelineView: View {
         laneOrders.count + audio.tracks.count
     }
 
+    /// Main lane 48 pt; other video/photo lanes (overlays) 38 pt, still with pictures; text, sticker and audio rows 30 pt (user 2026-10-16).
+    private func laneHeight(_ order: Int) -> CGFloat {
+        if order == primaryVideoLaneOrder { return rowHeight }
+        return lane(for: order).contains(where: isMediaClip) ? overlayRowHeight : otherRowHeight
+    }
+
     private var tracksHeight: CGFloat {
         guard rowCount > 0 else { return otherRowHeight }
-        let hasMainLane = primaryVideoLaneOrder != nil
-        let otherRowCount = rowCount - (hasMainLane ? 1 : 0)
-        let rowsHeight = (hasMainLane ? rowHeight : 0) + CGFloat(otherRowCount) * otherRowHeight
-        let spacingHeight = CGFloat(rowCount - 1) * rowSpacing
-        return rowsHeight + spacingHeight
+        let lanes = laneOrders.reduce(CGFloat(0)) { $0 + laneHeight($1) }
+        return lanes + CGFloat(audio.tracks.count) * otherRowHeight + CGFloat(rowCount - 1) * rowSpacing
     }
 
     /// Height of every lane except the pinned main one, spacing included.
     private var scrollingLanesHeight: CGFloat {
         let count = rowCount - (primaryVideoLaneOrder == nil ? 0 : 1)
         guard count > 0 else { return 0 }
-        return CGFloat(count) * otherRowHeight + CGFloat(count - 1) * rowSpacing
+        let lanes = laneOrders.filter { $0 != primaryVideoLaneOrder }.reduce(CGFloat(0)) { $0 + laneHeight($1) }
+        return lanes + CGFloat(audio.tracks.count) * otherRowHeight + CGFloat(count - 1) * rowSpacing
     }
 
     private var panelHeight: CGFloat {
@@ -388,7 +395,7 @@ struct TimelineView: View {
             clips: lane(for: order),
             pxPerMs: pxPerMs,
             windowMs: windowMs,
-            rowHeight: isMainLane ? rowHeight : otherRowHeight,
+            rowHeight: laneHeight(order),
             centerX: centerX,
             showsCoverAndMute: isMainLane,
             coverImage: coverImage,
@@ -609,7 +616,8 @@ private struct LaneRowView: View {
                         onTrimBegin: onTrimBegin,
                         onTrimUpdate: onTrimUpdate,
                         onTrimEnd: onTrimEnd,
-                        keyframeTimes: isSelected ? keyframeTimes : []
+                        keyframeTimes: isSelected ? keyframeTimes : [],
+                        pictureURL: isMediaClip(layer) ? resolved.url : nil
                     )
                     .onTapGesture { onSelectLayer(layer.id) }
                 }
@@ -1061,10 +1069,12 @@ private struct FilmstripClipView: View {
         var candidateStart: Double
         if case .video(let payload) = original.payload {
             let originalTrimStart = payload.trimStart ?? 0
-            let rawTrimStart = originalTrimStart + deltaMs
+            // How far the source moves for this much timeline (rate x ms for a constant speed, the curve for a speed curve).
+            let mapping = VideoTimeMapping(layer: original)
+            let rawTrimStart = originalTrimStart + (mapping?.headSource(forTimeline: deltaMs) ?? deltaMs)
             if rawTrimStart < 0 { limited = true }
             let clampedTrimStart = max(rawTrimStart, 0)
-            candidateStart = original.timing.start + (clampedTrimStart - originalTrimStart)
+            candidateStart = original.timing.start + (mapping?.headTimeline(forSource: clampedTrimStart - originalTrimStart) ?? (clampedTrimStart - originalTrimStart))
         } else {
             candidateStart = original.timing.start + deltaMs
         }
@@ -1088,7 +1098,7 @@ private struct FilmstripClipView: View {
         var newTrimStart: Double?
         var newTrimEnd: Double?
         if case .video(let payload) = original.payload {
-            newTrimStart = max((payload.trimStart ?? 0) + appliedDelta, 0)
+            newTrimStart = max((payload.trimStart ?? 0) + (VideoTimeMapping(layer: original)?.headSource(forTimeline: appliedDelta) ?? appliedDelta), 0)
             newTrimEnd = payload.trimEnd
         }
         onTrimUpdate(TrimClipCommand(layerId: original.id, start: resolvedStart, duration: newDuration, trimStart: newTrimStart, trimEnd: newTrimEnd, siblingStarts: siblingStarts))
@@ -1133,11 +1143,13 @@ private struct FilmstripClipView: View {
         var newTrimEnd: Double?
         var candidateDuration: Double
         if case .video(let payload) = original.payload {
-            let originalTrimEnd = payload.trimEnd ?? ((payload.trimStart ?? 0) + original.timing.duration)
-            var clampedTrimEnd = originalTrimEnd + deltaMs
+            let mapping = VideoTimeMapping(layer: original)
+            let sourceSpan = sourceSpanMs(of: original) ?? original.timing.duration
+            let originalTrimEnd = payload.trimEnd ?? ((payload.trimStart ?? 0) + sourceSpan)
+            var clampedTrimEnd = originalTrimEnd + (mapping?.tailSource(forTimeline: deltaMs) ?? deltaMs)
             if let assetDurationMs, clampedTrimEnd > assetDurationMs { clampedTrimEnd = assetDurationMs; limited = true }
             newTrimEnd = clampedTrimEnd
-            candidateDuration = original.timing.duration + (clampedTrimEnd - originalTrimEnd)
+            candidateDuration = original.timing.duration + (mapping?.tailTimeline(forSource: clampedTrimEnd - originalTrimEnd) ?? (clampedTrimEnd - originalTrimEnd))
         } else {
             candidateDuration = original.timing.duration + deltaMs
         }
@@ -1204,7 +1216,9 @@ private struct TrimHandleView: View {
     /// rejected by the user, 2026-10-10.)
     let edge: HorizontalEdge
     private let visibleWidth: CGFloat = 14
-    private let hitWidth: CGFloat = 28
+    /// The touch area: the 10 pt of the 14 pt handle next to the clip (was 28 pt, an invisible margin that caught taps on the blank space - user 2026-10-16).
+    private let touchWidth: CGFloat = 10
+    private var hitWidth: CGFloat { visibleWidth }
     private let gripColor = Color.white.opacity(0.85)
     /// Matches the selection bounding frame's own visible height
     /// (`rowHeight + selectionBorderWidth` — see that constant's doc
@@ -1218,7 +1232,7 @@ private struct TrimHandleView: View {
             .overlay(gripLine)
             .frame(width: visibleWidth, height: handleHeight)
             .frame(width: hitWidth, height: handleHeight, alignment: edge == .leading ? .trailing : .leading)
-            .contentShape(Rectangle())
+            .contentShape(InnerStrip(width: touchWidth, trailing: edge == .leading))
             .offset(x: edge == .leading ? -hitWidth : hitWidth)
             .accessibilityIdentifier(edge == .leading ? "trim-handle-leading" : "trim-handle-trailing")
     }
@@ -1227,6 +1241,16 @@ private struct TrimHandleView: View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(gripColor)
             .frame(width: 2, height: handleHeight * 0.35)
+    }
+}
+
+/// The part of a rect that is `width` wide on one side (used to narrow a trim handle's touch area to the side that touches the clip).
+private struct InnerStrip: Shape {
+    let width: CGFloat
+    let trailing: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: trailing ? rect.maxX - width : rect.minX, y: rect.minY, width: width, height: rect.height))
     }
 }
 
@@ -1259,8 +1283,13 @@ func isPushLaneType(_ type: String) -> Bool {
 
 /// Like `isPushLaneType`, for one clip: stickers are free overlays (gaps allowed, trimming never pushes a neighbour), so
 /// they behave like text although they are image layers.
+/// A video or photo clip (a sticker is a picture too, but it keeps its thin coloured bar).
+func isMediaClip(_ layer: V2Layer) -> Bool {
+    (layer.type == "video" || layer.type == "image") && !layer.id.hasPrefix(stickerLayerIdPrefix)
+}
+
 func isPushLane(_ layer: V2Layer) -> Bool {
-    isPushLaneType(layer.type) && !layer.id.hasPrefix(stickerLayerIdPrefix)
+    isPushLaneType(layer.type) && !layer.id.hasPrefix(stickerLayerIdPrefix) && !layer.id.hasPrefix(overlayLayerIdPrefix)
 }
 
 /// The "ripple reflow" — given a push-lane's clips in their *current*
@@ -1473,7 +1502,10 @@ private struct TimelineClipView: View {
     let onTrimUpdate: (EditorCommand) -> Void
     let onTrimEnd: (HorizontalEdge, String) -> Void
     var keyframeTimes: [Double] = []
+    /// A photo clip's file: its square picture is tiled over the clip like the video filmstrip (nil = the plain colour block).
+    var pictureURL: URL?
 
+    @State private var tile: UIImage?
     /// Same fixed-origin-per-gesture pattern as `FilmstripClipView`'s own
     /// drag handles — see its doc comment.
     @State private var dragStartLayer: V2Layer?
@@ -1493,10 +1525,18 @@ private struct TimelineClipView: View {
             // stroke anymore either; the type is communicated by the fill
             // + icon/label alone.
             .fill(color)
+            .overlay(alignment: .leading) {
+                if let tile {
+                    // One picture, repeated: the GPU tiles it, no view per tile.
+                    Image(uiImage: tile).resizable(resizingMode: .tile)
+                        .frame(width: max(CGFloat(layer.timing.duration) * pxPerMs, 28), height: rowHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: isSelected ? 0 : 6, style: .continuous))
+                }
+            }
             .overlay(alignment: .leading) { keyframeMarkers }   // under the frame and the handles
             .overlay(isSelected ? Rectangle().strokeBorder(Color(white: 0.2), lineWidth: selectionBorderWidth) : nil)
             .overlay(alignment: .leading) {
-                HStack(spacing: 4) {
+                if pictureURL == nil || tile == nil { HStack(spacing: 4) {
                     Image(systemName: icon)
                         .font(.caption2)
                     Text(layer.id.hasPrefix(stickerLayerIdPrefix) ? "Sticker" : layer.type.capitalized)
@@ -1504,7 +1544,7 @@ private struct TimelineClipView: View {
                         .lineLimit(1)
                 }
                 .foregroundColor(.white)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 6) }
             }
             .overlay(alignment: .leading) {
                 if isSelected {
@@ -1515,6 +1555,10 @@ private struct TimelineClipView: View {
                 if isSelected {
                     TrimHandleView(rowHeight: rowHeight, corners: [.topRight, .bottomRight], edge: .trailing).gesture(rightHandleDrag).modifier(TrimTouchModifier())
                 }
+            }
+            .task(id: pictureURL) {
+                guard let pictureURL else { tile = nil; return }
+                tile = await PhotoThumbnailCache.tile(for: pictureURL, side: rowHeight)
             }
             .frame(width: max(CGFloat(layer.timing.duration) * pxPerMs, 28), height: rowHeight)
             .offset(x: CGFloat(layer.timing.start) * pxPerMs)

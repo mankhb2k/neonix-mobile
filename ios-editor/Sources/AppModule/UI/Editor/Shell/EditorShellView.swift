@@ -59,6 +59,13 @@ struct EditorShellView: View {
     @State private var filterIntents: [String: AppliedFilter] = [:]
     @State private var filterDragOriginal: V2Project?
     @State private var showingFilterSheet = false
+    @State private var showingAnimationSheet = false
+    @State private var showingSpeedSheet = false
+    @State private var mediaPicker: MediaPickerPurpose?
+    @State private var mediaError: String?
+    @State private var textSessionTab: TextSheet.Tab = .font
+    /// The project as it was when the Speed sheet opened: every ruler tick is computed from it, and it is the undo step.
+    @State private var speedSessionOriginal: V2Project?
     @State private var showingStickerSheet = false
     @State private var showingGraphSheet = false
     /// The Text sheet session: one undo step for everything done in it (like Transform), `textSessionOriginal` is the project before it.
@@ -122,8 +129,9 @@ struct EditorShellView: View {
     /// Every write to `project` goes through here so the engine always sees
     /// the same layers the Stage and Timeline render.
     private func setProject(_ newProject: V2Project) {
-        project = newProject
-        engine.update(project: newProject)
+        let normalized = AnimationWrappers.normalized(newProject)   // animation wrappers follow their clip's timing
+        project = normalized
+        engine.update(project: normalized)
     }
 
     /// The one path every edit must go through — see `EditorHistory`'s own
@@ -164,7 +172,8 @@ struct EditorShellView: View {
 
     /// "Add text" (new = true) puts a clip with the default words ("Hello") at the playhead and edits it live; "Edit text" opens the selected
     /// text clip. Closing the sheet with empty words undoes the whole session (a new clip disappears, an old one keeps its words).
-    private func openTextSheet(new: Bool) {
+    private func openTextSheet(new: Bool, tab: TextSheet.Tab = .font) {
+        textSessionTab = tab
         let composition = project.composition
         textSessionOriginal = project
         textSessionIsNew = new
@@ -342,6 +351,95 @@ struct EditorShellView: View {
         }
     }
 
+    // MARK: Replace
+
+    /// A photo or video was picked for Replace: copy it into the app, then apply the command (one undo step).
+    private func usePickedMedia(_ picked: PickedMedia, for purpose: MediaPickerPurpose) async {
+        let assetId = "media-\(UUID().uuidString.prefix(8).lowercased())"
+        do {
+            let asset = try await PhotoImporter.importMedia(picked.asset, kind: picked.kind, assetId: assetId)
+            apply(ReplaceClipCommand(layerId: purpose.layerId, asset: asset))
+            engine.refreshFrames()
+        } catch {
+            mediaError = error.localizedDescription
+        }
+    }
+
+    // MARK: Speed
+
+    private func openSpeedSheet() {
+        guard let layer = selectedLayer, layer.type == "video" else { return }
+        speedSessionOriginal = nil   // taken at the first change: that is the undo step
+        showingSpeedSheet = true
+    }
+
+    /// The command works from the clip as it is now (the footage it plays is constant, only the rate changes), so every ruler tick can be
+    /// applied to the current project; the project as it was before the first change is what Undo goes back to.
+    @ViewBuilder private var speedSheet: some View {
+        if let id = selectedLayerId, let layer = project.layers.first(where: { $0.id == id }) {
+            let rate = VideoTimeMapping(layer: layer)?.rate ?? 1
+            let span = sourceSpanMs(of: layer) ?? layer.timing.duration
+            let mapping = VideoTimeMapping(layer: layer)
+            let curvePoints: [V2SpeedPoint]? = { if case .video(let payload) = layer.payload { return payload.speedCurve } else { return nil } }()
+            // Where the playhead is in the footage the clip plays, as a fraction of it.
+            let playhead: Double? = mapping.flatMap { m in
+                currentTimeMs >= layer.timing.start && currentTimeMs <= layer.timing.start + layer.timing.duration && span > 0
+                    ? (m.sourceMs(atTimelineMs: currentTimeMs) - m.trimStartMs) / span : nil
+            }
+            SpeedSheet(
+                rate: rate, curve: curvePoints, sourceSpanMs: span, fps: project.composition.fps, playheadFraction: playhead,
+                onRate: { newRate in
+                    if speedSessionOriginal == nil { speedSessionOriginal = project }
+                    setProject(SetClipSpeedCommand(layerId: id, rate: newRate).apply(to: project))
+                },
+                onCurve: { points in
+                    if speedSessionOriginal == nil { speedSessionOriginal = project }
+                    setProject(SetClipSpeedCurveCommand(layerId: id, points: points).apply(to: project))
+                }
+            )
+        }
+    }
+
+    /// The whole session is one undo step - and only when something changed.
+    private func finishSpeedSession() {
+        guard let original = speedSessionOriginal else { return }
+        defer { speedSessionOriginal = nil }
+        let changed = zip(original.layers, project.layers).contains { $0.timing.duration != $1.timing.duration || $0.timing.start != $1.timing.start }
+        if changed { history.record(current: original) }
+    }
+
+    // MARK: Animation
+
+    @ViewBuilder private var animationSheet: some View {
+        if let id = selectedLayerId, let layer = project.layers.first(where: { $0.id == id }) {
+            AnimationSheet(
+                initial: AnimationWrappers.applied(for: id, in: project.layers),
+                clipDurationMs: layer.timing.duration,
+                onPick: { slot, presetId, durationMs in
+                    apply(SetAnimationCommand(layerId: id, slot: slot, presetId: presetId, durationMs: durationMs))
+                    if presetId != nil { previewAnimation(of: id, slot: slot, durationMs: durationMs) }
+                }
+            )
+        }
+    }
+
+    /// Plays the picked animation on the stage: an entrance from the clip's start, an exit just before its end, a combo from the start.
+    private func previewAnimation(of id: String, slot: AnimationSlot, durationMs: Double) {
+        guard let layer = project.layers.first(where: { $0.id == id }) else { return }
+        let start = layer.timing.start, end = layer.timing.start + layer.timing.duration
+        let from: Double, length: Double
+        switch slot {
+        case .in: from = max(start - 200, 0); length = durationMs + 600
+        case .out: from = max(end - durationMs - 400, start); length = durationMs + 800
+        case .combo: from = start; length = min(layer.timing.duration, 3000)
+        }
+        engine.pause()
+        engine.glide(toMs: from, duration: 0.1) {
+            engine.play()
+            DispatchQueue.main.asyncAfter(deadline: .now() + length / 1000) { if engine.isPlaying { engine.pause() } }
+        }
+    }
+
     // MARK: Transform
 
     private var selectedLayer: V2Layer? { project.layers.first { $0.id == selectedLayerId } }
@@ -412,13 +510,33 @@ struct EditorShellView: View {
             titlebarHeight = newValue
         }
         .task { engine.prepare() }
+        #if DEBUG
+        // UI-test hook: the first video clip is replaced by one of the project's photos at launch (the main lane then has no video).
+        .task {
+            guard ProcessInfo.processInfo.environment["EDITOR_REPLACE_MAIN_WITH_PHOTO"] != nil,
+                  let photo = project.assets.first(where: { if case .image = $0 { return true } else { return false } }),
+                  let main = project.layers.first(where: { $0.type == "video" }) else { return }
+            apply(ReplaceClipCommand(layerId: main.id, asset: photo))
+        }
+        #endif
         .alert(item: $exportGate.alert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
         .sheet(isPresented: $showingFilterSheet) { filterSheet }
+        .sheet(isPresented: $showingAnimationSheet) { animationSheet }
+        .sheet(isPresented: $showingSpeedSheet, onDismiss: finishSpeedSession) { speedSheet }
+        .sheet(item: $mediaPicker) { purpose in
+            EditorMediaPickerView(purpose: purpose, onPick: { picked in
+                mediaPicker = nil
+                Task { await usePickedMedia(picked, for: purpose) }
+            }, onCancel: { mediaPicker = nil })
+        }
+        .alert("Couldn't add that", isPresented: Binding(get: { mediaError != nil }, set: { if !$0 { mediaError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(mediaError ?? "") }
         .sheet(isPresented: $showingStickerSheet) { stickerSheet }
-        .sheet(isPresented: $showingTextSheet, onDismiss: finishTextSession) { TextSheet(values: $textValues, composition: project.composition, selectAllOnFirstFocus: textSessionIsNew) }
+        .sheet(isPresented: $showingTextSheet, onDismiss: finishTextSession) { TextSheet(values: $textValues, composition: project.composition, selectAllOnFirstFocus: textSessionIsNew, initialTab: textSessionTab) }
         .sheet(isPresented: $showingGraphSheet) {
             if let id = selectedLayerId, let layer = selectedLayer, let start = graphSegmentStart {
                 GraphSheet(easing: LabEasing(v2: TransformKeyframes.easing(of: layer, segmentStart: start))) {
@@ -501,15 +619,29 @@ struct EditorShellView: View {
         case .opacity: openTransformSheet(focus: .opacity)
         case .adjust: showingAdjustSheet = true
         case .filter: showingFilterSheet = true
+        case .animation: if selectedLayerId != nil { showingAnimationSheet = true }
+        case .speed: openSpeedSheet()
         case .editText: openTextSheet(new: false)
         case .mirror:
             guard let id = selectedLayerId else { return }
             apply(MirrorLayerCommand(layerId: id))
-        case .duplicate where selectedLayerId?.hasPrefix(stickerLayerIdPrefix) == true:
+        case .duplicate:
             guard let id = selectedLayerId else { return }
             let copyId = "\(id)-copy-\(UUID().uuidString.prefix(6).lowercased())"
-            apply(DuplicateOverlayCommand(layerId: id, newLayerId: copyId))
-            selectedLayerId = copyId
+            apply(DuplicateClipCommand(layerId: id, newLayerId: copyId))
+            if project.layers.contains(where: { $0.id == copyId }) { selectedLayerId = copyId }
+            engine.refreshFrames()
+        case .style: openTextSheet(new: false, tab: .style)
+        case .replace:
+            guard let layer = selectedLayer else { return }
+            mediaPicker = MediaPickerPurpose(layerId: layer.id, minVideoMs: layer.type == "video" ? (sourceSpanMs(of: layer) ?? layer.timing.duration) : 0)
+        case .overlay:
+            // The selected clip becomes a picture-in-picture layer too (a copy, half the size, in the middle).
+            guard let id = selectedLayerId else { return }
+            let copyId = "\(overlayLayerIdPrefix)\(UUID().uuidString.prefix(8).lowercased())"
+            apply(CopyToOverlayCommand(layerId: id, newLayerId: copyId))
+            if project.layers.contains(where: { $0.id == copyId }) { selectedLayerId = copyId }
+            engine.refreshFrames()
         case .volume:
             if selectedAudioClipId != nil { selectedTool = .audio } else { comingSoonTitle = tool.title }
         case .delete:

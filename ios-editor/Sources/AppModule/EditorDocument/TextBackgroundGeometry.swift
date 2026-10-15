@@ -5,10 +5,11 @@ import CoreGraphics
 /// Resolved at compile time into Protocol V2 geometry (`V2PathContour`: lines and arcs), so V2 only ever sees numbers, never "story
 /// style" (CLAUDE.md, "Text layout stays atomic").
 enum TextBackgroundGeometry {
-    /// Padding and corner radius follow the font size, like the stories apps do.
-    static func padX(fontSize: Double) -> Double { fontSize * 0.32 }
-    static func padY(fontSize: Double) -> Double { fontSize * 0.10 }
-    static func radius(fontSize: Double) -> Double { fontSize * 0.30 }
+    /// Padding and corner radius follow the font size, like the stories apps do; the Background badge's sliders change the factors.
+    static let defaultPadX = 0.32, defaultPadY = 0.10, defaultRadius = 0.30
+    static func padX(fontSize: Double, factor: Double? = nil) -> Double { fontSize * (factor ?? defaultPadX) }
+    static func padY(fontSize: Double, factor: Double? = nil) -> Double { fontSize * (factor ?? defaultPadY) }
+    static func radius(fontSize: Double, factor: Double? = nil) -> Double { fontSize * (factor ?? defaultRadius) }
 
     /// `lines` are the boxes' left/right edges per line, top to bottom; the lines stack without a gap (`boundaries` are the
     /// n + 1 horizontal edges: the top of the box, the line separators, the bottom).

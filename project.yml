@@ -44,6 +44,9 @@ targets:
       base:
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.neonix.editor.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 5BZL4WMZ53
 
   NeonixEditorUITests:
     type: bundle.ui-testing
@@ -57,6 +60,9 @@ targets:
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "YES"
         TEST_TARGET_NAME: NeonixEditor
+        PRODUCT_BUNDLE_IDENTIFIER: com.neonix.editor.uitests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 5BZL4WMZ53
 
 schemes:
   NeonixEditor:

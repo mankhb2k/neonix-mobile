@@ -86,10 +86,11 @@ struct RulerDial: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            // The number changes at once, every step shown as it is (no rolling digits: a fast drag looked like it skipped values).
             Text(format(value))
                 .font(.system(.title3, design: .rounded).monospacedDigit())
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.12), value: value)
+                .contentTransition(.identity)
+                .transaction { $0.animation = nil }
                 .accessibilityIdentifier("rulerReadout")
             ruler
         }

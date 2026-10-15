@@ -53,7 +53,11 @@ enum ClipTool: String, CaseIterable, Identifiable {
     func isBuilt(for kind: ClipKind) -> Bool {
         switch self {
         case .split, .transform, .adjust, .filter, .delete, .editText, .opacity, .mirror, .graph: return true
-        case .duplicate: return kind == .sticker
+        case .animation: return kind != .audio
+        case .speed: return kind == .video
+        case .duplicate: return kind == .video || kind == .image || kind == .text || kind == .sticker
+        case .replace, .overlay: return kind == .video || kind == .image
+        case .style: return kind == .text
         case .volume: return kind == .audio
         default: return false
         }

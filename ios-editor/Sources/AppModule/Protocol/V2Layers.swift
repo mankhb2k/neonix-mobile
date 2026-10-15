@@ -160,12 +160,29 @@ struct V2ImagePayload: Codable {
     var imageRendering: String?
 }
 
+/// One point of a speed curve: at `sourceMs` into the clip's stretch of source footage (0 = its first frame, the last point = its end) the
+/// clip plays at `rate` (1 = real time). Between points the speed changes smoothly (`SpeedCurve`).
+struct V2SpeedPoint: Codable, Equatable {
+    var sourceMs: Double
+    var rate: Double
+    /// d ln(rate) / d sourceMs at this point. Absent = worked out from the neighbours (a smooth, non-overshooting curve); present when a cut
+    /// (Split, trim) has to keep the shape of the curve it came from exactly.
+    var slope: Double?
+
+    init(sourceMs: Double, rate: Double, slope: Double? = nil) {
+        self.sourceMs = sourceMs; self.rate = rate; self.slope = slope
+    }
+}
+
 struct V2VideoPayload: Codable {
     var assetId: String
     var fit: String?
     var trimStart: Double?
     var trimEnd: Double?
     var playbackRate: Double?
+    /// A speed that changes along the clip (a time remap): at least two points, the first at 0 and the last at the end of the clip's source
+    /// stretch. When present it replaces `playbackRate`. Absent = the constant `playbackRate`.
+    var speedCurve: [V2SpeedPoint]?
     var audio: V2EmbeddedVideoAudio?
     var framePolicy: String?
 }

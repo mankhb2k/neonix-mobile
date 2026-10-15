@@ -61,10 +61,38 @@ struct EditorTextPathIntent: Codable {
     var startOffset: Double
 }
 
-/// A rounded label behind the text that hugs every line (story style). Size-dependent geometry (padding, radius) is derived from the
-/// font size in `TextBackgroundGeometry`; only the colour is authored.
+/// A rounded label behind the text. `style` "hug" = story style (one shape hugging every line), "box" = one rectangle around the whole
+/// block. Padding and corner radius are fractions of the font size (nil = the story-style defaults in `TextBackgroundGeometry`);
+/// `opacity` multiplies the colour's own alpha.
 struct EditorTextBackground: Codable, Equatable {
     var color: String
+    var opacity: Double? = nil
+    var style: String? = nil
+    var radius: Double? = nil
+    var padX: Double? = nil
+    var padY: Double? = nil
+}
+
+/// An outline around the glyphs, `width` in layer units (the part outside the glyph).
+struct EditorTextStroke: Codable, Equatable {
+    var color: String
+    var width: Double
+}
+
+/// A soft halo: the glyphs' own shape blurred, no offset. `intensity` 0...1, `blur` in layer units.
+struct EditorTextGlow: Codable, Equatable {
+    var color: String
+    var intensity: Double
+    var blur: Double
+}
+
+/// A drop shadow: `distance` along `angle` (degrees, 0 = to the right, 90 = down), `opacity` 0...1, `blur` in layer units.
+struct EditorTextShadow: Codable, Equatable {
+    var color: String
+    var opacity: Double
+    var blur: Double
+    var distance: Double
+    var angle: Double
 }
 
 struct EditorTextLayer: Codable {
@@ -77,4 +105,17 @@ struct EditorTextLayer: Codable {
     var typewriter: EditorTypewriterIntent?
     var wave: EditorTextWaveIntent?
     var textPath: EditorTextPathIntent?
+    var stroke: EditorTextStroke? = nil
+    var glow: EditorTextGlow? = nil
+    var shadow: EditorTextShadow? = nil
+    /// Extra space after every character / between lines, in layer units (can be negative).
+    var letterSpacing: Double? = nil
+    var lineSpacing: Double? = nil
+    var bold: Bool? = nil
+    var italic: Bool? = nil
+    var underline: Bool? = nil
+    /// "uppercase" | "lowercase" | "capitalize"; nil = as typed.
+    var textCase: String? = nil
+    /// -100...100: bends every line into an arc (positive = an arch, negative = a bowl).
+    var curve: Double? = nil
 }

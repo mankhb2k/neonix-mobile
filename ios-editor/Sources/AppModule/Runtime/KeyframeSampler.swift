@@ -230,6 +230,17 @@ struct ResolvedTextRun {
     var opacity: Double = 1
     /// Degrees — from `V2TextChunk.rotate[i]`, always `0` otherwise.
     var rotation: Double = 0
+    var bold = false
+    var italic = false
+    var underline = false
+    var letterSpacing: Double = 0
+    /// Outline: colour and width (the part outside the glyph); drawn under the fill.
+    var strokeColor: V2Color?
+    var strokeWidth: Double = 0
+    var shadows: [V2TextShadow] = []
+
+    /// The face this run is drawn in (bold / italic resolved), shared with the layout compiler's metrics.
+    var uiFont: UIFont { TextLayoutCompiler.resolveFont(family: fontFamily, size: fontSize, bold: bold, italic: italic) }
 }
 
 /// Which stagger entry (if any) a given absolute source-text character
@@ -283,32 +294,50 @@ private func resolveTextRuns(_ payload: V2TextLayerPayload, layer: V2Layer, atMs
             guard start < end, start >= 0 else { continue }
             let fontFamily = span.font.families.first ?? "Helvetica"
             let fontSize = span.font.size.numericValue
-            let font = TextLayoutCompiler.resolveFont(family: fontFamily, size: fontSize)
+            let bold = (span.font.weight ?? 400) >= 600
+            let italic = span.font.style == "italic"
+            let font = TextLayoutCompiler.resolveFont(family: fontFamily, size: fontSize, bold: bold, italic: italic)
             let topY = baselineY - Double(font.ascender)
             let color = span.fill?.flatColor ?? "#FFFFFFFF"
+            let letterSpacing: Double
+            if case .length(let length)? = span.letterSpacing { letterSpacing = length.numericValue } else { letterSpacing = 0 }
+            // `text-transform`: the words as drawn; same UTF-16 length as the source, so every range below still applies.
+            let drawn = span.textTransform == nil ? utf16 : Array(TextLayoutCompiler.transformed(payload.source.text, span.textTransform).utf16)
+            let drawnLine = String(decoding: drawn[chunkStart..<chunkEnd], as: UTF16.self)
+            var template = ResolvedTextRun(text: "", x: x, y: topY, fontFamily: fontFamily, fontSize: fontSize, color: color)
+            template.bold = bold; template.italic = italic
+            template.underline = span.textDecoration?.underline != nil
+            template.letterSpacing = letterSpacing
+            if let strokeColor = span.stroke?.flatColor, let width = span.strokeWidth?.numericValue, width > 0 {
+                template.strokeColor = strokeColor; template.strokeWidth = width
+            }
+            template.shadows = span.shadows ?? []
 
             let staggered = !selectors.isEmpty && (start..<end).contains { staggerPosition(forSourceIndex: $0, in: selectors, totalLength: utf16.count) != nil }
             guard staggered || hasPerCharacterOffsets else {
-                let substring = String(decoding: utf16[start..<end], as: UTF16.self)
-                runs.append(ResolvedTextRun(text: substring, x: x, y: topY, fontFamily: fontFamily, fontSize: fontSize, color: color))
+                var run = template
+                run.text = String(decoding: drawn[start..<end], as: UTF16.self)
+                runs.append(run)
                 continue
             }
 
             for sourceIndex in start..<end {
                 let localIndex = sourceIndex - chunkStart
-                let character = String(decoding: [utf16[sourceIndex]], as: UTF16.self)
                 let extraDx = chunk.dx?[safe: localIndex]?.numericValue ?? 0
                 let extraDy = chunk.dy?[safe: localIndex]?.numericValue ?? 0
                 let rotation = chunk.rotate?[safe: localIndex] ?? 0
-                let charX = x + TextLayoutCompiler.offsetForCharacter(in: lineText, font: font, localIndex: localIndex) + extraDx
-                var opacity = 1.0
+                var run = template
+                run.text = String(decoding: [drawn[sourceIndex]], as: UTF16.self)
+                run.x = x + TextLayoutCompiler.offsetForCharacter(in: drawnLine, font: font, localIndex: localIndex, letterSpacing: letterSpacing) + extraDx
+                run.y = topY + extraDy
+                run.rotation = rotation
                 if let (selector, position) = staggerPosition(forSourceIndex: sourceIndex, in: selectors, totalLength: utf16.count) {
                     let elapsedMs = atMs - layer.timing.start
                     let delayMs = Double(position) * selector.stagger.perUnitDelayMs
                     let localMs = min(max(elapsedMs - delayMs, 0), layer.timing.duration)
-                    opacity = interpolate(track: selector.track, boundMs: layer.timing.duration, atMs: localMs)
+                    run.opacity = interpolate(track: selector.track, boundMs: layer.timing.duration, atMs: localMs)
                 }
-                runs.append(ResolvedTextRun(text: character, x: charX, y: topY + extraDy, fontFamily: fontFamily, fontSize: fontSize, color: color, opacity: opacity, rotation: rotation))
+                runs.append(run)
             }
         }
     }

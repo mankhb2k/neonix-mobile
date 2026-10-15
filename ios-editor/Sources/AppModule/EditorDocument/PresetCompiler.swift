@@ -171,44 +171,62 @@ private func compileTextPayload(_ editorLayer: EditorLayer) -> V2TextLayerPayloa
     guard let intent = editorLayer.text else {
         return V2TextLayerPayload(source: V2TextSource(text: ""), layout: nil, chunks: [])
     }
+    let background = intent.background
     // A background label needs room around the text: the lines are laid out in a narrower box and shifted in by the padding, so the
-    // label stays inside the layer frame (the layer clips to it).
-    let padX = intent.background == nil ? 0 : TextBackgroundGeometry.padX(fontSize: intent.fontSize)
-    let padY = intent.background == nil ? 0 : TextBackgroundGeometry.padY(fontSize: intent.fontSize)
+    // label stays inside the layer frame.
+    let padX = background == nil ? 0 : TextBackgroundGeometry.padX(fontSize: intent.fontSize, factor: background?.padX)
+    let padY = background == nil ? 0 : TextBackgroundGeometry.padY(fontSize: intent.fontSize, factor: background?.padY)
+    let bold = intent.bold ?? false, italic = intent.italic ?? false
+    let letterSpacing = intent.letterSpacing ?? 0
+    // The words as drawn (`text-transform`); the source text keeps what was typed.
+    let displayText = TextLayoutCompiler.transformed(intent.text, intent.textCase)
     var (layout, lines) = TextLayoutCompiler.compile(
-        text: intent.text, fontFamily: intent.fontFamily, fontSize: intent.fontSize,
+        text: displayText, fontFamily: intent.fontFamily, fontSize: intent.fontSize,
         textAlign: intent.layout.textAlign, wrap: intent.layout.wrap,
-        maxWidth: editorLayer.frame.width - 2 * padX
+        maxWidth: editorLayer.frame.width - 2 * padX,
+        bold: bold, italic: italic, letterSpacing: letterSpacing, lineSpacing: intent.lineSpacing ?? 0
     )
-    if let background = intent.background {
-        let boxes = lines.map { (left: $0.x, right: $0.x + $0.width + 2 * padX) }
+    if let background {
+        var boxes = lines.map { (left: $0.x, right: $0.x + $0.width + 2 * padX) }
+        if background.style == "box", let left = boxes.map(\.left).min(), let right = boxes.map(\.right).max() {
+            boxes = boxes.map { _ in (left: left, right: right) }   // one rectangle around the whole block
+        }
         let edges = (0...lines.count).map { i -> Double in
             i == 0 ? 0 : (i == lines.count ? 2 * padY + Double(lines.count) * layout.lineHeight : padY + Double(i) * layout.lineHeight)
         }
-        if let contour = TextBackgroundGeometry.contour(lines: boxes, boundaries: edges, radius: TextBackgroundGeometry.radius(fontSize: intent.fontSize)) {
-            layout.background = V2TextBackground(contours: [contour], fill: .color(background.color))
+        let radius = TextBackgroundGeometry.radius(fontSize: intent.fontSize, factor: background.radius)
+        if let contour = TextBackgroundGeometry.contour(lines: boxes, boundaries: edges, radius: radius) {
+            layout.background = V2TextBackground(contours: [contour], fill: .color(colorWithAlphaScaled(background.color, by: background.opacity ?? 1)))
         }
         lines = lines.map { ResolvedTextLine(range: $0.range, x: $0.x + padX, y: $0.y + padY, width: $0.width) }
     }
-    // Matches real SVG `<tspan>` flexibility: font lives on the span, not
-    // the layer — every span this compiler emits today happens to use the
-    // same font (`EditorTextLayer` only authors one), but Protocol V2 keeps
-    // the per-span capability for fidelity with the real schema.
-    let font = V2TextFont(families: [intent.fontFamily], size: .number(intent.fontSize))
-    let uiFont = TextLayoutCompiler.resolveFont(family: intent.fontFamily, size: intent.fontSize)
-    let sourceUtf16 = Array(intent.text.utf16)
+    // Matches real SVG `<tspan>` flexibility: font lives on the span, not the layer - every span this compiler emits today uses the
+    // same font (`EditorTextLayer` only authors one), but Protocol V2 keeps the per-span capability for fidelity with the real schema.
+    let font = V2TextFont(families: [intent.fontFamily], size: .number(intent.fontSize), weight: bold ? 700 : nil, style: italic ? "italic" : nil)
+    let uiFont = TextLayoutCompiler.resolveFont(family: intent.fontFamily, size: intent.fontSize, bold: bold, italic: italic)
+    let sourceUtf16 = Array(displayText.utf16)
+    // Glow first (behind), then the drop shadow: a glow is a zero-offset blur, so V2 only sees shadows.
+    var shadows: [V2TextShadow] = []
+    if let glow = intent.glow, glow.intensity > 0 {
+        shadows.append(V2TextShadow(color: colorWithAlphaScaled(glow.color, by: min(glow.intensity, 1)), offsetX: 0, offsetY: 0, blur: glow.blur))
+        shadows.append(V2TextShadow(color: colorWithAlphaScaled(glow.color, by: min(glow.intensity, 1) * 0.6), offsetX: 0, offsetY: 0, blur: glow.blur * 0.5))
+    }
+    if let shadow = intent.shadow {
+        let radians = shadow.angle * Double.pi / 180
+        shadows.append(V2TextShadow(
+            color: colorWithAlphaScaled(shadow.color, by: shadow.opacity),
+            offsetX: cos(radians) * shadow.distance, offsetY: sin(radians) * shadow.distance, blur: shadow.blur
+        ))
+    }
     let chunks = lines.enumerated().map { index, line -> V2TextChunk in
-        // "Wave"/"text on a path" both expand fully into literal
-        // per-character numbers here — Protocol V2 never sees "wave" or
-        // "path", only the resulting dx/dy/rotate arrays (see CLAUDE.md's
-        // "Protocol V2 must stay atomic" rule and "Text layout stays
-        // atomic" note on why path placement is baked at compile time
-        // rather than left for the Runtime to interpret).
+        // "Wave"/"text on a path"/"curve" all expand fully into literal per-character numbers here - Protocol V2 never sees "wave",
+        // "path" or "curve", only the resulting dx/dy/rotate arrays (see CLAUDE.md's "Protocol V2 must stay atomic" rule and "Text
+        // layout stays atomic" note on why placement is baked at compile time rather than left for the Runtime to interpret).
         var dx: [V2SvgLength]?
         var dy: [V2SvgLength]?
         var rotate: [Double]?
+        let lineText = String(decoding: sourceUtf16[line.range.start..<line.range.end], as: UTF16.self)
         if let textPath = intent.textPath {
-            let lineText = String(decoding: sourceUtf16[line.range.start..<line.range.end], as: UTF16.self)
             let center = CGPoint(x: editorLayer.frame.width / 2, y: textPath.radius + 24)
             let path = TextPathResolver.circlePath(radius: textPath.radius, center: center)
             let placements = TextPathResolver.resolve(path: path, startOffset: textPath.startOffset, lineText: lineText, font: uiFont)
@@ -225,6 +243,10 @@ private func compileTextPayload(_ editorLayer: EditorLayer) -> V2TextLayerPayloa
             dx = values.map { .number($0.dx) }
             dy = values.map { .number($0.dy) }
             rotate = values.map(\.rotate)
+        } else if let curve = intent.curve, curve != 0, let arc = TextCurve.placements(lineText: lineText, font: uiFont, letterSpacing: letterSpacing, lineWidth: line.width, curve: curve) {
+            dx = arc.map { .number($0.dx) }
+            dy = arc.map { .number($0.dy) }
+            rotate = arc.map(\.rotate)
         }
         return V2TextChunk(
             id: "line-\(index)",
@@ -238,7 +260,14 @@ private func compileTextPayload(_ editorLayer: EditorLayer) -> V2TextLayerPayloa
                 id: "line-\(index)-span",
                 sourceRange: line.range,
                 font: font,
-                fill: .color(intent.color)
+                fill: .color(intent.color),
+                stroke: intent.stroke.flatMap { $0.width > 0 ? V2Paint.color($0.color) : nil },
+                strokeWidth: intent.stroke.flatMap { $0.width > 0 ? V2SvgLength.number($0.width) : nil },
+                paintOrder: intent.stroke.flatMap { $0.width > 0 ? [V2PaintOrderItem.stroke, .fill] : nil },
+                letterSpacing: letterSpacing != 0 ? .length(.number(letterSpacing)) : nil,
+                textDecoration: intent.underline == true ? V2TextDecoration(underline: V2TextDecorationStyle()) : nil,
+                shadows: shadows.isEmpty ? nil : shadows,
+                textTransform: intent.textCase
             )]
         )
     }
@@ -288,4 +317,13 @@ private func compileTextPayload(_ editorLayer: EditorLayer) -> V2TextLayerPayloa
         rangeSelectors = nil
     }
     return V2TextLayerPayload(source: V2TextSource(text: intent.text), layout: layout, chunks: chunks, rangeSelectors: rangeSelectors)
+}
+
+/// `#RRGGBB[AA]` with its alpha multiplied by `factor` (0...1), as `#RRGGBBAA`.
+func colorWithAlphaScaled(_ hex: String, by factor: Double) -> String {
+    var digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+    if digits.count == 6 { digits += "ff" }
+    guard digits.count == 8, let value = UInt32(digits.prefix(6), radix: 16), let alpha = UInt8(digits.suffix(2), radix: 16) else { return hex }
+    let scaled = Int((Double(alpha) * min(max(factor, 0), 1)).rounded())
+    return String(format: "#%06X", value) + String(format: "%02x", scaled)
 }

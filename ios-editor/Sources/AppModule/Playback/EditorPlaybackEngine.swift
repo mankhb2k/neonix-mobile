@@ -140,6 +140,12 @@ final class EditorPlaybackEngine {
         seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0)
     }
 
+    /// Shows the frame under the playhead again: a clip that just got new footage (Replace, Overlay) has a player that was never positioned.
+    func refreshFrames() {
+        guard mode == .idle else { return }
+        seekStageSessions(atMs: currentTimeMs, toleranceSeconds: 0)
+    }
+
     // MARK: Transport
 
     func play() {
@@ -300,6 +306,7 @@ final class EditorPlaybackEngine {
 
             guard let sourceSeconds = stageSessions[source.layerId]?.currentSourceSeconds else { return }
             let next = source.mapping.timelineMs(atSourceMs: sourceSeconds * 1000)
+            followSpeedCurves(atMs: next)
             let sourceEnd = source.mapping.layerStartMs + source.mapping.durationMs
             if next >= sourceEnd {
                 if let nextSource = sourceCovering(timeMs: sourceEnd + 0.001) {
@@ -525,7 +532,15 @@ final class EditorPlaybackEngine {
                   self.mode == .playing,
                   self.nativeMasterLayerId == source.layerId
             else { return }
-            self.stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate))
+            self.stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
+        }
+    }
+
+    /// Clips with a speed curve: every playing player gets the speed the curve has at this moment.
+    private func followSpeedCurves(atMs ms: Double) {
+        for source in videoSources where source.mapping.curve != nil
+            && ms >= source.mapping.layerStartMs && ms < source.mapping.layerStartMs + source.mapping.durationMs {
+            stageSessions[source.layerId]?.follow(rate: Float(source.mapping.rate(atTimelineMs: ms)))
         }
     }
 
@@ -564,7 +579,7 @@ final class EditorPlaybackEngine {
         for source in videoSources where
             ms >= source.mapping.layerStartMs
                 && ms < source.mapping.layerStartMs + source.mapping.durationMs {
-            stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate))
+            stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
         }
     }
 

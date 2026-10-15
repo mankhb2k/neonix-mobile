@@ -22,7 +22,7 @@ final class ClipToolTests: XCTestCase {
         // Edit text stays first (the only way to change the words), then Split, Transform, Delete 4th.
         XCTAssertEqual(ClipTool.tools(for: .text), [.editText, .split, .transform, .delete, .style, .animation, .graph, .duplicate])
         XCTAssertNil(ClipTool(rawValue: "lasting-text"), "Lasting text was dropped (user 2026-10-12)")
-        XCTAssertFalse(ClipTool.style.isBuilt(for: .text))
+        XCTAssertTrue(ClipTool.style.isBuilt(for: .text), "Style opens the Text sheet on its Style tab")
     }
 
     func testAnAudioClipHasSoundTools() {
@@ -57,7 +57,15 @@ final class ClipToolTests: XCTestCase {
         XCTAssertTrue(ClipTool.opacity.isBuilt(for: .image))
         XCTAssertTrue(ClipTool.volume.isBuilt(for: .audio))
         XCTAssertFalse(ClipTool.volume.isBuilt(for: .video), "video volume is not built yet")
-        for notYet in [ClipTool.speed, .animation, .crop, .replace, .duplicate, .overlay, .removeBackground, .unlink, .style] {
+        XCTAssertTrue(ClipTool.animation.isBuilt(for: .video) && ClipTool.animation.isBuilt(for: .text) && ClipTool.animation.isBuilt(for: .sticker))
+        XCTAssertFalse(ClipTool.animation.isBuilt(for: .audio))
+        for kind in [ClipKind.video, .image, .text, .sticker] { XCTAssertTrue(ClipTool.duplicate.isBuilt(for: kind), "\(kind)") }
+        XCTAssertFalse(ClipTool.duplicate.isBuilt(for: .audio), "audio duplicate waits for the audio batch")
+        for kind in [ClipKind.video, .image] { XCTAssertTrue(ClipTool.replace.isBuilt(for: kind) && ClipTool.overlay.isBuilt(for: kind)) }
+        XCTAssertFalse(ClipTool.replace.isBuilt(for: .text))
+        XCTAssertTrue(ClipTool.speed.isBuilt(for: .video))
+        XCTAssertFalse(ClipTool.speed.isBuilt(for: .audio), "audio speed is not built yet")
+        for notYet in [ClipTool.crop, .removeBackground, .unlink] {
             XCTAssertFalse(notYet.isBuilt(for: .video), "\(notYet)")
         }
     }

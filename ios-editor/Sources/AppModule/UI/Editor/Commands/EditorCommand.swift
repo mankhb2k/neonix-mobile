@@ -69,17 +69,26 @@ struct SplitClipCommand: EditorCommand {
         let secondDuration = original.timing.duration - firstDuration
 
         var first = original
-        first.timing = V2Timing(start: original.timing.start, duration: firstDuration)
-
         var second = original
+        // A clip with a speed curve is cut where the *source* is at the cut; each half keeps its own piece of the curve.
+        var curveCut: Double?
+        if case .video(let payload) = original.payload, let points = payload.speedCurve, let last = points.last,
+           let curve = SpeedCurve(points: points, span: last.sourceMs), let halves = curve.splitting(atSource: curve.sourceMs(atOutput: firstDuration)) {
+            let cut = curve.sourceMs(atOutput: firstDuration)
+            curveCut = cut   // the durations stay exactly what the timeline says; each curve's own length matches them to within a table cell
+            if case .video(var a) = first.payload { a.speedCurve = halves.first.points; first.payload = .video(a) }
+            if case .video(var b) = second.payload { b.speedCurve = halves.second.points; second.payload = .video(b) }
+        }
+        first.timing = V2Timing(start: original.timing.start, duration: firstDuration)
         second.id = "\(original.id)-split-\(UUID().uuidString.prefix(8))"
-        second.timing = V2Timing(start: atMs, duration: secondDuration)
+        second.timing = V2Timing(start: original.timing.start + firstDuration, duration: secondDuration)
         // A video clip's second half must keep playing from where the
         // first half left off in the *source* file, not restart from the
         // original's own trim point — shift `trimStart` forward by exactly
         // the first half's duration.
         if case .video(var payload) = second.payload {
-            payload.trimStart = (payload.trimStart ?? 0) + firstDuration
+            // The first half covers `firstDuration x rate` ms of the source (rate 1 unless Speed changed it).
+            payload.trimStart = (payload.trimStart ?? 0) + (curveCut ?? firstDuration * (payload.playbackRate ?? 1))
             second.payload = .video(payload)
         }
 
@@ -88,9 +97,18 @@ struct SplitClipCommand: EditorCommand {
         first.tracks = halves.first.tracks
         second.tracks = halves.second.tracks
 
+        // Animations: In stays on the first half, Out goes to the second, a Combo plays on both. The copy must not stay nested in
+        // the first half's wrappers.
+        let animations = AnimationWrappers.applied(for: original.id, in: layers)
+        second.parentLayerId = AnimationWrappers.baseParent(of: original, in: layers)
         layers[index] = first
         layers.insert(second, at: index + 1)
-        return project.withLayers(layers)
+        var result = project.withLayers(layers)
+        if !animations.isEmpty {
+            result = AnimationWrappers.rebuilt(result, clipId: first.id, animations: animations.values.filter { $0.slot != .out })
+            result = AnimationWrappers.rebuilt(result, clipId: second.id, animations: animations.values.filter { $0.slot != .in })
+        }
+        return result
     }
 }
 
@@ -134,6 +152,17 @@ struct TrimClipCommand: EditorCommand {
         if case .video(var payload) = layer.payload {
             payload.trimStart = trimStart
             payload.trimEnd = trimEnd
+            // A clip with a speed curve loses/gains the matching piece of it at each edge: how far each edge moved in timeline ms says how
+            // much source went with it, and the clip's own trim values follow from that.
+            if let oldMapping = VideoTimeMapping(layer: layers[index]), oldMapping.curve != nil, let curve = oldMapping.curve {
+                let head = oldMapping.headSource(forTimeline: start - layers[index].timing.start)
+                let tail = oldMapping.tailSource(forTimeline: (start + duration) - oldEnd)
+                if let trimmed = curve.trimmed(headSource: head, tailSource: tail) {
+                    payload.speedCurve = trimmed.points
+                    payload.trimStart = max(oldMapping.trimStartMs + head, 0)
+                    payload.trimEnd = (payload.trimStart ?? 0) + trimmed.span
+                }
+            }
             layer.payload = .video(payload)
         }
         layers[index] = layer
@@ -159,14 +188,15 @@ struct DeleteClipCommand: EditorCommand {
         let removed = project.layers.first { $0.id == layerId }
         let remaining = project.withLayers(project.layers.filter { $0.id != layerId })
         // Deleting a clip of the main lane leaves a hole there: close it (main-lane magnet).
-        guard let mainOrder, let removed, removed.type == "video", removed.order == mainOrder else { return remaining }
+        guard let mainOrder, let removed, isPushLane(removed), removed.order == mainOrder else { return remaining }
         return packLane(order: mainOrder, in: remaining)
     }
 }
 
-/// The main lane = the lowest `order` that holds a video clip (the one pinned under the ruler).
+/// The main lane = the lowest `order` that holds a video **or a photo** clip of the main track (the lane pinned under the ruler). Stickers and
+/// overlays are free clips and never make a lane the main one; a main lane with only photos (a video replaced by a photo) is still the main lane.
 func primaryVideoLaneOrder(of layers: [V2Layer]) -> Int? {
-    layers.filter { $0.type == "video" }.map(\.order).min()
+    layers.filter { isPushLane($0) }.map(\.order).min()
 }
 
 /// Main-lane magnet (user decision 2026-10-12): the main lane never has a hole - its clips follow each other, the first
@@ -378,15 +408,12 @@ struct AddTextLayerCommand: EditorCommand {
                     id: layerId, kind: "text",
                     frame: V2Frame(width: project.composition.width, height: TextStyleValues.frameHeight(for: textValues, width: project.composition.width)),
                     timing: V2Timing(start: atMs, duration: Self.defaultDurationMs),
-                    text: EditorTextLayer(
-                        text: text, fontFamily: textValues.fontFamily, fontSize: textValues.fontSize, color: textValues.color,
-                        layout: EditorTextLayoutIntent(textAlign: textValues.align, wrap: "none"),
-                        background: textValues.backgroundColor.map { EditorTextBackground(color: $0) }
-                    )
+                    text: textValues.editorText()
                 )
             ]
         )
         guard var newLayer = compile(document).layers.first else { return project }
+        TextIntentCache.shared.remember(textValues, for: newLayer)
 
         let textLayers = project.layers.filter { $0.type == "text" }
         func overlaps(_ order: Int) -> Bool {
@@ -481,8 +508,12 @@ struct DuplicateOverlayCommand: EditorCommand {
                 && $0.timing.start < copy.timing.start + copy.timing.duration
         }
         if busy { copy.order = (layers.map(\.order).max() ?? 0) + 1 }
+        // The copy carries the same animations, in wrappers of its own (not nested in the original's).
+        let animations = AnimationWrappers.applied(for: layerId, in: layers)
+        copy.parentLayerId = AnimationWrappers.baseParent(of: layers[index], in: layers)
         layers.insert(copy, at: index + 1)
-        return project.withLayers(layers)
+        let result = project.withLayers(layers)
+        return animations.isEmpty ? result : AnimationWrappers.rebuilt(result, clipId: newLayerId, animations: Array(animations.values))
     }
 }
 
@@ -529,11 +560,7 @@ struct SetTextCommand: EditorCommand {
                     id: original.id, kind: "text",
                     frame: frame,
                     timing: original.timing,
-                    text: EditorTextLayer(
-                        text: values.text, fontFamily: values.fontFamily, fontSize: values.fontSize, color: values.color,
-                        layout: EditorTextLayoutIntent(textAlign: values.align, wrap: "none"),
-                        background: values.backgroundColor.map { EditorTextBackground(color: $0) }
-                    )
+                    text: values.editorText()
                 )
             ]
         )
@@ -542,6 +569,7 @@ struct SetTextCommand: EditorCommand {
         var updated = original
         updated.payload = recompiled.payload
         updated.frame = frame
+        TextIntentCache.shared.remember(values, for: updated)
         layers[index] = updated
         return project.withLayers(layers)
     }

@@ -141,6 +141,8 @@ struct AssetCell: View {
     let library: PhotoLibrary
     let asset: PHAsset
     let dimmed: Bool
+    /// Shown on a dimmed cell ("Too short").
+    var dimmedLabel: String?
     let onTap: () -> Void
 
     @State private var image: UIImage?
@@ -160,7 +162,12 @@ struct AssetCell: View {
                             .padding(4).shadow(radius: 2)
                     }
                 }
-                .overlay { if dimmed { Color.black.opacity(0.55) } }
+                .overlay {
+                    if dimmed {
+                        Color.black.opacity(0.55)
+                            .overlay { if let dimmedLabel { Text(dimmedLabel).font(.caption.weight(.semibold)).foregroundColor(.white) } }
+                    }
+                }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("assetCell")
