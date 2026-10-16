@@ -73,6 +73,7 @@ schemes:
         NeonixEditorUITests: [test]
     run:
       config: Debug
+      storeKitConfiguration: ios-editor/StoreKit/Credits.storekit
     test:
       config: Debug
       targets:

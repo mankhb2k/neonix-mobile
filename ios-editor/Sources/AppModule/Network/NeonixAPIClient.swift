@@ -50,6 +50,21 @@ struct NeonixAPIClient {
         try await send("GET", "v1/billing/balance", as: APIBalance.self).balance
     }
 
+    func packs() async throws -> [APIPack] {
+        try await send("GET", "v1/billing/packs", as: APIPackList.self).items
+    }
+
+    /// Safe to retry: the server counts one StoreKit transaction once.
+    func creditPurchase(signedTransaction: String) async throws -> APIPurchaseResult {
+        try await send("POST", "v1/billing/purchases", body: ["signedTransaction": signedTransaction], as: APIPurchaseResult.self)
+    }
+
+    func ledger(limit: Int = 30, cursor: String? = nil) async throws -> APILedgerPage {
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await send("GET", "v1/billing/ledger", query: items, as: APILedgerPage.self)
+    }
+
     func templates(category: String? = nil, query: String? = nil, limit: Int = 20, cursor: String? = nil) async throws -> APITemplatePage {
         var items = [URLQueryItem(name: "limit", value: String(limit))]
         if let category { items.append(URLQueryItem(name: "category", value: category)) }

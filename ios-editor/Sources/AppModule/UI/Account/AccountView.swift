@@ -2,6 +2,10 @@ import SwiftUI
 
 struct AccountView: View {
     @AppStorage("playbackMetricsArmed") private var playbackMetricsArmed = false
+    @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
+    /// Last balance the server gave (-1 = never); shown at once and refreshed below, so the row is never empty.
+    @AppStorage(CreditsView.lastBalanceKey) private var lastBalance = -1
 
     var body: some View {
         List {
@@ -23,19 +27,65 @@ struct AccountView: View {
 
             Section("Account") {
                 Label("Edit profile", systemImage: "person.crop.circle")
-                Label("Subscription", systemImage: "star.circle")
-                Label("Storage", systemImage: "externaldrive")
+                NavigationLink {
+                    CreditsView()
+                } label: {
+                    HStack {
+                        Label("Credits", systemImage: "bitcoinsign.circle")
+                        Spacer()
+                        Text(verbatim: lastBalance >= 0 ? String(lastBalance) : "—").foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("row-credits")
+                NavigationLink {
+                    StorageView()
+                } label: {
+                    Label("Storage", systemImage: "externaldrive")
+                }
+                .accessibilityIdentifier("row-storage")
             }
 
             Section("Preferences") {
                 Label("Notifications", systemImage: "bell")
-                Label("Appearance", systemImage: "paintbrush")
-                Label("Privacy", systemImage: "lock")
+                NavigationLink {
+                    AppearanceView()
+                } label: {
+                    HStack {
+                        Label("Appearance", systemImage: "paintbrush")
+                        Spacer()
+                        Text(appearance.title).foregroundColor(.secondary)
+                    }
+                }
+                NavigationLink {
+                    LanguageView()
+                } label: {
+                    HStack {
+                        Label("Language", systemImage: "globe")
+                        Spacer()
+                        Group {
+                            if let name = language.nativeName { Text(verbatim: name) } else { Text("System") }
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                }
+                NavigationLink {
+                    PrivacyTermsView()
+                } label: {
+                    Label("Privacy & Terms", systemImage: "lock")
+                }
             }
 
             Section("Support") {
-                Label("Help Center", systemImage: "questionmark.circle")
-                Label("Send feedback", systemImage: "envelope")
+                NavigationLink {
+                    HelpCenterView()
+                } label: {
+                    Label("Help Center", systemImage: "questionmark.circle")
+                }
+                NavigationLink {
+                    FeedbackView()
+                } label: {
+                    Label("Send feedback", systemImage: "envelope")
+                }
             }
 
             Section {
@@ -47,6 +97,9 @@ struct AccountView: View {
             } footer: {
                 Text("Shows a metrics pill in the editor. Start/stop a recorded run there and share the CSV. See PLAYBACK_PIPELINE.md.")
             }
+        }
+        .task {   // refreshed each time the tab appears
+            if let balance = try? await NeonixAPIClient(config: .current).balance() { lastBalance = balance }
         }
     }
 }

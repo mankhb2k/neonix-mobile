@@ -69,6 +69,37 @@ struct APIExportResult: Decodable {
 
 struct APICreditGrant: Decodable { let balance: Int }
 
+/// One row of `GET /v1/billing/ledger` (newest first). `delta` is signed: purchases add, exports subtract.
+struct APILedgerEntry: Decodable, Identifiable, Equatable {
+    let id: String
+    let delta: Int
+    let balanceAfter: Int
+    /// purchase, export, export_refund, iap_refund, grant, template_purchase
+    let reason: String
+    let createdAt: Date
+}
+
+/// `GET /v1/billing/packs`: credit packs on sale. The price text comes from StoreKit by `productId`.
+struct APIPack: Decodable, Identifiable, Equatable {
+    let productId: String
+    let credits: Int
+    var id: String { productId }
+}
+
+struct APIPackList: Decodable { let items: [APIPack] }
+
+/// `POST /v1/billing/purchases`. `credited` is false when the same transaction was already counted (a retry).
+struct APIPurchaseResult: Decodable {
+    let credited: Bool
+    let credits: Int
+    let balance: Int
+}
+
+struct APILedgerPage: Decodable {
+    let items: [APILedgerEntry]
+    let nextCursor: String?
+}
+
 enum APIError: LocalizedError {
     case http(status: Int, code: String?, message: String)
     case invalidResponse

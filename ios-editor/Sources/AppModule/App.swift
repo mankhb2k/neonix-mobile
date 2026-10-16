@@ -2,9 +2,14 @@ import SwiftUI
 
 @main
 struct NeonixEditorApp: App {
+    @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
+
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .preferredColorScheme(appearance.colorScheme)
+                .environment(\.locale, language.locale)
                 #if DEBUG
                 .task { await FilterThumbnailBench.runIfRequested() }   // env FILTER_BENCH=1; see FilterThumbnailBench
                 .task { await SeekTimeBench.runIfRequested() }   // env SEEK_BENCH=1; see SeekTimeBench

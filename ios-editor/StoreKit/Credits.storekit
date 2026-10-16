@@ -1,0 +1,57 @@
+{
+  "identifier": "A1B2C3D4",
+  "nonRenewingSubscriptions": [],
+  "products": [
+    {
+      "displayPrice": "0.99",
+      "familyShareable": false,
+      "internalID": "6700000100",
+      "localizations": [
+        {
+          "description": "50 credits to unlock templates",
+          "displayName": "50 credits",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.credits.50",
+      "referenceName": "50 credits",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "6700000101",
+      "localizations": [
+        {
+          "description": "120 credits to unlock templates",
+          "displayName": "120 credits",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.credits.120",
+      "referenceName": "120 credits",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "6700000102",
+      "localizations": [
+        {
+          "description": "300 credits to unlock templates",
+          "displayName": "300 credits",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.credits.300",
+      "referenceName": "300 credits",
+      "type": "Consumable"
+    }
+  ],
+  "settings": {},
+  "subscriptionGroups": [],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

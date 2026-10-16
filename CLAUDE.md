@@ -20,7 +20,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   The TS validator stays canonical.
 - **No SVG-import alias fields** (e.g. `V2LinearGradient.angle`) in anything authored.
 - Hand-written Swift Codable types are a stand-in for types generated from `schema/v2.json`.
-- **All in-app UI text is English** (conversation stays Vietnamese). Chrome uses system
+- **In-app UI text is English by default** (conversation stays Vietnamese). Vietnamese is selectable in Account › Language (`AppLanguage`, `Resources/Localizable.xcstrings`, English text is the key; `Text("literal")` translates via the root `\.locale`, a `String` needs `AppLanguage.string`). Translated so far: the Account tab only; new UI text goes in the catalog. Chrome uses system
   dynamic colors (`Color(.systemBackground)`…), never hardcoded black/white.
 - Code comments short; non-obvious decisions get a pointer to a section here.
 
@@ -121,7 +121,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   packing, as `AddTextLayerCommand`/`AddAudioClipCommand` do). Audio has its own domain
   (`V2AudioDomain.tracks[].clips[]`), not `layers[]`.
   **Lane height**: a lane with a video or photo clip (overlays and photo lanes too, `isMediaClip`; not stickers) shows pictures (main lane 48 pt, other video/photo lanes e.g. overlays 38 pt) - a video its filmstrip, a photo one square
-  picture tiled over the clip (`PhotoThumbnailCache`, ImageIO, `Image(...resizingMode: .tile)`); text/sticker lanes and audio rows are 30 pt. **Trim handle touch area** = the 10 pt of the 14 pt handle next to the clip (was 28).
+  picture tiled over the clip (`PhotoThumbnailCache`, ImageIO, `Image(...resizingMode: .tile)`); text/sticker lanes and audio rows are 30 pt; lane gap 6 pt. **Runway** (`LaneRunway`, CapCut's band): every lane and audio row gets a `secondarySystemBackground` band from 0 to `engine.maxDurationMs` (the end of the longest clip on any lane or audio track), so empty lanes read as one even block. **Trim handle touch area** = the 10 pt of the 14 pt handle next to the clip (was 28).
   The main lane (lowest lane with a video or photo clip of the main track, see Replace / Overlay below) is **pinned under the ruler**; every other
   lane and the audio tracks sit in a **native vertical `ScrollView`** (system momentum and
   bounce — deliberately no custom physics). It scrolls only when the lanes overflow the
@@ -247,7 +247,7 @@ true (history lives in git; long investigations go in `PLAYBACK_PIPELINE.md` /
   footage** (so it does not move while you edit); the clip's length is what the curve takes. `SetClipSpeedCurveCommand` (shares `retimedClip` with `SetClipSpeedCommand`: keyframes scale, the lane follows); a curve that is 1x
   everywhere is no curve; the Normal ruler replaces a curve with a constant rate. **Split** cuts the curve where the source is at the cut, **trim** removes/extends the matching piece at each edge (an extension is flat); the cut
   pieces carry explicit `slope`s so they are exactly the same function as the original. UI (`SpeedCurveEditor`): three lines - 9x top, 1x middle (solid), 0.1x bottom - each half logarithmic (`SpeedGraphAxis`), five beats at 1x to start,
-  drag a beat vertically (inner ones also sideways), a white line = the playhead, **one + / - icon** (+ adds a beat at the playhead; on a beat, or a picked one, it is a - and removes it), Reset (the toolbar) flattens, the sheet is
+  drag a beat vertically (inner ones also sideways), a black line = the playhead, **draggable** (round handle on top or the line; scrubs the clip through the engine, a beat under the finger wins over the line), **one + / - icon** (+ adds a beat at the playhead; on a beat, or a picked one, it is a - and removes it), Reset (the toolbar) flattens, the sheet is
   taller (440) on Curve. **Playback**: the engine's tick sets each playing curved clip's player rate to the curve's speed at its own source position (`StagePlayerSession.follow(rate:)`, only when > 3 % off); the playhead follows the
   player's clock. **Not measured on the iPhone yet**: how closely the footage keeps to the curve while playing (`SpeedBench` with `SPEED_BENCH_CURVE=1`, the device was unavailable). Not built: audio-clip speed, "Change audio pitch"
   (the video's own sound is not played today - the stage players are muted), the preset curves (Montage, Hero, Bullet...), "Smooth slow-mo". A speed change while playing takes ~150-300 ms to show in the clock and may step it
