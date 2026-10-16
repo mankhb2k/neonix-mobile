@@ -18,7 +18,7 @@ enum SpeedGraphAxis {
 }
 
 /// CapCut's "Custom" speed graph: the clip's source footage runs left to right, the line is its speed, the circles are the beats. Drag a beat up to
-/// speed that part up, down to slow it; the first and last beats only move vertically. A white line marks the playhead.
+/// speed that part up, down to slow it; the first and last beats only move vertically. A white line marks the playhead; grab it (its round handle on top, or the line) to move it along the footage.
 struct SpeedCurveEditor: View {
     @Binding var points: [V2SpeedPoint]
     @Binding var selected: Int?
@@ -26,11 +26,16 @@ struct SpeedCurveEditor: View {
     /// Where the playhead is in the source footage, 0...1 (nil = outside the clip).
     var playheadFraction: Double?
     let onChange: () -> Void
+    /// The playhead was dragged to this fraction of the footage (0...1) / the drag ended.
+    var onSeek: (Double) -> Void = { _ in }
+    var onSeekEnd: () -> Void = {}
 
     @State private var dragging: Int?
+    @State private var draggingPlayhead = false
 
     private let inset: CGFloat = 16
     private let hitRadius: CGFloat = 26
+    private let gripRadius: CGFloat = 8
     /// Beats keep at least this much of the width between them.
     private let minGap = 0.03
 
@@ -43,13 +48,19 @@ struct SpeedCurveEditor: View {
                 if let fraction = playheadFraction {
                     Rectangle().fill(Color.primary.opacity(0.7)).frame(width: 1.5, height: plot.height)
                         .position(x: plot.minX + plot.width * fraction, y: plot.midY)
+                    Circle().fill(Color.primary.opacity(0.85)).frame(width: 2 * gripRadius, height: 2 * gripRadius)
+                        .position(x: plot.minX + plot.width * fraction, y: plot.minY)
+                        .accessibilityHidden(true)
                 }
                 ForEach(points.indices, id: \.self) { index in beat(index, plot) }
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in drag(value.location, startLocation: value.startLocation, plot: plot) }
-                .onEnded { _ in dragging = nil })
+                .onEnded { _ in
+                    dragging = nil
+                    if draggingPlayhead { draggingPlayhead = false; onSeekEnd() }
+                })
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("speedGraph")
@@ -106,7 +117,24 @@ struct SpeedCurveEditor: View {
     // MARK: Dragging
 
     private func drag(_ location: CGPoint, startLocation: CGPoint, plot: CGRect) {
+        if draggingPlayhead {
+            onSeek(min(max((location.x - plot.minX) / plot.width, 0), 1))
+            return
+        }
         if dragging == nil {
+            // The playhead's round handle wins over a beat sitting on the line; its line loses to a beat.
+            if let fraction = playheadFraction {
+                let x = plot.minX + plot.width * fraction
+                let onGrip = distance(CGPoint(x: x, y: plot.minY), startLocation) <= hitRadius * 0.7
+                let nearBeat = points.indices.contains { distance(position($0, plot), startLocation) <= hitRadius }
+                let onLine = abs(startLocation.x - x) <= 14 && !nearBeat
+                if onGrip || onLine {
+                    draggingPlayhead = true
+                    selected = nil
+                    onSeek(min(max((location.x - plot.minX) / plot.width, 0), 1))
+                    return
+                }
+            }
             // The nearest beat to where the finger went down, if it is close enough.
             let nearest = points.indices.min { distance(position($0, plot), startLocation) < distance(position($1, plot), startLocation) }
             guard let nearest, distance(position(nearest, plot), startLocation) <= hitRadius else { selected = nil; return }   // a touch on empty graph deselects

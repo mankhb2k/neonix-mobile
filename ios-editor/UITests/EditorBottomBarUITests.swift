@@ -357,6 +357,16 @@ final class EditorBottomBarUITests: XCTestCase {
         XCTAssertTrue(beat.waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["speedBeat-5"].exists, "five beats to start with")
         saveShot(app, "speed-curve-flat")
+        // The playhead's round handle (top of the black line) scrubs the clip: dragging it along the graph moves the timeline's time.
+        let graph = app.descendants(matching: .any)["speedGraph"]
+        let timeBefore = Double(app.descendants(matching: .any)["timeline"].label) ?? -1
+        let size = graph.frame.size
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 16 / size.width, dy: 12 / size.height))
+            .press(forDuration: 0.05, thenDragTo: graph.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 12 / size.height)))
+        sleep(1)
+        let timeAfter = Double(app.descendants(matching: .any)["timeline"].label) ?? -1
+        saveShot(app, "speed-curve-playhead")
+        XCTAssertGreaterThan(timeAfter, timeBefore + 200, "dragging the black line moves the playhead (\(timeBefore) -> \(timeAfter))")
         let lengthBefore = line.label
         beat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: beat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -3.2)))
         sleep(1)

@@ -388,6 +388,13 @@ struct EditorShellView: View {
             }
             SpeedSheet(
                 rate: rate, curve: curvePoints, sourceSpanMs: span, fps: project.composition.fps, playheadFraction: playhead,
+                onSeek: { fraction in
+                    // The black line on the graph is a scrubber over the clip's footage.
+                    guard let mapping else { return }
+                    engine.beginScrub()
+                    engine.scrub(toMs: mapping.timelineMs(atSourceMs: mapping.trimStartMs + fraction * span))
+                },
+                onSeekEnd: { engine.endScrub(velocityMsPerSecond: 0) },
                 onRate: { newRate in
                     if speedSessionOriginal == nil { speedSessionOriginal = project }
                     setProject(SetClipSpeedCommand(layerId: id, rate: newRate).apply(to: project))
@@ -783,7 +790,8 @@ struct EditorShellView: View {
                         onTrimUpdate: updateTrim,
                         onTrimEnd: endTrim,
                         fps: project.composition.fps,
-                        keyframeTimes: selectedLayer.map(TransformKeyframes.visibleTimelineTimes) ?? []
+                        keyframeTimes: selectedLayer.map(TransformKeyframes.visibleTimelineTimes) ?? [],
+                        onMoveClip: apply
                     )
                     .frame(height: timelineHeight)
                     .clipped()

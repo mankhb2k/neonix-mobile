@@ -9,6 +9,9 @@ struct SpeedSheet: View {
     let sourceSpanMs: Double
     let fps: Double
     let playheadFraction: Double?
+    /// The playhead dragged on the graph: a fraction of the clip's footage / end of that drag.
+    var onSeek: (Double) -> Void = { _ in }
+    var onSeekEnd: () -> Void = {}
     let onRate: (Double) -> Void
     /// The speed curve, live (nil = back to a constant 1x).
     let onCurve: ([V2SpeedPoint]?) -> Void
@@ -28,6 +31,7 @@ struct SpeedSheet: View {
 
     /// `curve`: the clip's speed curve when it has one (the sheet then opens on Curve).
     init(rate: Double, curve: [V2SpeedPoint]?, sourceSpanMs: Double, fps: Double, playheadFraction: Double?,
+         onSeek: @escaping (Double) -> Void = { _ in }, onSeekEnd: @escaping () -> Void = {},
          onRate: @escaping (Double) -> Void, onCurve: @escaping ([V2SpeedPoint]?) -> Void) {
         _rate = State(initialValue: SpeedScale.snapped(rate))
         _mode = State(initialValue: curve == nil ? .normal : .curve)
@@ -36,6 +40,8 @@ struct SpeedSheet: View {
         self.sourceSpanMs = sourceSpanMs
         self.fps = fps
         self.playheadFraction = playheadFraction
+        self.onSeek = onSeek
+        self.onSeekEnd = onSeekEnd
         self.onRate = onRate
         self.onCurve = onCurve
     }
@@ -111,7 +117,8 @@ struct SpeedSheet: View {
             .font(.subheadline.monospacedDigit())
             .padding(.horizontal, 16)
             .accessibilityElement(children: .contain)
-            SpeedCurveEditor(points: $points, selected: $selectedBeat, span: sourceSpanMs, playheadFraction: playheadFraction, onChange: pushCurve)
+            SpeedCurveEditor(points: $points, selected: $selectedBeat, span: sourceSpanMs, playheadFraction: playheadFraction, onChange: pushCurve,
+                             onSeek: onSeek, onSeekEnd: onSeekEnd)
                 .frame(height: 170)
         }
     }

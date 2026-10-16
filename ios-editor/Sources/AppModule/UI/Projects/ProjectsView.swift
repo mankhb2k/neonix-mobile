@@ -14,12 +14,22 @@ struct ProjectSample: Identifiable {
 
 private struct ProjectRow: View {
     let project: ProjectSample
+    /// The project's first frame; the gradient shows until it arrives (and stays for a project with no picture).
+    @State private var cover: UIImage?
 
     var body: some View {
         HStack(spacing: 12) {
-            LinearGradient(colors: project.gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            ZStack {
+                LinearGradient(colors: project.gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let cover {
+                    Image(uiImage: cover).resizable().aspectRatio(contentMode: .fill)
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .task(id: project.id) {
+                cover = await ProjectCover.firstFrame(of: ProjectsView.openEditorProject(for: project), side: 64)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(project.name).font(.body.weight(.medium))
@@ -80,7 +90,7 @@ struct ProjectsView: View {
     /// declares for the asset.
     private static let sampleClipDurationMs = SampleClipOverride.current?.durationMs ?? 31_200.0
 
-    private static func openEditorProject(for project: ProjectSample) -> V2Project {
+    static func openEditorProject(for project: ProjectSample) -> V2Project {
         let videoProject = compile(SampleProjectBuilder.makeDocument(
             media: .videoPortrait, inOption: .none, outOption: .none,
             effectOption: .none, easingOption: .linear,

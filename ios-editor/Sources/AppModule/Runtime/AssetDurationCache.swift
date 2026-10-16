@@ -14,6 +14,9 @@ final class AssetDurationCache {
     static let shared = AssetDurationCache()
     private var cache: [String: Double] = [:]
 
+    /// The duration if it is already known (the timeline's clip asked for it), without loading anything.
+    func cachedDurationMs(url: URL) -> Double? { cache[url.lastPathComponent] }
+
     func durationMs(url: URL) async -> Double? {
         let key = url.lastPathComponent
         if let cached = cache[key] { return cached }
