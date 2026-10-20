@@ -160,6 +160,12 @@ func compile(_ document: EditorDocument) -> V2Project {
     }
     var project = V2Project(composition: document.composition, assets: document.assets, filters: filters.isEmpty ? nil : filters, layers: layers)
     if let audio = document.audio { project.audio = audio }
+    // Apply left-to-right so every overlap shifts the remaining cuts exactly once.
+    let starts = Dictionary(uniqueKeysWithValues: document.layers.map { ($0.id, $0.timing.start) })
+    for intent in (document.transitions ?? []).sorted(by: { (starts[$0.outgoingId] ?? 0) < (starts[$1.outgoingId] ?? 0) }) {
+        project = TransitionLowerer.apply(project, outgoingId: intent.outgoingId, incomingId: intent.incomingId,
+                                          kind: intent.kind, durationMs: intent.durationMs)
+    }
     return project
 }
 

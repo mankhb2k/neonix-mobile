@@ -53,7 +53,10 @@ final class SnapContext {
 
     private var points: [Double] = []
     private var held: Double?
-    private let haptic = UISelectionFeedbackGenerator()
+    /// The tick when an edge lands on a snap point: a light impact at half strength (user 2026-10-17).
+    private static let hapticStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+    private static let hapticIntensity: CGFloat = 0.5
+    private let haptic = UIImpactFeedbackGenerator(style: SnapContext.hapticStyle)
 
     func begin(layer: V2Layer, isMove: Bool) {
         held = nil
@@ -70,10 +73,26 @@ final class SnapContext {
         haptic.prepare()
     }
 
+    /// An audio clip's trim: every layer's edges and every *other* audio clip's edges, t = 0 and the playhead.
+    func beginAudio(clipId: String) {
+        held = nil
+        var result = [0, playheadMs]
+        for layer in layers where layer.type != "group" { result += [layer.timing.start, layer.timing.start + layer.timing.duration] }
+        for track in audio.tracks {
+            for clip in track.clips where clip.id != clipId { result += [clip.timing.start, clip.timing.start + clip.timing.duration] }
+        }
+        points = result
+        haptic.prepare()
+    }
+
     /// The shift (ms) that lands the closest of `edges` on a snap point, 0 when none is near. Shows the snap line.
     func delta(edges: [Double]) -> Double {
+        #if DEBUG
+        // UI tests that measure a drag against the finger turn snapping off (`EDITOR_NO_SNAP=1`).
+        if ProcessInfo.processInfo.environment["EDITOR_NO_SNAP"] != nil { return 0 }
+        #endif
         let result = SnapEngine.resolve(edges: edges, points: points, pxPerMs: pxPerMs, held: held)
-        if let point = result.point, point != held { haptic.selectionChanged() }
+        if let point = result.point, point != held { haptic.impactOccurred(intensity: Self.hapticIntensity) }
         held = result.point
         onLine(result.point)
         return result.deltaMs

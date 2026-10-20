@@ -49,7 +49,10 @@ final class VideoFrameCache {
 
     func frame(assetId: String, url: URL, atSeconds seconds: Double) async -> UIImage? {
         let bucket = Self.scrubBucket(forMs: seconds * 1000)
-        let key = "\(assetId):\(bucket)"
+        // Asset IDs are project-scoped and can be reused after switching projects. Include the source URL so a
+        // still from another video with the same ID can never be used for preview color sampling or scrubbing.
+        let sourceKey = url.standardizedFileURL.absoluteString
+        let key = "\(sourceKey):\(assetId):\(bucket)"
         if let cached = cache[key] { return cached }
 
         let generator = generator(for: assetId, url: url, tier: .stage)
@@ -138,7 +141,7 @@ final class VideoFrameCache {
     }
 
     private func generator(for assetId: String, url: URL, tier: GeneratorTier) -> AVAssetImageGenerator {
-        let key = "\(assetId)#\(tier.rawValue)"
+        let key = "\(url.standardizedFileURL.absoluteString)#\(assetId)#\(tier.rawValue)"
         if let cached = generators[key] { return cached }
         let asset = AVURLAsset(url: url)
         let created = AVAssetImageGenerator(asset: asset)

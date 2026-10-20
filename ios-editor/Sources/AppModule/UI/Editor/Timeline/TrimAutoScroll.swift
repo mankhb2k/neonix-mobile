@@ -54,7 +54,7 @@ final class TrimAutoScroll {
         engine?.setTimeFloor(allowsNegativeTime ? -1_000_000 : 0)
         self.pxPerMs = pxPerMs
         self.apply = apply
-        startTimeMs = engine?.currentTimeMs ?? 0
+        startTimeMs = engine?.editorTimeMs ?? 0
         haptic.prepare()
     }
 

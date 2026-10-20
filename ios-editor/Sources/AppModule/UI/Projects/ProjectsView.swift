@@ -48,6 +48,9 @@ struct ProjectsView: View {
         ProjectSample(name: "Trip to Paris", lastEdited: "2 hours ago", gradient: [.blue, .teal], compositionWidth: 360, compositionHeight: 640), // 9:16
         ProjectSample(name: "Product Launch", lastEdited: "Yesterday", gradient: [.pink, .purple], compositionWidth: 640, compositionHeight: 360), // 16:9
         ProjectSample(name: "Birthday Recap", lastEdited: "3 days ago", gradient: [.orange, .yellow], compositionWidth: 480, compositionHeight: 480), // 1:1
+        // Remove BG on video: the two clips with real people (`public/preview/video/demo-nguoi1/2.MOV`, copied into `Documents/ImportedMedia`), one project each.
+        ProjectSample(name: ProjectsView.selfieProjectName, lastEdited: "Test project", gradient: [.green, .mint], compositionWidth: 360, compositionHeight: 640),
+        ProjectSample(name: ProjectsView.crowdProjectName, lastEdited: "Test project", gradient: [.teal, .indigo], compositionWidth: 360, compositionHeight: 640),
     ]
     // `fullScreenCover`, not `NavigationLink` — a pushed page inside a
     // `TabView` leaves this tab's own tab bar showing underneath it.
@@ -90,6 +93,30 @@ struct ProjectsView: View {
     /// declares for the asset.
     private static let sampleClipDurationMs = SampleClipOverride.current?.durationMs ?? 31_200.0
 
+    static let selfieProjectName = "Selfie (Remove BG test)"
+    static let crowdProjectName = "Crowd (Remove BG test)"
+
+    /// The Remove BG test projects: one real clip each on the main lane, the whole file - a selfie (1080 x 1920, one person) and a street shot (1920 x 1080, a crowd,
+    /// letterboxed in the 9:16 canvas). One clip per project because a second video on the lane shows over the first from t = 0 (`LayerNodeView.isOutsideItsTime`
+    /// leaves video layers always drawn). Needs the file in `Documents/ImportedMedia` (or the bundle); without it it is the plain sample.
+    private static func peopleProject(for project: ProjectSample, fallback: V2Project) -> V2Project {
+        #if DEBUG
+        let file = project.name == selfieProjectName ? "demo-nguoi1.MOV" : "demo-nguoi2.MOV"
+        guard let clip = VideoFileInfo.read(uri: file) else { return fallback }
+        // The whole picture inside the canvas: full width, the height its aspect gives (a selfie fills the canvas, the landscape clip is letterboxed).
+        let height = min(project.compositionWidth * clip.height / clip.width, project.compositionHeight)
+        let layer = EditorLayer(
+            id: "people-1", kind: "video", assetId: "people-1", fill: nil,
+            frame: V2Frame(width: project.compositionWidth, height: height),
+            timing: V2Timing(start: 0, duration: clip.durationMs)
+        )
+        let asset = V2Asset.video(V2VideoAsset(id: "people-1", uri: clip.uri, width: clip.width, height: clip.height, duration: clip.durationMs))
+        return compile(EditorDocument(id: "people-test", composition: fallback.composition, assets: [asset], layers: [layer]))
+        #else
+        return fallback
+        #endif
+    }
+
     static func openEditorProject(for project: ProjectSample) -> V2Project {
         let videoProject = compile(SampleProjectBuilder.makeDocument(
             media: .videoPortrait, inOption: .none, outOption: .none,
@@ -97,6 +124,7 @@ struct ProjectsView: View {
             composition: V2Composition(width: project.compositionWidth, height: project.compositionHeight, fps: 30, background: "#101820"),
             frame: V2Frame(width: project.compositionWidth, height: project.compositionHeight)
         ))
+        if project.name == Self.selfieProjectName || project.name == Self.crowdProjectName { return peopleProject(for: project, fallback: videoProject) }
         guard project.name == "Trip to Paris" else { return videoProject }
 
         // The sample clip's own full length (31.2 s) instead of the demo's
@@ -141,9 +169,17 @@ struct ProjectsView: View {
         // Photo overlays — four stickers-style images, each on its own lane (they
         // overlap in time), so the sample has enough lanes to try the timeline's
         // vertical scrolling. Compiled through the real pipeline like the text.
-        let overlaySpots: [(x: Double, y: Double, start: Double)] = [
+        var overlaySpots: [(x: Double, y: Double, start: Double)] = [
             (-90, -170, 500), (90, -170, 1500), (-90, 170, 2500), (90, 170, 3500),
         ]
+        var overlaySize = V2Frame(width: 140, height: 210)
+        #if DEBUG
+        // Marketing screenshots (`MarketingShotsUITests`): one small overlay so the stage stays readable.
+        if ProcessInfo.processInfo.environment["EDITOR_MARKETING_DEMO"] != nil {
+            overlaySpots = [(105, 235, 500)]
+            overlaySize = V2Frame(width: 100, height: 150)
+        }
+        #endif
         let overlayProject = compile(EditorDocument(
             id: "trip-to-paris-overlays",
             composition: videoProject.composition,
@@ -153,7 +189,7 @@ struct ProjectsView: View {
                     id: "overlay-photo-\(index)", kind: "image",
                     assetId: SampleMedia.photo.asset.id,
                     fill: nil,
-                    frame: V2Frame(width: 140, height: 210),
+                    frame: overlaySize,
                     timing: V2Timing(start: overlaySpots[index].start, duration: 8000)
                 )
             }

@@ -52,6 +52,9 @@ struct TemplateEditView: View {
         .alert(item: $exportGate.alert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
+        .sheet(item: $exportGate.sharedFile) { file in
+            ExportResultSheet(url: file.url) { exportGate.sharedFile = nil }
+        }
         .alert("Couldn't update", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
@@ -115,7 +118,6 @@ struct TemplateEditView: View {
         let context = TemplateExportContext(templateId: template.id, versionId: versionId, creditCost: template.creditCost)
         Task {
             await exportGate.export(project: model.project, context: context)
-            if exportGate.completed { onBack() }
         }
     }
 

@@ -86,11 +86,113 @@ final class EditorCommandTests: XCTestCase {
         )
     }
 
+    func testAppendMainLaneMediaAddsMixedAssetsInOrderAfterTheMainLane() {
+        let originalAsset = V2VideoAsset(id: "asset1", uri: "source.mp4", width: 360, height: 640, duration: 8_000)
+        let photo = V2ImageAsset(id: "new-photo", uri: "photo.jpg", width: 1200, height: 1600)
+        let video = V2VideoAsset(id: "new-video", uri: "video.mp4", width: 1920, height: 1080, duration: 6_000)
+        let project = makeProject().withAssets([.video(originalAsset)]).withLayers([makeVideoLayer(duration: 8_000)])
+
+        let result = AppendMainLaneMediaCommand(items: [
+            MainLaneMediaItem(asset: .image(photo), layerId: "added-photo"),
+            MainLaneMediaItem(asset: .video(video), layerId: "added-video")
+        ]).apply(to: project)
+
+        XCTAssertEqual(result.layers.map(\.id), ["clip1", "added-photo", "added-video"])
+        XCTAssertEqual(result.layers[1].order, 0)
+        XCTAssertEqual(result.layers[1].timing.start, 8_000)
+        XCTAssertEqual(result.layers[1].timing.duration, AppendMainLaneMediaCommand.defaultPhotoDurationMs)
+        XCTAssertEqual(result.layers[2].timing.start, 11_000)
+        XCTAssertEqual(result.layers[2].timing.duration, 6_000)
+        XCTAssertEqual(result.layers[2].frame.width, project.composition.width)
+        XCTAssertEqual(result.layers[2].frame.height, project.composition.height)
+        XCTAssertEqual(result.assets.map(\.id), ["asset1", "new-photo", "new-video"])
+    }
+
+    func testAppendMainLaneMediaIgnoresNonVisualAssets() {
+        let project = makeProject()
+        let audio = V2AudioAsset(id: "audio", uri: "audio.m4a", mimeType: "audio/mp4", duration: 5_000)
+        let result = AppendMainLaneMediaCommand(items: [MainLaneMediaItem(asset: .audio(audio), layerId: "wrong-kind")]).apply(to: project)
+
+        XCTAssertTrue(result.layers.isEmpty)
+        XCTAssertTrue(result.assets.isEmpty)
+    }
+
+    func testAppendMainLaneMediaStartsAtMainLaneEndEvenWhenOverlayExtendsFurther() {
+        let project = makeProject().withLayers([
+            makeVideoLayer(duration: 4_000),
+            V2Layer(
+                id: "overlay-photo-1", order: 1, frame: V2Frame(width: 360, height: 640), transform: .identity,
+                timing: V2Timing(start: 0, duration: 20_000), payload: .image(V2ImagePayload(assetId: "overlay-asset"))
+            )
+        ])
+        let photo = V2ImageAsset(id: "new-photo", uri: "photo.jpg", width: 1200, height: 1600)
+
+        let result = AppendMainLaneMediaCommand(items: [MainLaneMediaItem(asset: .image(photo), layerId: "added-photo")]).apply(to: project)
+
+        XCTAssertEqual(result.layers.first(where: { $0.id == "added-photo" })?.order, 0)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "added-photo" })?.timing.start, 4_000)
+    }
+
+    func testAppendMainLaneMediaInsertsAfterSelectedClipAndShiftsFollowingClips() {
+        let first = makeVideoLayer(id: "first", start: 0, duration: 4_000)
+        let second = makeVideoLayer(id: "second", start: 4_000, duration: 5_000)
+        let third = makeVideoLayer(id: "third", start: 9_000, duration: 6_000)
+        let overlay = V2Layer(
+            id: "overlay-title", order: 1, frame: V2Frame(width: 360, height: 640), transform: .identity,
+            timing: V2Timing(start: 9_000, duration: 2_000), payload: .image(V2ImagePayload(assetId: "overlay-asset"))
+        )
+        let project = makeProject().withLayers([first, second, third, overlay])
+        let photo = V2ImageAsset(id: "inserted-photo", uri: "photo.jpg", width: 1200, height: 1600)
+
+        let result = AppendMainLaneMediaCommand(
+            items: [MainLaneMediaItem(asset: .image(photo), layerId: "added")],
+            insertAfterLayerId: "first"
+        ).apply(to: project)
+
+        XCTAssertEqual(result.layers.first(where: { $0.id == "first" })?.timing.start, 0)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "added" })?.timing.start, 4_000)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "second" })?.timing.start, 7_000)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "third" })?.timing.start, 12_000)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "overlay-title" })?.timing.start, 9_000)
+    }
+
+    func testAppendMainLaneMediaAfterClipRemovesBrokenTransitionAndClosesOverlap() {
+        let first = makeVideoLayer(id: "first", start: 0, duration: 4_000)
+        let second = makeVideoLayer(id: "second", start: 4_000, duration: 5_000)
+        let project = makeProject().withLayers([first, second])
+        let transitioned = SetTransitionCommand(outgoingId: "first", incomingId: "second", durationMs: 500).apply(to: project)
+        let photo = V2ImageAsset(id: "inserted-photo", uri: "photo.jpg", width: 1200, height: 1600)
+
+        let result = AppendMainLaneMediaCommand(
+            items: [MainLaneMediaItem(asset: .image(photo), layerId: "added")],
+            insertAfterLayerId: "first"
+        ).apply(to: transitioned)
+
+        XCTAssertEqual(result.layers.first(where: { $0.id == "added" })?.timing.start, 4_000)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "second" })?.timing.start, 7_000)
+        XCTAssertNil(TransitionWrappers.applied(for: "second", in: result.layers))
+    }
+
+    func testAppendMainLaneMediaCreatesMainLaneBelowExistingOverlayWhenNoMainClipExists() {
+        let overlay = V2Layer(
+            id: "overlay-photo-1", order: 2, frame: V2Frame(width: 180, height: 320), transform: .identity,
+            timing: V2Timing(start: 0, duration: 5_000), payload: .image(V2ImagePayload(assetId: "overlay-asset"))
+        )
+        let project = makeProject().withLayers([overlay])
+        let photo = V2ImageAsset(id: "new-photo", uri: "photo.jpg", width: 1200, height: 1600)
+
+        let result = AppendMainLaneMediaCommand(items: [MainLaneMediaItem(asset: .image(photo), layerId: "added-photo")]).apply(to: project)
+
+        XCTAssertEqual(result.layers.first(where: { $0.id == "added-photo" })?.order, 1)
+        XCTAssertEqual(result.layers.first(where: { $0.id == "overlay-photo-1" })?.order, 2)
+        XCTAssertEqual(primaryVideoLaneOrder(of: result.layers), 1)
+    }
+
     func testSplitClipCommandProducesTwoCorrectlyTimedLayersWithShiftedTrimStart() {
         let original = makeVideoLayer(duration: 8000, trimStart: 2000)
         let project = makeProject().withLayers([original])
 
-        let result = SplitClipCommand(layerId: "clip1", atMs: 3000).apply(to: project)
+        let result = SplitClipCommand(layerId: "clip1", atMs: 3000, secondLayerId: "clip1-split-second").apply(to: project)
 
         XCTAssertEqual(result.layers.count, 2)
         let first = result.layers[0]
@@ -100,7 +202,7 @@ final class EditorCommandTests: XCTestCase {
         XCTAssertEqual(first.timing.start, 0)
         XCTAssertEqual(first.timing.duration, 3000)
 
-        XCTAssertNotEqual(second.id, "clip1")
+        XCTAssertEqual(second.id, "clip1-split-second")
         XCTAssertEqual(second.timing.start, 3000)
         XCTAssertEqual(second.timing.duration, 5000)
         // Same lane — `order` carried over unchanged from the original.
@@ -113,6 +215,28 @@ final class EditorCommandTests: XCTestCase {
         // exactly the first half's duration so the second half keeps
         // playing from the right source point.
         XCTAssertEqual(secondPayload.trimStart, 5000)
+    }
+
+    func testSplitImageUsesTheProvidedIdForTheSecondHalf() {
+        let original = V2Layer(
+            id: "photo", order: 0, frame: V2Frame(width: 360, height: 640), transform: .identity,
+            timing: V2Timing(start: 0, duration: 4000), payload: .image(V2ImagePayload(assetId: "still"))
+        )
+        let project = makeProject().withLayers([original])
+
+        let result = SplitClipCommand(layerId: "photo", atMs: 1500, secondLayerId: "photo-split-second").apply(to: project)
+
+        XCTAssertEqual(result.layers.map(\.id), ["photo", "photo-split-second"])
+        XCTAssertEqual(result.layers[1].timing.start, 1500)
+        XCTAssertEqual(result.layers[1].timing.duration, 2500)
+        XCTAssertEqual(result.layers[1].type, "image")
+    }
+
+    func testTransitionControlHidesOnlyWhenAClipAtThatCutIsSelected() {
+        XCTAssertTrue(transitionControlIsVisible(outgoingId: "a", incomingId: "b", selectedLayerId: nil))
+        XCTAssertFalse(transitionControlIsVisible(outgoingId: "a", incomingId: "b", selectedLayerId: "a"))
+        XCTAssertFalse(transitionControlIsVisible(outgoingId: "a", incomingId: "b", selectedLayerId: "b"))
+        XCTAssertTrue(transitionControlIsVisible(outgoingId: "a", incomingId: "b", selectedLayerId: "other"))
     }
 
     func testSplitClipCommandIsNoOpWhenSplitPointIsOutsideClipRange() {

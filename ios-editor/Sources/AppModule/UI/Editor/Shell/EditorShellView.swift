@@ -1,6 +1,14 @@
 import SwiftUI
 import AVFoundation
 
+private struct TransitionPickerTarget: Identifiable {
+    let outgoingId: String
+    let incomingId: String
+    let kind: TransitionKind?
+    var durationMs: Double
+    var id: String { "\(outgoingId)->\(incomingId)" }
+}
+
 /// The real Editor screen's shell — nav bar (`Huỷ`/`Xuất`), then Stage /
 /// Titlebar / Timeline. See `ui-design-note.md` (repo root) for the full
 /// layout rationale and bug history.
@@ -12,7 +20,7 @@ struct EditorShellView: View {
     /// (`Playback/EditorPlaybackEngine.swift`). This view only sends it
     /// commands and reads from it — it never writes the time.
     @State private var engine: EditorPlaybackEngine
-    private var currentTimeMs: Double { engine.currentTimeMs }
+    private var currentTimeMs: Double { engine.editorTimeMs }
     private var isPlaying: Bool { engine.isPlaying }
     private var maxDurationMs: Double { engine.maxDurationMs }
     /// Measured via `TitlebarHeightKey`; this is just the pre-first-layout guess.
@@ -60,13 +68,43 @@ struct EditorShellView: View {
     @State private var filterDragOriginal: V2Project?
     @State private var showingFilterSheet = false
     @State private var showingAnimationSheet = false
+    @State private var showingCoverEditor = false
+    @State private var coverImageOverride: UIImage?
+    @State private var transitionPickerTarget: TransitionPickerTarget?
     @State private var showingSpeedSheet = false
+    /// Crop: the full-length popup, the frame being edited and the still it is drawn on.
+    @State private var cropSession: CropSession?
+    @State private var cropDraft = CropDraft()
+    @State private var cropStill: UIImage?
+    @State private var cropLayerId: String?
+    /// Mask: the shape row replaces the clip row (`showingMaskTools`), the popup (`maskSession`), and the project before the first live change of an edit
+    /// (the undo step, taken lazily like the Volume and Speed sessions).
+    @State private var showingMaskTools = false
+    @State private var maskSession: MaskSession?
+    @State private var maskSessionOriginal: V2Project?
+    /// Remove BG (photo): its row (`showingRemoveBgTools`) and popup; the undo step shares `maskSessionOriginal`.
+    @State private var showingRemoveBgTools = false
+    @State private var removeBgSession: RemoveBackgroundSession?
+    @State private var showingChromaKeySheet = false
+    @State private var chromaKeyDraft = ChromaKeyDraft()
+    @State private var chromaKeySessionOriginal: V2Project?
+    /// The Volume / Fade popup, when open: the request carries which side to open (Volume tool -> Volume, Fade tool -> Fade).
+    @State private var volumeRequest: VolumeSheet.Request?
     @State private var mediaPicker: MediaPickerPurpose?
+    /// Freeze the insertion target when `+` is tapped; presenting the picker can clear timeline selection.
+    @State private var mainLaneInsertAfterLayerId: String?
+    @State private var importingMainLaneMedia = false
+    /// Audio > Extract is working (the sound is being exported from the picked video).
+    @State private var extractingAudio = false
     @State private var mediaError: String?
     @State private var textSessionTab: TextSheet.Tab = .font
     /// The project as it was when the Speed sheet opened: every ruler tick is computed from it, and it is the undo step.
     @State private var speedSessionOriginal: V2Project?
+    /// The project before the Volume sheet's first change: that is the undo step (like `speedSessionOriginal`).
+    @State private var volumeSessionOriginal: V2Project?
     @State private var showingStickerSheet = false
+    @State private var showingSoundSheet = false
+    @State private var showingRecorderSheet = false
     @State private var showingGraphSheet = false
     /// The Text sheet session: one undo step for everything done in it (like Transform), `textSessionOriginal` is the project before it.
     @State private var showingTextSheet = false
@@ -78,6 +116,7 @@ struct EditorShellView: View {
     /// The Transform values last synced from the playhead on a keyframed layer: an edit that equals them writes nothing.
     @State private var transformSynced: TransformValues?
     @State private var stickerStore = StickerStore()
+    @State private var soundStore = SoundStore()
     /// The selected video has a sound track (probed when the selection changes) - decides Volume / Extract Audio / Unlink.
     @State private var selectedHasAudio = false
     /// A tool that is only a button so far: the short "<tool> is coming soon" note over the stage.
@@ -92,7 +131,8 @@ struct EditorShellView: View {
     /// Same "one undo step per drag" shape as `adjustDragOriginal`.
     @State private var transformDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
-    private let toolPanelHeight: CGFloat = 64
+    /// A tool's options row is exactly as tall as the other rows (user 2026-10-16: the Edit row's height).
+    private var toolPanelHeight: CGFloat { toolbarHeight }
     /// The bottom row sits this much lower than the safe-area edge (into the home-indicator margin); the timeline gets the points.
     private let bottomBarDrop: CGFloat = 8
 
@@ -102,13 +142,29 @@ struct EditorShellView: View {
         case main
         case selection(SelectionToolbarView.Subject)
         case toolPanel(EditorTool)
+        case maskTools
+        case removeBgTools
     }
 
     private var bottomMode: BottomMode {
         if let selectedTool, selectedTool.hasOptionsPanel { return .toolPanel(selectedTool) }
+        if showingMaskTools, let layer = selectedLayer, layer.type == "video" || layer.type == "image" { return .maskTools }
+        if showingRemoveBgTools, let layer = selectedLayer, layer.type == "image" || layer.type == "video" { return .removeBgTools }
         if let layer = project.layers.first(where: { $0.id == selectedLayerId }) { return .selection(.layer(layer)) }
         if project.audio.tracks.flatMap(\.clips).contains(where: { $0.id == selectedAudioClipId }) { return .selection(.audioClip) }
         return .main
+    }
+
+    /// A clip picked on the timeline gives the bottom row to that clip's tools: an open tool panel (Audio's Extract / Music / Record ...) closes,
+    /// otherwise `bottomMode` keeps showing the panel and the selection looks ignored.
+    private func timelineSelection(_ selection: Binding<String?>) -> Binding<String?> {
+        Binding(
+            get: { selection.wrappedValue },
+            set: { id in
+                selection.wrappedValue = id
+                if id != nil, selectedTool?.hasOptionsPanel == true { selectedTool = nil }
+            }
+        )
     }
 
     private var bottomBarHeight: CGFloat {
@@ -129,7 +185,7 @@ struct EditorShellView: View {
     /// Every write to `project` goes through here so the engine always sees
     /// the same layers the Stage and Timeline render.
     private func setProject(_ newProject: V2Project) {
-        let normalized = AnimationWrappers.normalized(newProject)   // animation wrappers follow their clip's timing
+        let normalized = TransitionWrappers.normalized(AnimationWrappers.normalized(newProject))   // generated wrappers follow their clips
         project = normalized
         engine.update(project: normalized)
     }
@@ -157,6 +213,15 @@ struct EditorShellView: View {
     /// this runs the real import (copy into the sandbox + read duration)
     /// off the main actor's own async context, then applies the result as
     /// one ordinary undoable command, same as every other edit.
+    /// A take from the recorder popup: copied into the project's media like any picked audio, then the temp file goes.
+    private func addRecording(from url: URL) {
+        Task {
+            defer { try? FileManager.default.removeItem(at: url) }
+            guard let asset = try? await MediaImportService.importAudio(from: url) else { return }
+            apply(AddAudioClipCommand(asset: asset, durationMs: asset.duration, atMs: currentTimeMs))
+        }
+    }
+
     private func addAudio(from url: URL) {
         Task {
             guard let asset = try? await MediaImportService.importAudio(from: url) else { return }
@@ -313,6 +378,17 @@ struct EditorShellView: View {
         }
     }
 
+    // MARK: Sound FX
+
+    /// Use in the Sound FX sheet: copies the file into the project's media (once) and puts the sound on the audio lane at the playhead.
+    /// The sheet stays open to add more; false when the file could not be fetched.
+    private func addSoundEffect(_ sound: APISoundCatalogue.Sound) async -> Bool {
+        guard let asset = try? await soundStore.importAsset(for: sound) else { return false }
+        apply(AddAudioClipCommand(asset: asset, durationMs: asset.duration, atMs: currentTimeMs))
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        return true
+    }
+
     @ViewBuilder private var stickerSheet: some View {
         StickerSheet(store: stickerStore, onPick: addSticker)
     }
@@ -363,6 +439,309 @@ struct EditorShellView: View {
         } catch {
             mediaError = error.localizedDescription
         }
+    }
+
+    /// Imports the selected batch and inserts it after the selected main-lane clip (or at the end) in one command/undo step.
+    private func appendPickedMediaToMainLane(_ picked: [PickedMedia]) async {
+        guard !picked.isEmpty else { return }
+        importingMainLaneMedia = true
+        defer { importingMainLaneMedia = false }
+
+        let insertAfterLayerId = mainLaneInsertAfterLayerId
+        mainLaneInsertAfterLayerId = nil
+        let mainOrder = primaryVideoLaneOrder(of: project.layers)
+        let selectedMainLaneClip = insertAfterLayerId.flatMap { selectedId in
+            project.layers.first { $0.id == selectedId && $0.order == mainOrder && isPushLane($0) }
+        }
+        let mainClips = project.layers.filter { $0.order == mainOrder && isPushLane($0) }
+        let insertionTime = selectedMainLaneClip.map { $0.timing.start + $0.timing.duration }
+            ?? (mainClips.map { $0.timing.start + $0.timing.duration }.max() ?? 0)
+        var items: [MainLaneMediaItem] = []
+        var firstImportError: Error?
+        for media in picked {
+            let layerId = "main-\(UUID().uuidString.prefix(8).lowercased())"
+            let assetId = "media-\(UUID().uuidString.prefix(8).lowercased())"
+            do {
+                let asset = try await PhotoImporter.importMedia(media.asset, kind: media.kind, assetId: assetId)
+                items.append(MainLaneMediaItem(asset: asset, layerId: layerId))
+            } catch {
+                if firstImportError == nil { firstImportError = error }
+            }
+        }
+
+        guard !items.isEmpty else {
+            if let firstImportError { mediaError = firstImportError.localizedDescription }
+            return
+        }
+        apply(AppendMainLaneMediaCommand(items: items, insertAfterLayerId: selectedMainLaneClip?.id))
+        engine.refreshFrames()
+        selectedAudioClipId = nil
+        selectedLayerId = items.first?.layerId
+        engine.beginScrub()
+        engine.scrub(toMs: insertionTime)
+        engine.endScrub(velocityMsPerSecond: 0)
+        if firstImportError != nil { mediaError = "Some items couldn't be added. The other selected items were added." }
+    }
+
+    // MARK: Extract audio
+
+    /// Audio > Extract: the picked video's sound goes to the audio lane at the playhead, as long as the video (one undo step). The video
+    /// is read straight from the library (no copy); its audio is exported once to `extracted-<library id>.m4a` and reused.
+    private func extractAudio(from picked: PickedMedia) async {
+        extractingAudio = true
+        defer { extractingAudio = false }
+        guard let source = await PhotoLibrary().avAsset(for: picked.asset) else {
+            mediaError = "Couldn't read that video"
+            return
+        }
+        do {
+            let key = picked.asset.localIdentifier.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+            let asset = try await MediaImportService.extractAudio(from: source, cacheKey: key)
+            apply(AddAudioClipCommand(asset: asset, durationMs: asset.duration, atMs: currentTimeMs))
+        } catch {
+            mediaError = error.localizedDescription
+        }
+    }
+
+    // MARK: Volume
+
+    /// The popup works live: every tick of a slider writes the clip's `gainDb` or fades (no history entry); the project as it was before the first tick
+    /// is the one undo step - volume and fade together - recorded when the popup closes.
+    @ViewBuilder private func volumeSheet(_ request: VolumeSheet.Request) -> some View {
+        if selectedAudioClipId == nil, let layer = selectedLayer, case .video(let payload) = layer.payload {
+            // A video clip's own sound: Volume only.
+            VolumeSheet(gainDb: payload.audio?.gainDb ?? 0) { gainDb in
+                if volumeSessionOriginal == nil { volumeSessionOriginal = project }
+                setProject(SetVideoClipVolumeCommand(layerId: layer.id, gainDb: gainDb).apply(to: project))
+            }
+        } else if let id = selectedAudioClipId, let clip = project.audio.tracks.flatMap(\.clips).first(where: { $0.id == id }) {
+            VolumeSheet(
+                gainDb: clip.gainDb ?? 0, fadeInMs: clip.fadeIn?.duration ?? 0, fadeOutMs: clip.fadeOut?.duration ?? 0,
+                clipDurationMs: clip.timing.duration, tab: request.tab,
+                onGain: { gainDb in
+                    if volumeSessionOriginal == nil { volumeSessionOriginal = project }
+                    setProject(SetAudioClipVolumeCommand(clipId: id, gainDb: gainDb).apply(to: project))
+                },
+                onFade: { inMs, outMs in
+                    if volumeSessionOriginal == nil { volumeSessionOriginal = project }
+                    setProject(SetAudioClipFadeCommand(clipId: id, fadeInMs: inMs, fadeOutMs: outMs).apply(to: project))
+                }
+            )
+        }
+    }
+
+    private func finishVolumeSession() {
+        guard let original = volumeSessionOriginal else { return }
+        defer { volumeSessionOriginal = nil }
+        func summary(_ project: V2Project) -> [[Double]] {
+            let clips = project.audio.tracks.flatMap(\.clips).map { [$0.gainDb ?? 0, $0.fadeIn?.duration ?? 0, $0.fadeOut?.duration ?? 0] }
+            let videos = project.layers.compactMap { layer -> [Double]? in
+                if case .video(let payload) = layer.payload { return [payload.audio?.gainDb ?? 0] }
+                return nil
+            }
+            return clips + videos
+        }
+        if summary(original) != summary(project) { history.record(current: original) }
+    }
+
+    // MARK: Mask
+
+    /// The selected clip's mask as the tool edits it (read back out of `project.masks`; none when it has none).
+    private var currentMaskDraft: MaskDraft {
+        guard let layer = selectedLayer else { return MaskDraft() }
+        return MaskDraft(layer: layer, masks: project.masks ?? [])
+    }
+
+    /// What the stage handles and the popup edit: reads the clip's mask, and every change writes it back live (no history entry; the session is one undo step).
+    private var maskBinding: Binding<MaskDraft> {
+        Binding(get: { currentMaskDraft }, set: { setMaskLive($0) })
+    }
+
+    private func setMaskLive(_ draft: MaskDraft) {
+        guard let id = selectedLayerId, draft != currentMaskDraft else { return }
+        if maskSessionOriginal == nil { maskSessionOriginal = project }
+        setProject(SetLayerMaskCommand(layerId: id, draft: draft).apply(to: project))
+    }
+
+    /// A tap on a shape of the row: the shape the clip already has opens the popup; another one (or None) replaces the mask, one undo step.
+    private func pickMaskShape(_ shape: MaskShape) {
+        guard let id = selectedLayerId else { return }
+        let current = currentMaskDraft
+        if shape == current.shape, shape != .none { maskSession = MaskSession(); return }
+        finishMaskSession()
+        apply(SetLayerMaskCommand(layerId: id, draft: shape == .none ? MaskDraft() : MaskDraft(shape: shape, keeping: current)))
+    }
+
+    private func closeMaskTools() {
+        finishMaskSession()
+        showingMaskTools = false
+    }
+
+    /// The edit (handles or popup) is over: what changed since it began is one undo step.
+    private func finishMaskSession() {
+        guard let original = maskSessionOriginal else { return }
+        defer { maskSessionOriginal = nil }
+        let sameNames = original.layers.map(\.mask) == project.layers.map(\.mask)
+        if !(sameNames && sameMaskGeometry(original, project)) { history.record(current: original) }
+    }
+
+    private func sameMaskGeometry(_ a: V2Project, _ b: V2Project) -> Bool {
+        guard let first = a.masks, let second = b.masks else { return (a.masks == nil) == (b.masks == nil) }
+        guard let encodedA = try? JSONEncoder().encode(first), let encodedB = try? JSONEncoder().encode(second) else { return false }
+        return encodedA == encodedB
+    }
+
+
+    // MARK: Remove BG
+
+    private var currentRemoveBgDraft: RemoveBackgroundDraft {
+        guard let layer = selectedLayer else { return RemoveBackgroundDraft() }
+        return RemoveBackgroundDraft(layer: layer, masks: project.masks ?? [])
+    }
+
+    private var removeBgBinding: Binding<RemoveBackgroundDraft> {
+        Binding(get: { currentRemoveBgDraft }, set: { setRemoveBgLive($0) })
+    }
+
+    private func setRemoveBgLive(_ draft: RemoveBackgroundDraft) {
+        guard let id = selectedLayerId, draft != currentRemoveBgDraft else { return }
+        if maskSessionOriginal == nil { maskSessionOriginal = project }
+        setProject(SetLayerSegmentationCommand(layerId: id, draft: draft).apply(to: project))
+    }
+
+    /// A tap on a tile of the row: the mode the clip already has opens the popup; another one (or None) replaces the mask, one undo step (Choose subject opens the popup at once - it needs the tap).
+    private func pickRemoveBgMode(_ mode: RemoveBackgroundMode) {
+        guard let id = selectedLayerId else { return }
+        let current = currentRemoveBgDraft
+        if mode == current.mode, mode != .none { removeBgSession = RemoveBackgroundSession(); return }
+        finishMaskSession()
+        var next = current
+        next.mode = mode
+        apply(SetRemoveBackgroundOptionCommand(layerId: id, draft: mode == .none ? RemoveBackgroundDraft() : next))
+        if mode == .point { removeBgSession = RemoveBackgroundSession() }
+    }
+
+    private func closeRemoveBgTools() {
+        finishMaskSession()
+        showingRemoveBgTools = false
+    }
+
+    // MARK: Chroma key
+
+    private var currentChromaKeyDraft: ChromaKeyDraft {
+        guard let layer = selectedLayer else { return ChromaKeyDraft() }
+        return ChromaKeyDraft(layer: layer, filters: project.filters ?? [])
+    }
+
+    private var chromaKeyBinding: Binding<ChromaKeyDraft> {
+        Binding(get: { chromaKeyDraft }, set: { setChromaKeyLive($0) })
+    }
+
+    private func setChromaKeyLive(_ draft: ChromaKeyDraft) {
+        guard let id = selectedLayerId, draft != currentChromaKeyDraft else { return }
+        if chromaKeySessionOriginal == nil { chromaKeySessionOriginal = project }
+        chromaKeyDraft = draft
+        setProject(SetChromaKeyCommand(layerId: id, draft: draft).apply(to: project))
+    }
+
+    private func finishChromaKeySession() {
+        guard let original = chromaKeySessionOriginal else { return }
+        chromaKeySessionOriginal = nil
+        guard let before = try? JSONEncoder().encode(original), let after = try? JSONEncoder().encode(project), before != after else { return }
+        history.record(current: original)
+    }
+
+    private func openChromaKeySheet() {
+        finishMaskSession()
+        engine.pause()
+        chromaKeyDraft = currentChromaKeyDraft
+        showingChromaKeySheet = true
+    }
+
+    /// The selected picture's pixels (for the subject picker) and the asset key the cut-out cache uses.
+    private var removeBgPicture: (key: String, image: CGImage?) {
+        guard let layer = selectedLayer, case .image(let payload)? = layer.payload as V2LayerPayload?, let asset = project.assets.first(where: { $0.id == payload.assetId }) else { return ("", nil) }
+        return (asset.uri, BundledImageCache.image(filename: asset.uri)?.cgImage)
+    }
+
+
+    // MARK: Remove BG on video
+
+    /// The layers of video clips that have Remove BG (Auto), with the file and the source stretch each one plays.
+    private var removeBgVideoLayers: [(layer: V2Layer, uri: String, from: Double, to: Double)] {
+        project.layers.compactMap { layer in
+            guard case .video(let payload) = layer.payload, let id = layer.mask, id.hasPrefix("removebg-"), id.hasSuffix("~auto"),
+                  case .video(let asset)? = project.assets.first(where: { $0.id == payload.assetId }), let mapping = VideoTimeMapping(layer: layer) else { return nil }
+            return (layer, asset.uri, mapping.trimStartMs / 1000, mapping.sourceMs(atTimelineMs: layer.timing.start + layer.timing.duration) / 1000)
+        }
+    }
+
+    /// Changes whenever a clip needs a different job (a mask on or off, a trim, a replaced file).
+    private var removeBgJobsSignature: String {
+        removeBgVideoLayers.map { "\($0.layer.id)|\($0.uri)|\($0.from)|\($0.to)" }.joined(separator: ";")
+    }
+
+    private func syncRemoveBgJobs() {
+        for item in removeBgVideoLayers {
+            let mapping = VideoTimeMapping(layer: item.layer)
+            let focus = (mapping?.sourceMs(atTimelineMs: currentTimeMs) ?? item.from * 1000) / 1000
+            SegmentationJobs.shared.ensure(layerId: item.layer.id, assetURI: item.uri, range: item.from...max(item.to, item.from), focus: focus)
+        }
+        SegmentationJobs.shared.keepOnly(Set(removeBgVideoLayers.map(\.layer.id)))
+    }
+
+    /// The running job to show a card for: the selected clip's, else the first one.
+    private var removeBgProgressLayer: (layerId: String, fraction: Double)? {
+        let running = SegmentationJobs.shared.running
+        guard !running.isEmpty else { return nil }
+        let id = selectedLayerId.flatMap { running[$0] != nil ? $0 : nil } ?? running.keys.sorted()[0]
+        return running[id].map { (id, $0.fraction) }
+    }
+
+    /// Cancel on the card: Remove BG comes off that clip (one undo step); the frames done stay in the cache.
+    private func cancelRemoveBg(layerId: String) {
+        SegmentationJobs.shared.cancel(layerId)
+        apply(SetLayerSegmentationCommand(layerId: layerId, draft: RemoveBackgroundDraft()))
+    }
+
+    // MARK: Crop
+
+
+
+    /// Opens the sheet on the selected picture or video clip: the frame starts where the clip's crop is (the whole picture when it has none).
+    private func openCropSheet() {
+        guard let layer = selectedLayer, layer.type == "video" || layer.type == "image" else { return }
+        cropLayerId = layer.id
+        cropDraft = CropDraft(crop: layer.crop)
+        cropStill = nil
+        cropSession = CropSession(video: cropVideo(for: layer))
+        let snapshot = project
+        let atMs = currentTimeMs
+        Task { cropStill = await CropStill.image(for: layer, project: snapshot, atMs: atMs) }
+    }
+
+    /// The selected video clip as the popup plays it: its file, the stretch of footage the clip shows, its length.
+    private func cropVideo(for layer: V2Layer) -> CropVideo? {
+        guard case .video(let payload) = layer.payload,
+              case .video(let asset)? = project.assets.first(where: { $0.id == payload.assetId }), let url = bundledURL(filename: asset.uri),
+              let mapping = VideoTimeMapping(layer: layer)
+        else { return nil }
+        let start = layer.timing.start, duration = layer.timing.duration
+        return CropVideo(
+            url: url,
+            startSourceMs: mapping.sourceMs(atTimelineMs: start), endSourceMs: mapping.sourceMs(atTimelineMs: start + duration),
+            durationMs: duration, pictureAspect: asset.width / max(asset.height, 1),
+            initialFraction: duration > 0 ? min(max((currentTimeMs - start) / duration, 0), 1) : 0
+        )
+    }
+
+    /// The sheet closed (Done or swiped away): the frame is stored on the clip, one undo step; nothing changed = nothing recorded.
+    private func finishCropSession() {
+        defer { cropLayerId = nil; cropStill = nil }
+        guard let id = cropLayerId, let layer = project.layers.first(where: { $0.id == id }) else { return }
+        let next: V2Crop? = cropDraft.v2.isIdentity ? nil : cropDraft.v2
+        guard next != layer.crop else { return }
+        apply(SetClipCropCommand(layerId: id, crop: next))
     }
 
     // MARK: Speed
@@ -518,6 +897,29 @@ struct EditorShellView: View {
         }
         .task { engine.prepare() }
         #if DEBUG
+        // UI-test hook: `EDITOR_SELECT=<layer id>` selects that clip at launch and puts the playhead on it.
+        .task {
+            if let id = ProcessInfo.processInfo.environment["EDITOR_SELECT"], let layer = project.layers.first(where: { $0.id == id }) {
+                selectedLayerId = id
+                engine.beginScrub()   // onto the clip, so it shows on the stage
+                engine.scrub(toMs: layer.timing.start + 300)
+                engine.endScrub(velocityMsPerSecond: 0)
+                // Measurement runs (`PLAYBACK_PIPELINE.md` section 9): `EDITOR_AUTO_REMOVEBG=1` puts Auto on that clip, `EDITOR_AUTOPLAY_AFTER=<s>` plays it for `EDITOR_AUTOPLAY_FOR` s (default 10).
+                let environment = ProcessInfo.processInfo.environment
+                if environment["EDITOR_AUTO_REMOVEBG"] != nil {
+                    var draft = RemoveBackgroundDraft(); draft.mode = .auto
+                    apply(SetLayerSegmentationCommand(layerId: id, draft: draft))
+                }
+                if let after = Double(environment["EDITOR_AUTOPLAY_AFTER"] ?? "") {
+                    try? await Task.sleep(for: .seconds(after))
+                    engine.togglePlay()
+                    try? await Task.sleep(for: .seconds(Double(environment["EDITOR_AUTOPLAY_FOR"] ?? "") ?? 10))
+                    if engine.isPlaying { engine.togglePlay() }
+                }
+            }
+        }
+        #endif
+        #if DEBUG
         // UI-test hook: the first video clip is replaced by one of the project's photos at launch (the main lane then has no video).
         .task {
             guard ProcessInfo.processInfo.environment["EDITOR_REPLACE_MAIN_WITH_PHOTO"] != nil,
@@ -529,20 +931,59 @@ struct EditorShellView: View {
         .alert(item: $exportGate.alert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
         }
+        .sheet(item: $exportGate.sharedFile) { file in
+            ExportResultSheet(url: file.url) { exportGate.sharedFile = nil }
+        }
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
+        .sheet(isPresented: $showingCoverEditor) {
+            CoverEditorSheet(project: project, initialCover: coverImageOverride) { coverImageOverride = $0 }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationCornerRadius(18)
+                .preferredColorScheme(.light)
+        }
         .sheet(isPresented: $showingFilterSheet) { filterSheet }
         .sheet(isPresented: $showingAnimationSheet) { animationSheet }
+        .sheet(item: $transitionPickerTarget) { target in
+            TransitionSheet(
+                initialKind: target.kind,
+                initialDurationMs: target.durationMs,
+                onPick: { kind, duration in
+                    apply(SetTransitionCommand(outgoingId: target.outgoingId, incomingId: target.incomingId,
+                                               kind: kind ?? .mix, durationMs: kind == nil ? nil : duration))
+                }
+            )
+        }
         .sheet(isPresented: $showingSpeedSheet, onDismiss: finishSpeedSession) { speedSheet }
+        .sheet(item: $maskSession, onDismiss: finishMaskSession) { _ in MaskSheet(draft: maskBinding) }
+        .task(id: removeBgJobsSignature) { syncRemoveBgJobs() }
+        .sheet(item: $removeBgSession, onDismiss: finishMaskSession) { _ in RemoveBackgroundSheet(draft: removeBgBinding, source: removeBgPicture.image, sourceKey: removeBgPicture.key) }
+        .sheet(isPresented: $showingChromaKeySheet, onDismiss: finishChromaKeySession) { ChromaKeySheet(draft: chromaKeyBinding) }
+        .sheet(item: $cropSession, onDismiss: finishCropSession) { session in CropSheet(draft: $cropDraft, image: cropStill, video: session.video) }
+        .sheet(item: $volumeRequest, onDismiss: finishVolumeSession) { request in volumeSheet(request) }
         .sheet(item: $mediaPicker) { purpose in
             EditorMediaPickerView(purpose: purpose, onPick: { picked in
                 mediaPicker = nil
-                Task { await usePickedMedia(picked, for: purpose) }
-            }, onCancel: { mediaPicker = nil })
+                Task {
+                    if purpose.mode == .extractAudio { await extractAudio(from: picked) } else { await usePickedMedia(picked, for: purpose) }
+                }
+            }, onAppend: { picked in
+                mediaPicker = nil
+                Task { await appendPickedMediaToMainLane(picked) }
+            }, onCancel: {
+                mediaPicker = nil
+                mainLaneInsertAfterLayerId = nil
+            })
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .preferredColorScheme(.light)
         }
         .alert("Couldn't add that", isPresented: Binding(get: { mediaError != nil }, set: { if !$0 { mediaError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(mediaError ?? "") }
         .sheet(isPresented: $showingStickerSheet) { stickerSheet }
+        .sheet(isPresented: $showingSoundSheet) { SoundSheet(store: soundStore, onUse: addSoundEffect) }
+        .sheet(isPresented: $showingRecorderSheet) { RecorderSheet(onAdd: { addRecording(from: $0) }) }
         .sheet(isPresented: $showingTextSheet, onDismiss: finishTextSession) { TextSheet(values: $textValues, composition: project.composition, selectAllOnFirstFocus: textSessionIsNew, initialTab: textSessionTab) }
         .sheet(isPresented: $showingGraphSheet) {
             if let id = selectedLayerId, let layer = selectedLayer, let start = graphSegmentStart {
@@ -563,6 +1004,7 @@ struct EditorShellView: View {
             transformValues = sampled
         }
         .task(id: selectedLayerId) { await probeSelectedAudio() }
+        .onChange(of: selectedLayerId) { _, _ in if showingMaskTools { closeMaskTools() }; if showingRemoveBgTools { closeRemoveBgTools() } }
         .overlay(alignment: .bottom) {
             if let title = comingSoonTitle {
                 Text("\(title) is coming soon")
@@ -572,6 +1014,22 @@ struct EditorShellView: View {
                     .padding(.bottom, 96)
                     .transition(.opacity)
                     .accessibilityIdentifier("comingSoonToast")
+            }
+        }
+        .overlay {
+            if extractingAudio {
+                ProgressView("Extracting audio…")
+                    .padding(20)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityIdentifier("extractingAudio")
+            }
+        }
+        .overlay {
+            if importingMainLaneMedia {
+                ProgressView("Adding clips…")
+                    .padding(20)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityIdentifier("addingMainLaneMedia")
             }
         }
         .animation(.easeOut(duration: 0.2), value: comingSoonTitle)
@@ -603,11 +1061,34 @@ struct EditorShellView: View {
                 onBack: { selectedLayerId = nil; selectedAudioClipId = nil },
                 onTool: handleClipTool
             )
+        case .maskTools:
+            HStack(spacing: 0) {
+                BottomBarBackButton { closeMaskTools() }
+                    .padding(.trailing, 8)
+                Divider().frame(height: 28)
+                    .padding(.trailing, 4)
+                MaskToolRow(current: currentMaskDraft.shape, onPick: pickMaskShape)
+            }
+            .padding(.horizontal, 12)
+
+        case .removeBgTools:
+            HStack(spacing: 0) {
+                BottomBarBackButton { closeRemoveBgTools() }
+                    .padding(.trailing, 8)
+                Divider().frame(height: 28)
+                    .padding(.trailing, 4)
+                RemoveBackgroundToolRow(current: currentRemoveBgDraft.mode, modes: selectedLayer?.type == "video" ? [.none, .auto] : RemoveBackgroundMode.allCases, onPick: pickRemoveBgMode, chromaKeyEnabled: currentChromaKeyDraft.enabled, onChromaKey: openChromaKeySheet)
+            }
+            .padding(.horizontal, 12)
         case .toolPanel(let tool):
-            HStack(spacing: 8) {
+            // Same frame as the Edit row: back button, divider, then the tool's items from the left.
+            HStack(spacing: 0) {
                 BottomBarBackButton { selectedTool = nil }
+                    .padding(.trailing, 8)
+                Divider().frame(height: 28)
+                    .padding(.trailing, 4)
                 optionsPanel(for: tool)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
         }
@@ -618,9 +1099,18 @@ struct EditorShellView: View {
     private func handleClipTool(_ tool: ClipTool) {
         switch tool {
         case .split:
+            if let audioId = selectedAudioClipId {
+                apply(SplitAudioClipCommand(clipId: audioId, atMs: currentTimeMs))
+                selectedAudioClipId = nil
+                return
+            }
             guard let id = selectedLayerId else { return }
-            apply(SplitClipCommand(layerId: id, atMs: currentTimeMs))
-            selectedLayerId = nil
+            let secondLayerId = "\(id)-split-\(UUID().uuidString.prefix(8))"
+            apply(SplitClipCommand(layerId: id, atMs: currentTimeMs, secondLayerId: secondLayerId))
+            if project.layers.contains(where: { $0.id == secondLayerId }) {
+                selectedLayerId = secondLayerId
+                selectedAudioClipId = nil
+            }
         case .transform: openTransformSheet()
         case .graph: if graphSegmentStart != nil { showingGraphSheet = true }
         case .opacity: openTransformSheet(focus: .opacity)
@@ -628,6 +1118,9 @@ struct EditorShellView: View {
         case .filter: showingFilterSheet = true
         case .animation: if selectedLayerId != nil { showingAnimationSheet = true }
         case .speed: openSpeedSheet()
+        case .mask: if selectedLayer?.type == "video" || selectedLayer?.type == "image" { showingMaskTools = true }
+        case .removeBackground: if selectedLayer?.type == "image" || selectedLayer?.type == "video" { showingRemoveBgTools = true }
+        case .crop: openCropSheet()
         case .editText: openTextSheet(new: false)
         case .mirror:
             guard let id = selectedLayerId else { return }
@@ -649,8 +1142,13 @@ struct EditorShellView: View {
             apply(CopyToOverlayCommand(layerId: id, newLayerId: copyId))
             if project.layers.contains(where: { $0.id == copyId }) { selectedLayerId = copyId }
             engine.refreshFrames()
-        case .volume:
-            if selectedAudioClipId != nil { selectedTool = .audio } else { comingSoonTitle = tool.title }
+        case .volume, .fade:
+            if selectedAudioClipId != nil || (tool == .volume && selectedLayer?.type == "video") {
+                volumeSessionOriginal = nil   // taken at the first change
+                volumeRequest = VolumeSheet.Request(tab: tool == .fade ? .fade : .volume)
+            } else {
+                comingSoonTitle = tool.title
+            }
         case .delete:
             if let id = selectedLayerId {
                 apply(DeleteClipCommand(layerId: id))
@@ -666,6 +1164,10 @@ struct EditorShellView: View {
 
     /// Whether the selected clip is a video whose file has a sound track.
     private func probeSelectedAudio() async {
+        #if DEBUG
+        // UI tests: the sample videos have no sound track; this lets the Volume popup be opened on one.
+        if ProcessInfo.processInfo.environment["EDITOR_VIDEO_HAS_SOUND"] != nil { selectedHasAudio = true; return }
+        #endif
         guard let layer = selectedLayer, case .video(let payload) = layer.payload,
               case .video(let asset)? = project.assets.first(where: { $0.id == payload.assetId }),
               let url = bundledURL(filename: asset.uri)
@@ -676,6 +1178,9 @@ struct EditorShellView: View {
 
     /// Split only makes sense strictly inside the clip's own range - at either edge it would leave a zero-length half.
     private var canSplitSelection: Bool {
+        if let clip = project.audio.tracks.flatMap(\.clips).first(where: { $0.id == selectedAudioClipId }) {
+            return currentTimeMs > clip.timing.start && currentTimeMs < clip.timing.start + clip.timing.duration
+        }
         guard let layer = project.layers.first(where: { $0.id == selectedLayerId }) else { return false }
         return currentTimeMs > layer.timing.start && currentTimeMs < layer.timing.start + layer.timing.duration
     }
@@ -722,21 +1227,17 @@ struct EditorShellView: View {
             tool: tool,
             composition: project.composition,
             selectedLayer: project.layers.first { $0.id == selectedLayerId },
-            selectedAudioClip: project.audio.tracks.flatMap(\.clips).first { $0.id == selectedAudioClipId },
             onSetAspectRatio: { width, height in apply(SetAspectRatioCommand(width: width, height: height)) },
             onSetBackgroundColor: { hex in apply(SetBackgroundColorCommand(hex: hex)) },
             onPickAudioFile: { url in addAudio(from: url) },
-            onSetAudioVolume: { clipId, gainDb in apply(SetAudioClipVolumeCommand(clipId: clipId, gainDb: gainDb)) },
-            onDeleteAudio: { clipId in
-                apply(DeleteAudioClipCommand(clipId: clipId))
-                selectedAudioClipId = nil
-            },
-            onRecordingFinished: { url in addAudio(from: url) },
+            onRecord: { showingRecorderSheet = true },
             onAddSoundEffect: { preset in
                 apply(AddAudioClipCommand(asset: SoundEffectCatalog.asset(for: preset), durationMs: preset.durationMs, atMs: currentTimeMs))
             },
             onAddText: { openTextSheet(new: true) },
-            onComingSoon: { title in comingSoonTitle = title }
+            onComingSoon: { title in comingSoonTitle = title },
+            onExtractAudio: { mediaPicker = .extractAudio },
+            onSoundFX: { showingSoundSheet = true }
         )
     }
 
@@ -757,17 +1258,47 @@ struct EditorShellView: View {
                     StagePreview(
                         composition: project.composition,
                         assets: project.assets,
-                        layers: project.layers,
+                        layers: engine.previewLayers,
                         filters: project.filters ?? [],
+                        masks: project.masks ?? [],
                         engine: engine
                     )
                     .frame(width: videoBoxSide, height: videoBoxSide)
+                    .overlay {
+                        // Mask tool: the picked mask's outline and handles sit on the live stage.
+                        if showingMaskTools, let layer = selectedLayer, currentMaskDraft.shape != .none {
+                            MaskGestureOverlay(
+                                draft: maskBinding, composition: project.composition, layerFrame: layer.frame,
+                                transform: TransformValues(layer: layer, atMs: currentTimeMs), onBegin: {}, onEnd: {}
+                            )
+                        }
+                    }
+                    .overlay {
+                        // Remove BG on video: the progress ring + Cancel while the frames are being cut.
+                        if let progress = removeBgProgressLayer {
+                            RemoveBackgroundProgressCard(fraction: progress.fraction, onCancel: { cancelRemoveBg(layerId: progress.layerId) })
+                        }
+                    }
                     .overlay {
                         // While the Transform sheet is open the stage can be dragged, pinched and twisted directly.
                         if showingTransformSheet, let layer = selectedLayer {
                             TransformGestureOverlay(
                                 values: $transformValues, composition: project.composition, layerFrame: layer.frame,
                                 onBegin: beginTransform, onEnd: endTransform
+                            )
+                        }
+                    }
+                    .overlay {
+                        if showingChromaKeySheet, let layer = selectedLayer, layer.type == "video" || layer.type == "image" {
+                            ChromaKeyPickerOverlay(
+                                layer: layer, project: project, composition: project.composition,
+                                atMs: currentTimeMs,
+                                onSample: { color in
+                                    var next = currentChromaKeyDraft
+                                    next.keyColor = color
+                                    next.enabled = true
+                                    setChromaKeyLive(next)
+                                }
                             )
                         }
                     }
@@ -784,14 +1315,32 @@ struct EditorShellView: View {
                         assets: project.assets,
                         audio: project.audio,
                         engine: engine,
-                        selectedLayerId: $selectedLayerId,
-                        selectedAudioClipId: $selectedAudioClipId,
+                        coverImageOverride: coverImageOverride,
+                        onEditCover: { showingCoverEditor = true },
+                        selectedLayerId: timelineSelection($selectedLayerId),
+                        selectedAudioClipId: timelineSelection($selectedAudioClipId),
                         onTrimBegin: beginTrim,
                         onTrimUpdate: updateTrim,
                         onTrimEnd: endTrim,
                         fps: project.composition.fps,
                         keyframeTimes: selectedLayer.map(TransformKeyframes.visibleTimelineTimes) ?? [],
-                        onMoveClip: apply
+                        onMoveClip: apply,
+                        onTransition: { outgoingId, incomingId in
+                            let existing = TransitionWrappers.applied(for: incomingId, in: project.layers)
+                            transitionPickerTarget = TransitionPickerTarget(
+                                outgoingId: outgoingId,
+                                incomingId: incomingId,
+                                kind: existing?.kind,
+                                durationMs: existing?.durationMs ?? TransitionWrappers.defaultDurationMs
+                            )
+                        },
+                        onAddMainLaneMedia: {
+                            let order = primaryVideoLaneOrder(of: project.layers)
+                            mainLaneInsertAfterLayerId = selectedLayerId.flatMap { selectedId in
+                                project.layers.first { $0.id == selectedId && $0.order == order && isPushLane($0) }?.id
+                            }
+                            mediaPicker = .appendMainLane
+                        }
                     )
                     .frame(height: timelineHeight)
                     .clipped()
@@ -820,7 +1369,7 @@ struct EditorShellView: View {
                 StagePreview(
                     composition: project.composition,
                     assets: project.assets,
-                    layers: project.layers,
+                    layers: engine.previewLayers,
                     filters: project.filters ?? [],
                     engine: engine
                 )
@@ -990,7 +1539,6 @@ struct EditorShellView: View {
     private func startExport() {
         Task {
             await exportGate.export(project: project, context: exportContext)
-            if exportGate.completed { dismiss() }
         }
     }
 
@@ -1007,6 +1555,7 @@ struct EditorShellView: View {
                         .font(.headline)
                         .fontWeight(.regular)
                 }
+                .accessibilityIdentifier("playback-toggle")
                 Spacer()
             }
 
@@ -1081,7 +1630,7 @@ private struct FullscreenScrubber: View {
 
     private var fraction: Double {
         guard engine.maxDurationMs > 0 else { return 0 }
-        return min(max(engine.currentTimeMs / engine.maxDurationMs, 0), 1)
+        return min(max(engine.editorTimeMs / engine.maxDurationMs, 0), 1)
     }
 
     var body: some View {
@@ -1120,7 +1669,7 @@ private struct FullscreenScrubber: View {
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("fullscreen-scrubber")
         #if DEBUG
-        .accessibilityValue(String(format: "%.0f", engine.currentTimeMs))
+        .accessibilityValue(String(format: "%.0f", engine.editorTimeMs))
         #endif
     }
 
@@ -1133,7 +1682,7 @@ private struct FullscreenScrubber: View {
     private func beginScrubbingIfNeeded() {
         guard !isDragging else { return }
         isDragging = true
-        scrubStartMs = engine.currentTimeMs
+        scrubStartMs = engine.editorTimeMs
         scrubMoved = false
         engine.beginScrub()
     }
@@ -1155,7 +1704,7 @@ private struct FullscreenScrubber: View {
     }
 }
 
-/// Wraps `PreviewCanvas`, reading `engine.currentTimeMs`/`engine.mode`
+/// Wraps `PreviewCanvas`, reading the render-time clock and `engine.mode`
 /// itself instead of taking them as plain values from the caller. Observing
 /// `@Observable` state inside a view's own `body` ties *that* view's
 /// Observation dependency to the property, not the caller's — so by reading
@@ -1169,6 +1718,7 @@ struct StagePreview: View {
     let assets: [V2Asset]
     let layers: [V2Layer]
     let filters: [V2Filter]
+    var masks: [V2Mask] = []
     let engine: EditorPlaybackEngine
 
     var body: some View {
@@ -1177,7 +1727,9 @@ struct StagePreview: View {
             assets: assets,
             layers: layers,
             filters: filters,
+            masks: masks,
             atMs: engine.currentTimeMs,
+            transitionFramePlan: engine.transitionFramePlan,
             playerEngine: engine
         )
         // Load-bearing — see ui-design-note.md (PreviewCanvas has no

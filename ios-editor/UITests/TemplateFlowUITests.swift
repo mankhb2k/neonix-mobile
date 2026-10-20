@@ -122,21 +122,20 @@ final class TemplateFlowUITests: XCTestCase {
         let app = openFilledEditor(as: user, shots: false)
 
         app.buttons["exportButton"].tap()
-        // Debug builds charge even though nothing can render yet, so the flow ends in "Export failed".
-        XCTAssertTrue(app.alerts["Export failed"].waitForExistence(timeout: 15))
-        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts["exportReady"].waitForExistence(timeout: 180), "first export writes a video")
+        app.buttons["Done"].tap()
         XCTAssertEqual(call("GET", "/v1/billing/balance", user: user)["balance"] as? Int, 14, "the first export costs 6 credits")
 
         app.buttons["exportButton"].tap()
-        XCTAssertTrue(app.alerts["Export failed"].waitForExistence(timeout: 15))
-        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts["exportReady"].waitForExistence(timeout: 180))
+        app.buttons["Done"].tap()
         XCTAssertEqual(call("GET", "/v1/billing/balance", user: user)["balance"] as? Int, 14, "exporting again is free")
 
         // A completely new project from the same template, later: still free.
         app.terminate()
         let again = openFilledEditor(as: user, shots: false, expectOwned: true)
         again.buttons["exportButton"].tap()
-        XCTAssertTrue(again.alerts["Export failed"].waitForExistence(timeout: 15))
+        XCTAssertTrue(again.staticTexts["exportReady"].waitForExistence(timeout: 180))
         XCTAssertEqual(call("GET", "/v1/billing/balance", user: user)["balance"] as? Int, 14, "an owned template never charges again")
     }
 

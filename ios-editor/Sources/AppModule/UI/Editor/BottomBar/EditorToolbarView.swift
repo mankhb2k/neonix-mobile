@@ -8,7 +8,7 @@ struct EditorToolbarView: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 20) {
-                ForEach(EditorTool.allCases) { tool in
+                ForEach(EditorTool.navigationTools) { tool in
                     Button { onSelect(tool) } label: {
                         VStack(spacing: 4) {
                             Image(systemName: tool.systemImage)

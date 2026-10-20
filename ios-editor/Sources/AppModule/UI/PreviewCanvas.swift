@@ -18,12 +18,19 @@ private struct LayerTreeNode {
 /// is how parent→child transform/opacity composition works here.
 private enum LayerTree {
     static func build(from layers: [V2Layer]) -> [LayerTreeNode] {
+        let paintIndex = Dictionary(uniqueKeysWithValues: layers.enumerated().map { ($0.element.id, $0.offset) })
         let byParent = Dictionary(grouping: layers, by: { $0.parentLayerId })
+        func ordered(_ children: [V2Layer]) -> [V2Layer] {
+            children.sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return (paintIndex[$0.id] ?? 0) < (paintIndex[$1.id] ?? 0)
+            }
+        }
         func node(for layer: V2Layer) -> LayerTreeNode {
-            let kids = (byParent[layer.id] ?? []).sorted { $0.order < $1.order }.map(node(for:))
+            let kids = ordered(byParent[layer.id] ?? []).map(node(for:))
             return LayerTreeNode(layer: layer, children: kids)
         }
-        return (byParent[nil] ?? []).sorted { $0.order < $1.order }.map(node(for:))
+        return ordered(byParent[nil] ?? []).map(node(for:))
     }
 }
 
@@ -47,9 +54,15 @@ struct PreviewCanvas: View {
     /// site that never authors a filter, same "no-op by default" shape as
     /// every other optional Protocol V2 feature this renderer reads.
     var filters: [V2Filter] = []
+    /// Resolved via each layer's `mask` id (the Mask tool's `V2Mask`s); a layer with none is untouched.
+    var masks: [V2Mask] = []
     let atMs: Double
+    /// The same cut window used by the playback engine and export frame sampler.
+    var transitionFramePlan: TransitionFramePlan? = nil
     /// Owns one `AVPlayer` per video layer; video layers draw from it.
     let playerEngine: EditorPlaybackEngine
+    /// Offline export supplies exact source frames while retaining this same V2 layer tree and sampler.
+    var exportFrames: [String: CGImage]? = nil
 
     /// Scales the fixed `composition.width`/`height` coordinate space to fit
     /// whatever box the caller gives this view. `.clipped()` keeps drawing
@@ -78,7 +91,10 @@ struct PreviewCanvas: View {
                     atMs: atMs,
                     assets: assets,
                     filters: filters,
-                    playerEngine: playerEngine
+                    masks: masks,
+                    playerEngine: playerEngine,
+                    exportFrames: exportFrames,
+                    transitionFramePlan: transitionFramePlan
                 )
             }
         }
@@ -94,18 +110,24 @@ private struct LayerNodeView: View {
     let atMs: Double
     let assets: [V2Asset]
     let filters: [V2Filter]
+    let masks: [V2Mask]
     let playerEngine: EditorPlaybackEngine
+    let exportFrames: [String: CGImage]?
+    let transitionFramePlan: TransitionFramePlan?
 
-    /// A layer exists only inside its own `timing` window (a text clip must vanish at its end). Video is left as it was: its player
-    /// is prepared ahead of the clip and tearing it down at the window's edge would be a playback change (CLAUDE.md "Playback").
+    /// A layer is visible only inside its own timing window. Video views stay mounted below so their player sessions remain prepared.
     private var isOutsideItsTime: Bool {
-        guard node.layer.type != "video" else { return false }
+        if node.layer.type == "video", transitionFramePlan?.isVisible(node.layer.id, at: atMs) == true { return false }
         return atMs < node.layer.timing.start || atMs > node.layer.timing.start + node.layer.timing.duration
     }
 
     var body: some View {
         let _ = PlaybackMetrics.shared.count(.layerBodyEvals)
-        if isOutsideItsTime {
+        if node.layer.type == "video" {
+            // Keep AVPlayerLayer mounted so its decoder/session survives cut boundaries, but hide frames outside
+            // the clip's timeline window. Overlapping main-lane clips can then both render during a transition.
+            drawn.opacity(isOutsideItsTime ? 0 : 1)
+        } else if isOutsideItsTime {
             Color.clear.frame(width: 0, height: 0)
         } else {
             drawn
@@ -123,7 +145,10 @@ private struct LayerNodeView: View {
                             atMs: atMs,
                             assets: assets,
                             filters: filters,
-                            playerEngine: playerEngine
+                            masks: masks,
+                            playerEngine: playerEngine,
+                            exportFrames: exportFrames,
+                            transitionFramePlan: transitionFramePlan
                         )
                     }
                 }
@@ -132,9 +157,13 @@ private struct LayerNodeView: View {
                     layerId: node.layer.id,
                     frame: frame, asset: assets.first { $0.id == frame.assetId },
                     filter: node.layer.filter.flatMap { id in filters.first { $0.id == id } },
-                    playerEngine: playerEngine
+                    segmentation: node.layer.mask.flatMap { id in masks.first { $0.id == id && $0.segmentation != nil } },
+                    playerEngine: playerEngine,
+                    exportFrame: exportFrames?[node.layer.id]
                 )
                 .frame(width: frame.frameWidth, height: frame.frameHeight)
+                .modifier(CropEffect(layer: node.layer, assets: assets, frameSize: CGSize(width: frame.frameWidth, height: frame.frameHeight)))
+                .modifier(MaskEffect(layer: node.layer, masks: masks, frameSize: CGSize(width: frame.frameWidth, height: frame.frameHeight)))
                 .modifier(ClipUnlessText(isText: node.layer.type == "text"))
             }
         }
@@ -188,6 +217,51 @@ private struct LayerNodeView: View {
     }
 }
 
+/// Mask tool: shows the layer only where its `V2Mask` (named by `layer.mask`) lets it through, with the mask's feather and invert (`MaskMatteView`). Applied after
+/// the crop, to the layer's own box. A layer with no mask, or one this renderer cannot draw, is untouched.
+private struct MaskEffect: ViewModifier {
+    let layer: V2Layer
+    let masks: [V2Mask]
+    let frameSize: CGSize
+
+    func body(content: Content) -> some View {
+        if let id = layer.mask, let mask = masks.first(where: { $0.id == id }), mask.children != nil {
+            content.mask { MaskMatteView(mask: mask, size: frameSize) }
+        } else {
+            content
+        }
+    }
+}
+
+/// Crop tool: shows only the layer's `V2Crop` region (see `CropLayout`). A layer with no crop is untouched.
+private struct CropEffect: ViewModifier {
+    let layer: V2Layer
+    let assets: [V2Asset]
+    let frameSize: CGSize
+
+    func body(content: Content) -> some View {
+        if let crop = layer.crop, let plan = CropLayout.plan(frame: frameSize, pictureAspect: pictureAspect, cover: layer.fit != "contain", crop: crop) {
+            content
+                .scaleEffect(x: (crop.flipped ?? false ? -1 : 1) * plan.zoom, y: plan.zoom)
+                .rotationEffect(.degrees(crop.rotation ?? 0))
+                .scaleEffect(plan.scale)
+                .offset(plan.offset)
+                .mask(alignment: .center) { Rectangle().frame(width: plan.visible.width, height: plan.visible.height) }
+        } else {
+            content
+        }
+    }
+
+    private var pictureAspect: Double {
+        guard let id = layer.assetId, let asset = assets.first(where: { $0.id == id }) else { return 1 }
+        switch asset {
+        case .image(let image): return image.width / max(image.height, 1)
+        case .video(let video): return video.width / max(video.height, 1)
+        default: return 1
+        }
+    }
+}
+
 /// Renders one layer's own content (before the shared transform/opacity
 /// modifiers `LayerNodeView` applies): a flat color for a shape, a cached
 /// still for an image, and an AVPlayer-backed frame for video.
@@ -199,32 +273,49 @@ private struct LayerContentView: View {
     /// layer that hasn't had a filter applied (the overwhelming common
     /// case), in which case `FilteredImageView` is a pure pass-through.
     let filter: V2Filter?
+    /// The layer's Remove BG mask (a `V2Mask` with a `segmentation` source), if any: a photo is drawn cut out.
+    let segmentation: V2Mask?
     let playerEngine: EditorPlaybackEngine
+    let exportFrame: CGImage?
+    @State private var metalReady = false
 
     var body: some View {
         let contentMode: ContentMode = frame.fit == "contain" ? .fit : .fill
         switch frame.kind {
         case "image":
             if let asset, let uiImage = BundledImageCache.image(filename: asset.uri) {
-                FilteredImageView(sourceKey: asset.uri, source: uiImage.cgImage, filter: filter, contentMode: contentMode)
+                SegmentedImageView(sourceKey: asset.uri, source: uiImage.cgImage, mask: segmentation, boxShort: min(frame.frameWidth, frame.frameHeight), filter: filter, contentMode: contentMode)
             } else {
                 Color.gray
             }
         case "video":
-            if asset == nil {
+            if let exportFrame {
+                Image(decorative: exportFrame, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode == .fit ? .fit : .fill)
+            } else if asset == nil {
                 Color.gray
             } else if let player = playerEngine.player(for: layerId) {
                 // The raw layer stays mounted under the filtered view. A filter appearing mid-edit (the first
                 // Adjust tick) used to swap the raw layer for a brand-new Metal view that needs ~250 ms before its
                 // first frame - a black flash; now the raw frame shows until the Metal view has drawn.
+                // Remove BG (video): the Metal view cuts each frame with its precomputed matte; once it has drawn, the raw layer
+                // (opaque, would show the background through the cut) is hidden.
+                let matteSet = segmentation.flatMap { _ in asset.map { VideoMatteStore.shared.set(forAssetURI: $0.uri) } }
+                let chromaKeyActive = filter?.primitives.contains { if case .feChromaKey = $0 { return true }; return false } ?? false
                 ZStack {
                     StagePlayerLayerView(player: player, contentMode: contentMode)
-                    if let filter {
+                        .opacity((matteSet != nil || chromaKeyActive) && metalReady ? 0 : 1)
+                    if filter != nil || matteSet != nil {
                         FilteredPlayerView(
                             player: player,
                             filter: filter,
                             previewContentMode: contentMode,
-                            requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000
+                            requestedSeconds: (frame.sourceMs ?? frame.elapsedMs) / 1000,
+                            matteSet: matteSet,
+                            matteFeather: segmentation?.feather ?? 0,
+                            matteInvert: segmentation?.invert ?? false,
+                            onPresented: { metalReady = true }
                         )
                     }
                 }
@@ -298,17 +389,24 @@ private struct StagePlayerLayerView: UIViewRepresentable {
 /// the newest decoded buffer on the next display tick.
 private struct FilteredPlayerView: UIViewRepresentable {
     let player: AVPlayer
-    let filter: V2Filter
+    let filter: V2Filter?
     let previewContentMode: SwiftUI.ContentMode
     let requestedSeconds: Double
+    /// Remove BG: the video's precomputed mattes (nil = no cut), the mask's feather (px of the layer box) and invert.
+    var matteSet: MatteSet?
+    var matteFeather: Double = 0
+    var matteInvert = false
+    var onPresented: () -> Void = {}
 
     func makeUIView(context: Context) -> FilteredPlayerMetalView {
-        FilteredPlayerMetalView(
+        let view = FilteredPlayerMetalView(
             player: player,
             filter: filter,
             previewContentMode: previewContentMode,
             requestedSeconds: requestedSeconds
         )
+        view.rebindMatte(set: matteSet, feather: matteFeather, invert: matteInvert, onPresented: onPresented)
+        return view
     }
 
     func updateUIView(_ uiView: FilteredPlayerMetalView, context: Context) {
@@ -318,6 +416,7 @@ private struct FilteredPlayerView: UIViewRepresentable {
             previewContentMode: previewContentMode,
             requestedSeconds: requestedSeconds
         )
+        uiView.rebindMatte(set: matteSet, feather: matteFeather, invert: matteInvert, onPresented: onPresented)
         uiView.setNeedsDisplay()
     }
 }
@@ -325,15 +424,19 @@ private struct FilteredPlayerView: UIViewRepresentable {
 @MainActor
 private final class FilteredPlayerMetalView: MTKView {
     private var player: AVPlayer
-    private var filter: V2Filter
+    private var filter: V2Filter?
     private var previewContentMode: SwiftUI.ContentMode
     private var requestedSeconds: Double
+    private var matteSet: MatteSet?
+    private var matteFeather = 0.0
+    private var matteInvert = false
+    private var onPresented: () -> Void = {}
     private var output: AVPlayerItemVideoOutput
     private let commandQueue: MTLCommandQueue
     private let ciContext: CIContext
     private let outputColorSpace = CGColorSpaceCreateDeviceRGB()
 
-    init(player: AVPlayer, filter: V2Filter, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
+    init(player: AVPlayer, filter: V2Filter?, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
         guard let device = MTLCreateSystemDefaultDevice(),
               let commandQueue = device.makeCommandQueue()
         else {
@@ -345,7 +448,9 @@ private final class FilteredPlayerMetalView: MTKView {
         self.requestedSeconds = requestedSeconds
         self.output = Self.makeOutput()
         self.commandQueue = commandQueue
-        self.ciContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
+        // `.workingColorSpace: NSNull()` like the shared context (CLAUDE.md "Core Image"): with the default (linear) working space the untagged video numbers were encoded to sRGB
+        // a second time on output - every filtered / cut video looked washed out (sweater 58 -> 127 of 255, measured on an iPhone 13).
+        self.ciContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false, .workingColorSpace: NSNull()])
         super.init(frame: .zero, device: device)
         framebufferOnly = false
         // Keep a display-synchronised draw loop alive while AVPlayerItemVideoOutput
@@ -364,7 +469,20 @@ private final class FilteredPlayerMetalView: MTKView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func rebind(player: AVPlayer, filter: V2Filter, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
+
+    func rebindMatte(set: MatteSet?, feather: Double, invert: Bool, onPresented: @escaping () -> Void) {
+        matteSet = set
+        matteFeather = feather
+        matteInvert = invert
+        self.onPresented = onPresented
+        // A cut frame has transparent pixels: the layer must not be opaque (and every pixel is written, see `draw`).
+        let filterHasAlpha = filter?.primitives.contains { if case .feChromaKey = $0 { return true }; return false } ?? false
+        let hasTransparency = set != nil || filterHasAlpha
+        isOpaque = !hasTransparency
+        (layer as? CAMetalLayer)?.isOpaque = !hasTransparency
+    }
+
+    func rebind(player: AVPlayer, filter: V2Filter?, previewContentMode: SwiftUI.ContentMode, requestedSeconds: Double) {
         if self.player !== player {
             self.player.currentItem?.remove(output)
             self.output = Self.makeOutput()
@@ -387,7 +505,8 @@ private final class FilteredPlayerMetalView: MTKView {
         else { return }
 
         let time = CMTime(seconds: max(requestedSeconds, 0), preferredTimescale: 600)
-        guard let pixelBuffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else {
+        var shownTime = CMTime.invalid
+        guard let pixelBuffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &shownTime) else {
             metrics.count(.metalEmptyBuffers)
             commandBuffer.commit()
             return
@@ -395,8 +514,20 @@ private final class FilteredPlayerMetalView: MTKView {
 
         var image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
         image = oriented(image, using: item)
-        image = FilterRenderer.apply(filter, to: image)
+        #if DEBUG
+        if matteSet != nil { RemoveBGSyncLog.shared.add(requested: requestedSeconds, shown: shownTime.isValid ? shownTime.seconds : .nan, rate: player.rate) }
+        #endif
+        // The matte belongs to the frame the player really handed over (`shownTime`), not to the playhead: while scrubbing / coasting the player lands on a nearby frame
+        // (scrub tolerance 0.2 s, seek lag), measured median 191 ms away, which left the cut a few pixels off the person.
+        if let matteSet, let matte = matteSet.matte(atSourceSeconds: shownTime.isValid ? shownTime.seconds : requestedSeconds) {
+            image = cut(image, with: matte)
+        }
+        if let filter { image = FilterRenderer.apply(filter, to: image) }
         image = fitted(image, to: drawableSize)
+        if matteSet != nil {
+            // Write every pixel (transparent where the cut is, and outside a letterboxed picture), not only the picture's.
+            image = image.composited(over: CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: drawableSize)))
+        }
         ciContext.render(
             image,
             to: drawable.texture,
@@ -407,6 +538,22 @@ private final class FilteredPlayerMetalView: MTKView {
         commandBuffer.present(drawable)
         commandBuffer.commit()
         if alpha == 0 { alpha = 1 }
+        onPresented()
+    }
+
+
+    /// The frame with its background cleared: alpha = the matte (512 x 512, stretched over the picture), softened by the mask's feather and flipped by invert.
+    private func cut(_ image: CIImage, with matte: CIImage) -> CIImage {
+        let extent = image.extent
+        var mask = matte.transformed(by: CGAffineTransform(scaleX: extent.width / matte.extent.width, y: extent.height / matte.extent.height))
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+        if matteInvert { mask = mask.applyingFilter("CIColorInvert") }
+        if matteFeather > 0.01 {
+            // The feather is in px of the layer's box = `contentScaleFactor` drawable px each; the mask is in picture px, which `fitted` scales to the drawable.
+            let sigma = matteFeather * Double(contentScaleFactor) * Double(extent.width / max(drawableSize.width, 1))
+            mask = mask.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: extent)
+        }
+        return image.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: extent), kCIInputMaskImageKey: mask]).cropped(to: extent)
     }
 
     private static func makeOutput() -> AVPlayerItemVideoOutput {
@@ -418,13 +565,7 @@ private final class FilteredPlayerMetalView: MTKView {
 
     private func oriented(_ image: CIImage, using item: AVPlayerItem) -> CIImage {
         guard let track = item.asset.tracks(withMediaType: .video).first else { return image }
-        let transform = track.preferredTransform
-        let bounds = CGRect(origin: .zero, size: track.naturalSize).applying(transform)
-        return image.transformed(
-            by: transform.concatenating(
-                CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY)
-            )
-        )
+        return VideoOrientation.upright(image, transform: track.preferredTransform)
     }
 
     private func fitted(_ image: CIImage, to size: CGSize) -> CIImage {
@@ -445,6 +586,36 @@ private final class FilteredPlayerMetalView: MTKView {
         let x = (size.width - width) / 2 - image.extent.minX * scale
         let y = (size.height - height) / 2 - image.extent.minY * scale
         return image.transformed(by: CGAffineTransform(translationX: x, y: y).scaledBy(x: scale, y: scale))
+    }
+}
+
+/// A photo, cut out when its layer has a Remove BG mask: the original shows until the cut-out is ready (never nothing), then the cut-out replaces it, and the filter
+/// (if any) runs on whichever is showing. The mask's `feather` is in px of the layer's box; it is converted to the picture's pixels proportionally.
+private struct SegmentedImageView: View {
+    let sourceKey: String
+    let source: CGImage?
+    let mask: V2Mask?
+    let boxShort: Double
+    let filter: V2Filter?
+    let contentMode: ContentMode
+
+    @State private var cutout: CGImage?
+
+    private var key: String {
+        guard let mask, let segmentation = mask.segmentation, let data = try? JSONEncoder().encode(segmentation) else { return "none" }
+        return data.base64EncodedString() + "|\(mask.feather ?? 0)|\(mask.invert ?? false)"
+    }
+
+    var body: some View {
+        FilteredImageView(sourceKey: sourceKey + "|" + (cutout == nil ? "whole" : key), source: cutout ?? source, filter: filter, contentMode: contentMode)
+            .task(id: key) {
+                guard let mask, let segmentation = mask.segmentation, let source else { cutout = nil; return }
+                let pictureShort = Double(min(source.width, source.height))
+                let featherPx = (mask.feather ?? 0) * (boxShort > 0 ? pictureShort / boxShort : 1)
+                let result = await SegmentationStore.shared.cutout(of: source, sourceKey: sourceKey, segmentation: segmentation, featherPx: featherPx, invert: mask.invert ?? false)
+                guard !Task.isCancelled else { return }
+                cutout = result
+            }
     }
 }
 
@@ -533,7 +704,7 @@ func bundledURL(filename: String) -> URL? {
 /// and re-decoded the same file from scratch, which is what made scrubbing
 /// a photo layer feel janky too, same symptom as the video case but a
 /// different cause (needless repeated work, not a slow one-off operation).
-private enum BundledImageCache {
+enum BundledImageCache {
     private static var cache: [String: UIImage] = [:]
 
     static func image(filename: String) -> UIImage? {
@@ -578,3 +749,26 @@ private struct ClipUnlessText: ViewModifier {
         if isText { content } else { content.clipped() }
     }
 }
+
+#if DEBUG
+/// Measurement (Remove BG on video): per draw, the time the matte is looked up at (`requested`), the time of the frame the player really handed over (`shown`), and the player's rate.
+/// Writes `Documents/removebg_sync.csv` (emptied by `REMOVEBG_SYNC_LOG=1` at launch). Used to find out whether the cut lags the picture.
+@MainActor
+final class RemoveBGSyncLog {
+    static let shared = RemoveBGSyncLog()
+    private var lines: [String] = []
+    private let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("removebg_sync.csv")
+    private var started = false
+
+    func add(requested: Double, shown: Double, rate: Float) {
+        guard ProcessInfo.processInfo.environment["REMOVEBG_SYNC_LOG"] != nil else { return }
+        if !started { started = true; try? "t,requested,shown,rate\n".write(to: url, atomically: true, encoding: .utf8) }
+        lines.append(String(format: "%.3f,%.4f,%.4f,%.1f", CACurrentMediaTime(), requested, shown, rate))
+        if lines.count >= 60 {
+            let chunk = (lines.joined(separator: "\n") + "\n").data(using: .utf8)!
+            lines.removeAll(keepingCapacity: true)
+            if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(chunk); try? handle.close() }
+        }
+    }
+}
+#endif

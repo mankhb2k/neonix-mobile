@@ -118,6 +118,36 @@ enum APIError: LocalizedError {
         if case .http(_, let code, _) = self { return code == "INSUFFICIENT_CREDITS" }
         return false
     }
+
+    var isUnauthenticated: Bool {
+        if case .http(let status, _, _) = self { return status == 401 || status == 403 }
+        return false
+    }
+}
+
+struct APIAccountProfile: Decodable {
+    let id: String
+    let displayName: String?
+    let avatarUrl: URL?
+    let role: String?
+    let balance: Int
+}
+
+/// `GET /v1/sounds`: the built-in sound-effect library (files live in R2; `url` is public or presigned). `peaks` is the
+/// loudness per slice (0...1) the picker draws as a mini waveform before the file is downloaded.
+struct APISoundCatalogue: Codable, Equatable {
+    struct Category: Codable, Equatable, Identifiable { let id: String; let title: String }
+    struct Sound: Codable, Equatable, Identifiable {
+        let id: String
+        let name: String
+        let category: String
+        let url: URL
+        let durationMs: Double
+        let mimeType: String
+        let peaks: [Double]
+    }
+    let categories: [Category]
+    let sounds: [Sound]
 }
 
 /// `GET /v1/stickers`: the built-in sticker library (images live in R2; `url` is public or presigned).

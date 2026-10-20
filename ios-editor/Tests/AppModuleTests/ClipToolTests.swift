@@ -6,15 +6,15 @@ import UIKit
 final class ClipToolTests: XCTestCase {
     func testAVideoFollowsTheUsersList() {
         XCTAssertEqual(ClipTool.tools(for: .video), [
-            .split, .transform, .volume, .delete, .animation, .graph, .speed, .adjust, .filter, .opacity, .crop,
-            .replace, .duplicate, .overlay, .removeBackground, .unlink,
+            .split, .transform, .volume, .delete, .animation, .graph, .speed, .adjust, .filter, .opacity, .mask, .crop,
+            .replace, .duplicate, .overlay, .removeBackground, .freeze, .reverse, .unlink,
         ])
     }
 
     func testAPhotoHasNoSoundOrSpeedTools() {
         XCTAssertNil(ClipTool(rawValue: "extract-audio"), "Extract Audio was removed from the row (user 2026-10-12)")
         XCTAssertEqual(ClipTool.tools(for: .image), [
-            .split, .transform, .animation, .delete, .graph, .adjust, .filter, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground,
+            .split, .transform, .animation, .delete, .graph, .adjust, .filter, .opacity, .mask, .crop, .replace, .duplicate, .overlay, .removeBackground,
         ])
     }
 
@@ -26,7 +26,7 @@ final class ClipToolTests: XCTestCase {
     }
 
     func testAnAudioClipHasSoundTools() {
-        XCTAssertEqual(ClipTool.tools(for: .audio), [.split, .volume, .speed, .delete, .duplicate])
+        XCTAssertEqual(ClipTool.tools(for: .audio), [.split, .volume, .fade, .delete, .duplicate, .beat, .speed])
     }
 
     func testGraphIsOnEveryRowButAudio() {
@@ -56,7 +56,8 @@ final class ClipToolTests: XCTestCase {
         XCTAssertTrue(ClipTool.filter.isBuilt(for: .video), "Filter is built (grid + Intensity)")
         XCTAssertTrue(ClipTool.opacity.isBuilt(for: .image))
         XCTAssertTrue(ClipTool.volume.isBuilt(for: .audio))
-        XCTAssertFalse(ClipTool.volume.isBuilt(for: .video), "video volume is not built yet")
+        XCTAssertTrue(ClipTool.volume.isBuilt(for: .video), "video volume is built (Volume only, no Fade)")
+        XCTAssertFalse(ClipTool.fade.isBuilt(for: .video))
         XCTAssertTrue(ClipTool.animation.isBuilt(for: .video) && ClipTool.animation.isBuilt(for: .text) && ClipTool.animation.isBuilt(for: .sticker))
         XCTAssertFalse(ClipTool.animation.isBuilt(for: .audio))
         for kind in [ClipKind.video, .image, .text, .sticker] { XCTAssertTrue(ClipTool.duplicate.isBuilt(for: kind), "\(kind)") }
@@ -65,7 +66,14 @@ final class ClipToolTests: XCTestCase {
         XCTAssertFalse(ClipTool.replace.isBuilt(for: .text))
         XCTAssertTrue(ClipTool.speed.isBuilt(for: .video))
         XCTAssertFalse(ClipTool.speed.isBuilt(for: .audio), "audio speed is not built yet")
-        for notYet in [ClipTool.crop, .removeBackground, .unlink] {
+        XCTAssertTrue(ClipTool.fade.isBuilt(for: .audio), "audio fade opens the Volume / Fade popup on Fade")
+        XCTAssertFalse(ClipTool.beat.isBuilt(for: .audio), "audio beat is a label only")
+        XCTAssertTrue(ClipTool.crop.isBuilt(for: .video) && ClipTool.crop.isBuilt(for: .image), "Crop is built for video and photo")
+        XCTAssertFalse(ClipTool.crop.isBuilt(for: .text))
+        XCTAssertTrue(ClipTool.mask.isBuilt(for: .video) && ClipTool.mask.isBuilt(for: .image), "Mask is built for video and photo")
+        XCTAssertFalse(ClipTool.mask.isBuilt(for: .text))
+        XCTAssertTrue(ClipTool.removeBackground.isBuilt(for: .video))
+        for notYet in [ClipTool.unlink] {
             XCTAssertFalse(notYet.isBuilt(for: .video), "\(notYet)")
         }
     }

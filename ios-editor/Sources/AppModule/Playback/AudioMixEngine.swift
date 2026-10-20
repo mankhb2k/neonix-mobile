@@ -42,7 +42,11 @@ final class AudioMixEngine {
     /// without needing a real `AVAudioEngine` render pass.
     private(set) var sources: [AudioSource] = []
     private var activeNodes: [String: AVAudioPlayerNode] = [:]
+    /// One gain stage per playing node, after it: a player node's own `volume` stops at 1 (0 dB), the boost above that (up to +12 dB, the Volume
+    /// tool) is `AVAudioUnitEQ.globalGain`.
+    private var activeBoosts: [String: AVAudioUnitEQ] = [:]
     private var audioFiles: [String: AVAudioFile] = [:]
+    private var unreadable: Set<String> = []
 
     /// Call whenever the project changes — rebuilds the source list from
     /// `project.audio`'s standalone clips plus every video layer's embedded
@@ -68,21 +72,24 @@ final class AudioMixEngine {
             }
         }
 
+        // A video clip's own sound: on unless switched off (`audio.enabled == false`), read straight from the video file (or its audio derivative),
+        // at the clip's gain. Only at normal speed: this engine never retimes, so a sped-up or curved clip stays silent rather than play at the wrong pitch.
         for layer in project.layers {
             guard case .video(let payload) = layer.payload,
-                  let embedded = payload.audio, embedded.enabled,
+                  payload.audio?.enabled ?? true,
+                  (payload.playbackRate ?? 1) == 1, payload.speedCurve == nil,
                   let asset = project.assets.first(where: { $0.id == payload.assetId }),
                   case .video(let videoAsset) = asset,
-                  let derivative = videoAsset.audio,
-                  let url = bundledURL(filename: derivative.uri)
+                  let url = bundledURL(filename: videoAsset.audio?.uri ?? videoAsset.uri)
             else { continue }
+            let embedded = payload.audio
             next.append(AudioSource(
                 id: layer.id, url: url,
                 startMs: layer.timing.start, durationMs: layer.timing.duration,
                 trimStartMs: payload.trimStart ?? 0,
-                gainDb: embedded.gainDb ?? 0,
-                pan: embedded.pan ?? 0,
-                fadeIn: embedded.fadeIn, fadeOut: embedded.fadeOut
+                gainDb: embedded?.gainDb ?? 0,
+                pan: embedded?.pan ?? 0,
+                fadeIn: embedded?.fadeIn, fadeOut: embedded?.fadeOut
             ))
         }
 
@@ -123,7 +130,7 @@ final class AudioMixEngine {
             if ms >= source.startMs + source.durationMs {
                 stopNode(node, id: id)
             } else {
-                node.volume = volume(for: source, atMs: ms)
+                setGain(volume(for: source, atMs: ms), node: node, boost: activeBoosts[id])
             }
         }
     }
@@ -151,30 +158,52 @@ final class AudioMixEngine {
         guard frameCount > 0 else { return }
 
         let node = AVAudioPlayerNode()
+        let boost = AVAudioUnitEQ(numberOfBands: 0)   // no bands: only its global gain is used
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
+        engine.attach(boost)
+        engine.connect(node, to: boost, format: file.processingFormat)
+        engine.connect(boost, to: engine.mainMixerNode, format: file.processingFormat)
         node.scheduleSegment(file, startingFrame: startFrame, frameCount: frameCount, at: nil)
-        node.volume = volume(for: source, atMs: atMs)
+        setGain(volume(for: source, atMs: atMs), node: node, boost: boost)
         node.pan = Float(min(max(source.pan, -1), 1))
         if !engine.isRunning {
+            Self.activatePlaybackSession()
             guard (try? engine.start()) != nil else {
                 engine.detach(node)
+                engine.detach(boost)
                 return
             }
         }
         node.play()
         activeNodes[source.id] = node
+        activeBoosts[source.id] = boost
+    }
+
+    /// Playback must not depend on whatever session state the app was left in: `.playback` plays through the speaker and ignores the
+    /// silent switch (a video editor's sound is the point), and undoes the recorder's `.playAndRecord` (earpiece, quiet).
+    private static func activatePlaybackSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default)
+        try? session.setActive(true)
     }
 
     private func stopNode(_ node: AVAudioPlayerNode, id: String) {
         node.stop()
         engine.detach(node)
+        if let boost = activeBoosts.removeValue(forKey: id) { engine.detach(boost) }
         activeNodes.removeValue(forKey: id)
+    }
+
+    /// Up to 1 (0 dB) the node's own volume does it; above that the node stays at full and the boost stage adds the rest in dB.
+    private func setGain(_ gain: Float, node: AVAudioPlayerNode, boost: AVAudioUnitEQ?) {
+        node.volume = min(gain, 1)
+        boost?.globalGain = gain > 1 ? 20 * log10(gain) : 0
     }
 
     private func audioFile(for url: URL) -> AVAudioFile? {
         if let cached = audioFiles[url.path] { return cached }
-        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        if unreadable.contains(url.path) { return nil }   // a video with no sound track: asked once, not on every tick
+        guard let file = try? AVAudioFile(forReading: url) else { unreadable.insert(url.path); return nil }
         audioFiles[url.path] = file
         return file
     }
@@ -187,24 +216,9 @@ final class AudioMixEngine {
     /// Internal, not `private` — `AudioMixEngineTests` exercises the fade
     /// curve math directly, pure function, no engine state involved.
     func volume(for source: AudioSource, atMs: Double) -> Float {
-        var gain = pow(10, source.gainDb / 20)
-        let elapsedMs = atMs - source.startMs
-        let remainingMs = source.durationMs - elapsedMs
-
-        if let fadeIn = source.fadeIn, fadeIn.duration > 0, elapsedMs < fadeIn.duration {
-            gain *= fadeCurveValue(fraction: elapsedMs / fadeIn.duration, curve: fadeIn.curve)
-        }
-        if let fadeOut = source.fadeOut, fadeOut.duration > 0, remainingMs < fadeOut.duration {
-            gain *= fadeCurveValue(fraction: remainingMs / fadeOut.duration, curve: fadeOut.curve)
-        }
+        // Mute (-60 dB and below) is silence, +20 dB is 10x; the fades are `AudioFadeEnvelope`, the same curve the timeline draws.
+        let gain = VolumeScale.linearGain(source.gainDb)
+            * AudioFadeEnvelope.gain(elapsedMs: atMs - source.startMs, durationMs: source.durationMs, fadeIn: source.fadeIn, fadeOut: source.fadeOut)
         return Float(gain)
-    }
-
-    private func fadeCurveValue(fraction: Double, curve: V2AudioFadeCurve) -> Double {
-        let t = min(max(fraction, 0), 1)
-        switch curve {
-        case .linear: return t
-        case .equalPower: return sin(t * .pi / 2)
-        }
     }
 }

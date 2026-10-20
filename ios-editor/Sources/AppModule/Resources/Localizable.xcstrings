@@ -1,1037 +1,1361 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "  ·  %@": {},
-    "  ·  00:12": {},
-    "%@": {},
-    "%@ – %@  ·  %@ s of %@ s": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@ – %2$@  ·  %3$@ s of %4$@ s"
+  "sourceLanguage" : "en",
+  "strings" : {
+    "  ·  %@" : {
+
+    },
+    "  ·  00:12" : {
+
+    },
+    "·" : {
+
+    },
+    "%@" : {
+
+    },
+    "%@ – %@  ·  %@ s of %@ s" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ – %2$@  ·  %3$@ s of %4$@ s"
+          }
+        }
+      }
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
           }
         }
       }
+    },
+    "%@ credits" : {
+
+    },
+    "%@ is coming soon" : {
+
+    },
+    "%@%%" : {
+
     },
-    "%@ credits": {},
-    "%@ is coming soon": {},
-    "%lld credits": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld credit"
+    "%lld credits" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld credit"
           }
         }
       }
+    },
+    "0" : {
+
+    },
+    "0:%@" : {
+
+    },
+    "00:00" : {
+
+    },
+    "00:02" : {
+
     },
-    "00:03": {},
-    "13 controls on a live photo: a scrolling row vs Light / Color / Detail groups, both in the sheet. Hold the photo to compare.": {},
-    "16 fake filters on a live photo with an Intensity ruler: a 4-column grid in a fixed sheet, the same with a pull-up detent, or one row of thumbnails.": {},
-    "A tool says \"coming soon\".": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Một công cụ báo \"coming soon\"."
+    "00:03" : {
+
+    },
+    "1" : {
+
+    },
+    "10" : {
+
+    },
+    "13 controls on a live photo: a scrolling row vs Light / Color / Detail groups, both in the sheet. Hold the photo to compare." : {
+
+    },
+    "16 fake filters on a live photo with an Intensity ruler: a 4-column grid in a fixed sheet, the same with a pull-up detent, or one row of thumbnails." : {
+
+    },
+    "A tool says \"coming soon\"." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Một công cụ báo \"coming soon\"."
           }
         }
       }
     },
-    "A video must be at least as long as its slot. A longer video is cropped to the slot's length, and you choose where it starts.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Video phải dài bằng hoặc hơn ô đó. Video dài hơn sẽ được cắt theo độ dài của ô, và bạn chọn điểm bắt đầu."
+    "A video must be at least as long as its slot. A longer video is cropped to the slot's length, and you choose where it starts." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video phải dài bằng hoặc hơn ô đó. Video dài hơn sẽ được cắt theo độ dài của ô, và bạn chọn điểm bắt đầu."
           }
         }
       }
+    },
+    "Aa" : {
+
+    },
+    "AB" : {
+
+    },
+    "ABC" : {
+
     },
-    "Aa": {},
-    "AB": {},
-    "ABC": {},
-    "Account": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tài khoản"
+    "Account" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tài khoản"
           }
         }
       }
+    },
+    "Add photo" : {
+
+    },
+    "Adjust controls" : {
+
+    },
+    "Adjust lab" : {
+
+    },
+    "After CapCut's Mask: Horizontal, Mirror, Circle, Rectangle on a live photo with handles on the stage; the controls as CapCut's own flow, the editor's sheet, or a lighter sheet with sliders." : {
+
+    },
+    "After CapCut's Resize: a working crop frame (corners, move, aspect lock, Rotate, Flip) with the controls as a full-screen editor, the editor's sheet, or an iPhone Photos style." : {
+
+    },
+    "After iPhone's Voice Memos: name and running time, a red waveform scrolling in while it records, one big round button; stop turns it into a review with Delete, Play and Add." : {
+
+    },
+    "Allow access to your photos" : {
+
+    },
+    "Allow access to your photos in Settings" : {
+
     },
-    "Add Music": {},
-    "Adjust controls": {},
-    "Adjust lab": {},
-    "Allow access to your photos": {},
-    "Allow access to your photos in Settings": {},
-    "Appearance": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Giao diện"
+    "Allow it in Settings to record." : {
+
+    },
+    "Appearance" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giao diện"
           }
         }
       }
+    },
+    "Aspect ratio" : {
+
+    },
+    "Audio fade" : {
+
+    },
+    "Audio fade lab" : {
+
     },
-    "Bonus credits": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit thưởng"
+    "Audio waveform" : {
+
+    },
+    "Audio waveform lab" : {
+
+    },
+    "Bonus credits" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit thưởng"
           }
         }
       }
     },
-    "Bug": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lỗi"
+    "Bug" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lỗi"
           }
         }
       }
     },
-    "Can I change the template's text and music?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tôi có đổi được chữ và nhạc của mẫu không?"
+    "By continuing, you agree to Neonix's" : {
+
+    },
+    "Cache" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bộ nhớ đệm"
           }
         }
       }
     },
-    "Can't find your answer? Send us a message.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Không tìm thấy câu trả lời? Hãy nhắn cho chúng tôi."
+    "Cache and downloaded templates are made again when needed, so clearing them is safe. Your media is not removed here." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bộ nhớ đệm và mẫu đã tải sẽ được tạo lại khi cần nên dọn chúng là an toàn. Media của bạn không bị xóa ở đây."
           }
         }
       }
     },
-    "Can't load templates": {},
-    "Cancel": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hủy"
+    "Cache and downloaded templates are made again when needed. Templates you own stay yours. Your media is not removed." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bộ nhớ đệm và mẫu đã tải sẽ được tạo lại khi cần. Các mẫu bạn đã mua vẫn thuộc về bạn. Media của bạn không bị xóa."
           }
         }
       }
     },
-    "Choose the language of the app.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chọn ngôn ngữ của ứng dụng."
+    "Cache is made again when needed. Your media is not removed." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bộ nhớ đệm sẽ được tạo lại khi cần. Media của bạn không bị xóa."
           }
         }
       }
     },
-    "Contact us": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Liên hệ"
+    "Can I change the template's text and music?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tôi có đổi được chữ và nhạc của mẫu không?"
           }
         }
       }
     },
-    "Couldn't load your credits.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Không tải được credit của bạn."
+    "Can't find your answer? Send us a message." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không tìm thấy câu trả lời? Hãy nhắn cho chúng tôi."
           }
         }
       }
+    },
+    "Can't load templates" : {
+
     },
-    "Credit purchases go through the App Store, so refunds are handled by Apple at reportaproblem.apple.com. Credits that were refunded are taken back from your balance.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit được mua qua App Store, nên việc hoàn tiền do Apple xử lý tại reportaproblem.apple.com. Credit đã được hoàn tiền sẽ bị trừ khỏi số dư của bạn."
+    "Cancel" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hủy"
           }
         }
       }
     },
-    "Credits": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit"
+    "Canvas" : {
+
+    },
+    "Choose the language of the app." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chọn ngôn ngữ của ứng dụng."
           }
         }
       }
+    },
+    "Chroma key" : {
+
     },
-    "Credits purchased": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã mua credit"
+    "Chroma key lab" : {
+
+    },
+    "Clear" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dọn"
           }
         }
       }
     },
-    "Credits unlock templates, one time each.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit dùng để mở khóa mẫu, mỗi mẫu một lần."
+    "Clear Storage?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dọn dung lượng?"
           }
         }
       }
     },
-    "Credits unlock templates. A template is bought once, with its first export.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit dùng để mở khóa mẫu. Mỗi mẫu chỉ mua một lần, ở lần export đầu tiên."
+    "Contact us" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liên hệ"
           }
         }
       }
+    },
+    "Continue to your account" : {
+
     },
-    "Crop": {},
-    "Curves": {},
-    "Dark": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tối"
+    "Couldn't load your credits." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không tải được credit của bạn."
           }
         }
       }
     },
-    "Delete": {},
-    "Developer": {},
-    "Do I pay every time I export?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tôi có phải trả tiền mỗi lần export không?"
+    "Credit purchases go through the App Store, so refunds are handled by Apple at reportaproblem.apple.com. Credits that were refunded are taken back from your balance." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit được mua qua App Store, nên việc hoàn tiền do Apple xử lý tại reportaproblem.apple.com. Credit đã được hoàn tiền sẽ bị trừ khỏi số dư của bạn."
           }
         }
       }
     },
-    "Duration": {},
-    "Duration:": {},
-    "Edit": {},
-    "Edit graph": {},
-    "Edit profile": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sửa hồ sơ"
+    "Credits" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit"
           }
         }
       }
     },
-    "Edited %@": {},
-    "Editing": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chỉnh sửa"
+    "Credits purchased" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã mua credit"
           }
         }
       }
     },
-    "Email your feedback to %@.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hãy gửi phản hồi qua email tới %@."
+    "Credits unlock templates, one time each." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit dùng để mở khóa mẫu, mỗi mẫu một lần."
           }
         }
       }
     },
-    "Emoji art: Fluent Emoji by Microsoft, MIT licence": {},
-    "Experiments": {},
-    "Export": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Xuất video"
+    "Credits unlock templates. A template is bought once, with its first export." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit dùng để mở khóa mẫu. Mỗi mẫu chỉ mua một lần, ở lần export đầu tiên."
           }
         }
       }
     },
-    "Export refunded": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã hoàn lại lượt xuất"
+    "Crop" : {
+
+    },
+    "Crop lab" : {
+
+    },
+    "Curves" : {
+
+    },
+    "Dark" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tối"
           }
         }
       }
     },
-    "Fake data only. Nothing here touches projects or the server.": {},
-    "Filter lab": {},
-    "Filter picker": {},
-    "Get more credits": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nạp thêm credit"
+    "Do I pay every time I export?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tôi có phải trả tiền mỗi lần export không?"
           }
         }
       }
     },
-    "Goes to %@ by email.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Được gửi qua email tới %@."
+    "Downloaded templates" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mẫu đã tải"
           }
         }
       }
+    },
+    "Drag on preview to sample" : {
+
     },
-    "Help Center": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trung tâm trợ giúp"
+    "Drag the picker on the preview to sample" : {
+
+    },
+    "Drag to select color" : {
+
+    },
+    "Duration" : {
+
+    },
+    "Duration:" : {
+
+    },
+    "Edit" : {
+
+    },
+    "Edit graph" : {
+
+    },
+    "Edit profile" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sửa hồ sơ"
           }
         }
       }
     },
-    "History": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lịch sử"
+    "Edited %@" : {
+
+    },
+    "Editing" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chỉnh sửa"
           }
         }
       }
     },
-    "How do I get a refund for credits?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Làm sao để được hoàn tiền credit?"
+    "Email your feedback to %@." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hãy gửi phản hồi qua email tới %@."
           }
         }
       }
+    },
+    "Emoji art: Fluent Emoji by Microsoft, MIT licence" : {
+
     },
-    "How do I make a video from a template?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Làm video từ mẫu như thế nào?"
+    "Experiments" : {
+
+    },
+    "Experiments don't change projects or contact the server." : {
+
+    },
+    "Export" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xuất video"
           }
         }
       }
     },
-    "How do I trim or split a clip?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Làm sao để cắt hoặc chia một clip?"
+    "Export refunded" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã hoàn lại lượt xuất"
           }
         }
       }
+    },
+    "Extract" : {
+
+    },
+    "Feather" : {
+
     },
-    "How do I zoom the timeline?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Làm sao để phóng to hoặc thu nhỏ timeline?"
+    "Filter lab" : {
+
+    },
+    "Filter picker" : {
+
+    },
+    "Get more credits" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nạp thêm credit"
           }
         }
       }
     },
-    "Idea": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ý tưởng"
+    "Goes to %@ by email." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Được gửi qua email tới %@."
           }
         }
       }
     },
-    "Image": {},
-    "Include device info": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kèm thông tin thiết bị"
+    "Help" : {
+
+    },
+    "Help Center" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trung tâm trợ giúp"
           }
         }
       }
     },
-    "Intensity": {},
-    "Keyframe lab": {},
-    "Keyframes & graphs": {},
-    "Language": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ngôn ngữ"
+    "History" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lịch sử"
           }
         }
       }
+    },
+    "How a clip shows its fade in / out: the envelope curve, the waveform shrinking along it, or both with the faded part darkened; dark or light clip body and a volume badge." : {
+
     },
-    "Light": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sáng"
+    "How do I get a refund for credits?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Làm sao để được hoàn tiền credit?"
           }
         }
       }
     },
-    "Load more": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tải thêm"
+    "How do I make a video from a template?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Làm video từ mẫu như thế nào?"
           }
         }
       }
     },
-    "Mail isn't set up": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chưa cài đặt Mail"
+    "How do I trim or split a clip?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Làm sao để cắt hoặc chia một clip?"
           }
         }
       }
     },
-    "mankhb2k@neonix.video": {},
-    "Message": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nội dung"
+    "How do I zoom the timeline?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Làm sao để phóng to hoặc thu nhỏ timeline?"
           }
         }
       }
     },
-    "Microphone access needed in Settings": {},
-    "N": {},
-    "Neonix Account": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tài khoản Neonix"
+    "Idea" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ý tưởng"
           }
         }
       }
     },
-    "Neonix needs your photos and videos to fill the template.": {},
-    "New": {},
-    "Next": {},
-    "No activity yet.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chưa có hoạt động nào."
+    "Image" : {
+
+    },
+    "Include device info" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kèm thông tin thiết bị"
           }
         }
       }
+    },
+    "Intensity" : {
+
+    },
+    "Invert" : {
+
+    },
+    "Key color" : {
+
     },
-    "No results for \"%@\".": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Không có kết quả cho \"%@\"."
+    "Keyframe lab" : {
+
+    },
+    "Keyframes & graphs" : {
+
+    },
+    "Language" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ngôn ngữ"
           }
         }
       }
     },
-    "No. After the first export of a template it is yours: later exports of it are free.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Không. Sau lần export đầu tiên, mẫu đó là của bạn: các lần export sau đều miễn phí."
+    "Light" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sáng"
           }
         }
       }
     },
-    "Nothing but your message is sent.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chỉ gửi nội dung bạn viết."
+    "Load more" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tải thêm"
           }
         }
       }
     },
-    "Notifications": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Thông báo"
+    "Loading…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang tải…"
           }
         }
       }
     },
-    "OK": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "OK"
+    "Mail isn't set up" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chưa cài đặt Mail"
           }
         }
       }
+    },
+    "Mask" : {
+
+    },
+    "Mask lab" : {
+
     },
-    "Open a template on Home, tap use, then fill each slot with a photo or video. Change the texts and music if you like, then tap Export.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mở một mẫu ở trang Home, bấm dùng, rồi điền ảnh hoặc video vào từng ô. Bạn có thể đổi chữ và nhạc, sau đó bấm Export."
+    "Message" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nội dung"
           }
         }
       }
     },
-    "Open the Settings app, choose Neonix, and allow Photos or Microphone access.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mở ứng dụng Cài đặt, chọn Neonix, rồi cho phép truy cập Ảnh hoặc Micro."
+    "Microphone access is off" : {
+
+    },
+    "N" : {
+
+    },
+    "Neonix Account" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tài khoản Neonix"
           }
         }
       }
     },
-    "Original": {},
-    "Other": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Khác"
+    "Neonix needs your photos and videos to fill the template." : {
+
+    },
+    "Neonix uses %@ of your free disk space." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neonix dùng %@ dung lượng trống của bạn."
           }
         }
       }
+    },
+    "New" : {
+
     },
-    "Photo": {},
-    "Photos, or videos of at least %@ s": {},
-    "Pinch the timeline. The playhead stays in the centre while you zoom.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chụm hoặc mở hai ngón tay trên timeline. Con trỏ phát luôn ở giữa khi bạn thu phóng."
+    "Next" : {
+
+    },
+    "No activity yet." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chưa có hoạt động nào."
           }
         }
       }
     },
-    "Preferences": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tùy chọn"
+    "No credit packs available right now." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hiện chưa có gói credit nào."
           }
         }
       }
     },
-    "Privacy & Terms": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quyền riêng tư & Điều khoản"
+    "No results for \"%@\"." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không có kết quả cho \"%@\"."
           }
         }
       }
     },
-    "Privacy Policy": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chính sách quyền riêng tư"
+    "No. After the first export of a template it is yours: later exports of it are free." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không. Sau lần export đầu tiên, mẫu đó là của bạn: các lần export sau đều miễn phí."
           }
         }
       }
     },
-    "Purchase refunded": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã hoàn tiền giao dịch"
+    "Nothing but your message is sent." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chỉ gửi nội dung bạn viết."
           }
         }
       }
+    },
+    "Nothing on the timeline yet - a sound you use lands at the playhead." : {
+
     },
-    "Replace %@": {},
-    "Reset": {},
-    "Round buttons; tapping one opens a Curves-style sheet with the ruler and the buttons inside. Drag, pinch and twist the layer too.": {},
-    "Select an audio clip on the timeline to adjust volume": {},
-    "Send": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gửi"
+    "Nothing on the timeline yet." : {
+
+    },
+    "Notifications" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thông báo"
           }
         }
       }
     },
-    "Send feedback": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gửi phản hồi"
+    "OK" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
           }
         }
       }
+    },
+    "On a dark panel" : {
+
     },
-    "Shows a metrics pill in the editor. Start/stop a recorded run there and share the CSV. See PLAYBACK_PIPELINE.md.": {},
-    "Size": {},
-    "Some screens are not translated yet and stay in English.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Một số màn hình chưa được dịch và vẫn hiển thị tiếng Anh."
+    "One Google sign-in for credits and exports." : {
+
+    },
+    "Open a template on Home, tap use, then fill each slot with a photo or video. Change the texts and music if you like, then tap Export." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở một mẫu ở trang Home, bấm dùng, rồi điền ảnh hoặc video vào từng ô. Bạn có thể đổi chữ và nhạc, sau đó bấm Export."
           }
         }
       }
     },
-    "Some tools are not built yet and only show that message. They will arrive in later versions.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Một số công cụ chưa được làm và chỉ hiện thông báo đó. Chúng sẽ có trong các phiên bản sau."
+    "Open the Settings app, choose Neonix, and allow Photos or Microphone access." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở ứng dụng Cài đặt, chọn Neonix, rồi cho phép truy cập Ảnh hoặc Micro."
           }
         }
       }
+    },
+    "Original" : {
+
     },
-    "Storage": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bộ nhớ"
+    "Other" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khác"
           }
         }
       }
+    },
+    "Photo" : {
+
+    },
+    "Photos, or videos of at least %@ s" : {
+
     },
-    "Subscription": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gói đăng ký"
+    "Pick a background color on a sample or your own photo/video frame; adjust the key live and inspect transparency." : {
+
+    },
+    "Pick a shape below" : {
+
+    },
+    "Picker design" : {
+
+    },
+    "Pinch the timeline. The playhead stays in the centre while you zoom." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chụm hoặc mở hai ngón tay trên timeline. Con trỏ phát luôn ở giữa khi bạn thu phóng."
           }
         }
       }
     },
-    "Support": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hỗ trợ"
+    "Preferences" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tùy chọn"
           }
         }
       }
     },
-    "System": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hệ thống"
+    "Privacy & Terms" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quyền riêng tư & Điều khoản"
           }
         }
       }
     },
-    "System follows your device's light or dark setting.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hệ thống sẽ theo chế độ sáng hoặc tối của thiết bị."
+    "Privacy Policy" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chính sách quyền riêng tư"
           }
         }
       }
     },
-    "Tap a button: a sheet opens with the ruler and the buttons inside": {},
-    "Tap a clip on the timeline. The bottom row then shows that clip's tools, including Split. Drag a clip's handles to trim it.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bấm vào một clip trên timeline. Hàng dưới cùng sẽ hiện các công cụ của clip đó, trong đó có Split. Kéo hai đầu clip để cắt."
+    "Projects & media" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dự án & media"
           }
         }
       }
     },
-    "Tap a clip to replace or crop it": {},
-    "Template unlocked": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã mở khóa mẫu"
+    "Purchase refunded" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã hoàn tiền giao dịch"
           }
         }
       }
+    },
+    "Recorder lab" : {
+
     },
-    "Templates": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mẫu"
+    "Recorder popup" : {
+
+    },
+    "Removing background" : {
+
+    },
+    "Replace %@" : {
+
+    },
+    "Reset" : {
+
+    },
+    "Rotate" : {
+
+    },
+    "Round buttons; tapping one opens a Curves-style sheet with the ruler and the buttons inside. Drag, pinch and twist the layer too." : {
+
+    },
+    "Sample" : {
+
+    },
+    "Send" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gửi"
           }
         }
       }
     },
-    "Terms of Use": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Điều khoản sử dụng"
+    "Send feedback" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gửi phản hồi"
           }
         }
       }
+    },
+    "Sign in to manage credits and export" : {
+
     },
-    "Text": {},
-    "Text lab": {},
-    "Text picker": {},
-    "The app can't see my photos or microphone.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ứng dụng không thấy ảnh hoặc micro của tôi."
+    "Sign in to Neonix with Google" : {
+
+    },
+    "Sign in with Google" : {
+
+    },
+    "Size" : {
+
+    },
+    "Slide to select" : {
+
+    },
+    "Some screens are not translated yet and stay in English." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Một số màn hình chưa được dịch và vẫn hiển thị tiếng Anh."
           }
         }
       }
     },
-    "The stickers could not be loaded": {},
-    "This template has no text to edit": {},
-    "Three keyframes on a moving layer; pick each segment's graph from a row of curves, a grid sheet or a big live curve, or edit it with two handles.": {},
-    "Transform controls": {},
-    "Transform lab": {},
-    "TREND first10s -> last10s": {},
-    "Try again": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Thử lại"
+    "Some tools are not built yet and only show that message. They will arrive in later versions." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Một số công cụ chưa được làm và chỉ hiện thông báo đó. Chúng sẽ có trong các phiên bản sau."
           }
         }
       }
     },
-    "Two tabs, Font and Style, on a live photo; the text field heads the sheet (CapCut) or sits at the bottom like Filter's Intensity bar.": {},
-    "Type": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loại"
+    "Sound FX lab" : {
+
+    },
+    "Sound FX picker" : {
+
+    },
+    "Starter sounds made by Neonix" : {
+
+    },
+    "Storage" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bộ nhớ"
           }
         }
       }
     },
-    "Use template": {},
-    "Volume": {},
-    "What are credits for?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Credit dùng để làm gì?"
+    "Storage Usage" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dung lượng sử dụng"
           }
         }
       }
     },
-    "Why was my video clip refused for a slot?": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vì sao video của tôi bị từ chối ở một ô?"
+    "Subscription" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gói đăng ký"
           }
         }
       }
     },
-    "Yes. The result screen has a Text section with the template's texts and an Audio switch for the music.": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Có. Màn hình kết quả có mục Text chứa các chữ của mẫu và công tắc Audio cho nhạc."
+    "Support" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hỗ trợ"
           }
         }
       }
     },
-    "Your data": {
-      "extractionState": "stale",
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dữ liệu của bạn"
+    "System" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hệ thống"
           }
         }
       }
     },
-    "Loading…": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đang tải…"
+    "System follows your device's light or dark setting." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hệ thống sẽ theo chế độ sáng hoặc tối của thiết bị."
           }
         }
       }
+    },
+    "Tap a button: a sheet opens with the ruler and the buttons inside" : {
+
     },
-    "No credit packs available right now.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hiện chưa có gói credit nào."
+    "Tap a clip on the timeline. The bottom row then shows that clip's tools, including Split. Drag a clip's handles to trim it." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bấm vào một clip trên timeline. Hàng dưới cùng sẽ hiện các công cụ của clip đó, trong đó có Split. Kéo hai đầu clip để cắt."
           }
         }
       }
     },
-    "Unavailable": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Không khả dụng"
+    "Tap a clip to replace or crop it" : {
+
+    },
+    "Template unlocked" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đã mở khóa mẫu"
           }
         }
       }
     },
-    "The purchase didn't go through. If you were charged, your credits will arrive shortly.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Giao dịch chưa hoàn tất. Nếu bạn đã bị trừ tiền, credit sẽ sớm được cộng."
+    "Templates" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mẫu"
           }
         }
       }
     },
-    "Your purchase is waiting for approval.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Giao dịch của bạn đang chờ phê duyệt."
+    "Terms of Use" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Điều khoản sử dụng"
           }
         }
       }
+    },
+    "Text" : {
+
+    },
+    "Text lab" : {
+
+    },
+    "Text picker" : {
+
     },
-    "Projects & media": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dự án & media"
+    "The 20 starter sounds with pretend playback and download: rows with a play button, rows with a waveform that fills while it plays, or a grid with a Use bar; Use puts the sound at the playhead." : {
+
+    },
+    "The app can't see my photos or microphone." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ứng dụng không thấy ảnh hoặc micro của tôi."
           }
         }
       }
     },
-    "Downloaded templates": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mẫu đã tải"
+    "The purchase didn't go through. If you were charged, your credits will arrive shortly." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giao dịch chưa hoàn tất. Nếu bạn đã bị trừ tiền, credit sẽ sớm được cộng."
           }
         }
       }
+    },
+    "The Record label opens the popup. Start, stop, then Add puts the take at the playhead; Delete throws it away." : {
+
+    },
+    "The sound-library peak waveform (hairlines as tall as the loudest sample), top half only, against the smooth curve the timeline draws now and the mirrored original; shown big and on lane clips at any zoom." : {
+
+    },
+    "The sounds could not be loaded" : {
+
     },
-    "Cache": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bộ nhớ đệm"
+    "The stickers could not be loaded" : {
+
+    },
+    "This template has no text to edit" : {
+
+    },
+    "Three keyframes on a moving layer; pick each segment's graph from a row of curves, a grid sheet or a big live curve, or edit it with two handles." : {
+
+    },
+    "Transform controls" : {
+
+    },
+    "Transform lab" : {
+
+    },
+    "Transition" : {
+
+    },
+    "TREND first10s -> last10s" : {
+
+    },
+    "Try again" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thử lại"
           }
         }
       }
+    },
+    "Two tabs, Font and Style, on a live photo; the text field heads the sheet (CapCut) or sits at the bottom like Filter's Intensity bar." : {
+
     },
-    "Storage Usage": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dung lượng sử dụng"
+    "Type" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loại"
           }
         }
       }
     },
-    "Neonix uses %@ of your free disk space.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Neonix dùng %@ dung lượng trống của bạn."
+    "Unavailable" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không khả dụng"
           }
         }
       }
     },
-    "Clear Storage?": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dọn dung lượng?"
+    "Upload" : {
+
+    },
+    "Use" : {
+
+    },
+    "Use template" : {
+
+    },
+    "Video" : {
+
+    },
+    "Video ready" : {
+
+    },
+    "What are credits for?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit dùng để làm gì?"
           }
         }
       }
     },
-    "Clear": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dọn"
+    "Why was my video clip refused for a slot?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vì sao video của tôi bị từ chối ở một ô?"
           }
         }
       }
     },
-    "Cache and downloaded templates are made again when needed, so clearing them is safe. Your media is not removed here.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bộ nhớ đệm và mẫu đã tải sẽ được tạo lại khi cần nên dọn chúng là an toàn. Media của bạn không bị xóa ở đây."
+    "Yes. The result screen has a Text section with the template's texts and an Audio switch for the music." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Có. Màn hình kết quả có mục Text chứa các chữ của mẫu và công tắc Audio cho nhạc."
           }
         }
       }
     },
-    "Cache and downloaded templates are made again when needed. Templates you own stay yours. Your media is not removed.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bộ nhớ đệm và mẫu đã tải sẽ được tạo lại khi cần. Các mẫu bạn đã mua vẫn thuộc về bạn. Media của bạn không bị xóa."
+    "Your data" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dữ liệu của bạn"
           }
         }
       }
+    },
+    "Your ideas,\nin motion." : {
+
+    },
+    "Your ideas, in motion." : {
+
+    },
+    "Your Neonix account" : {
+
     },
-    "Cache is made again when needed. Your media is not removed.": {
-      "localizations": {
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bộ nhớ đệm sẽ được tạo lại khi cần. Media của bạn không bị xóa."
+    "Your purchase is waiting for approval." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Giao dịch của bạn đang chờ phê duyệt."
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }

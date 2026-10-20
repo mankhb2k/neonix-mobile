@@ -152,7 +152,10 @@ final class TemplateFlowTests: XCTestCase {
         let available: Bool
         let log: ExportLog
         var isAvailable: Bool { available }
-        func export(_ project: V2Project) async throws { log.exported += 1 }
+        func export(_ project: V2Project) async throws -> URL {
+            log.exported += 1
+            return FileManager.default.temporaryDirectory.appendingPathComponent("stub-export.mp4")
+        }
     }
     final class ExportLog { var charged = 0; var exported = 0 }
 

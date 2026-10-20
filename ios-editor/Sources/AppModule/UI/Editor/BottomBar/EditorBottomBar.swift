@@ -19,6 +19,27 @@ struct BottomBarBackButton: View {
     }
 }
 
+/// One button of a bottom-bar row: an icon over a caption. The Edit row (`SelectionToolbarView`) and the Text and Audio tools' rows all
+/// use it, so the icon size and spacing are the same everywhere (user 2026-10-16): `title3` icon, 48 pt minimum width, rows spaced
+/// by `BottomBarItem.spacing`.
+struct BottomBarItem: View {
+    let title: String
+    let symbol: String
+    var tint: Color = .primary
+
+    static let spacing: CGFloat = 22
+
+    var body: some View {
+        VStack(spacing: 4) {
+            // The icons differ in height; a fixed box keeps the captions on one line.
+            Image(systemName: symbol).font(.title3).frame(height: 24)
+            Text(title).font(.caption2).lineLimit(1)
+        }
+        .frame(minWidth: 48)
+        .foregroundColor(tint)
+    }
+}
+
 /// The one row shown while a clip, photo, text or audio clip is selected: what can be done with *that* thing, with
 /// a back button that deselects it on the left and Delete pinned on the right. The tools in between scroll sideways;
 /// which ones appear, and in what order, is `ClipTool.tools(for:)`. A tool that is not built yet shows a short
@@ -54,7 +75,7 @@ struct SelectionToolbarView: View {
             Divider().frame(height: 28)
                 .padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 22) {
+                HStack(spacing: BottomBarItem.spacing) {
                     ForEach(ClipTool.tools(for: kind)) { tool in button(tool) }
                 }
             }
@@ -69,12 +90,7 @@ struct SelectionToolbarView: View {
         let needsSound = kind == .video && (tool == .volume || tool == .unlink)
         let enabled = (tool != .split || canSplit) && (tool != .graph || canGraph) && (!needsSound || hasAudio)
         return Button { onTool(tool) } label: {
-            VStack(spacing: 4) {
-                Image(systemName: tool.symbol).font(.title3)
-                Text(tool.title).font(.caption2).lineLimit(1)
-            }
-            .frame(minWidth: 48)
-            .foregroundColor(!enabled ? .secondary : .primary)
+            BottomBarItem(title: tool.title, symbol: tool.symbol, tint: !enabled ? .secondary : .primary)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

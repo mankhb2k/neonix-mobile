@@ -60,7 +60,17 @@ struct EditorDocument: Codable {
     var composition: V2Composition
     var assets: [V2Asset]
     var layers: [EditorLayer]
+    /// Editor-only authoring intent. The compiler lowers each adjacent cut into V2 groups/tracks;
+    /// renderers extend only those wrappers across the cut, while clip timings remain contiguous.
+    var transitions: [EditorTransitionIntent]? = nil
     /// Background music etc. Audio has its own domain, not a layer (CLAUDE.md, "Timeline lanes"); present in
     /// template documents, nil for plain projects.
     var audio: V2AudioDomain?
+}
+
+struct EditorTransitionIntent: Codable, Equatable {
+    var outgoingId: String
+    var incomingId: String
+    var kind: TransitionKind
+    var durationMs: Double
 }

@@ -4,6 +4,11 @@ options:
     iOS: "17.0"
   developmentLanguage: en
 
+packages:
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 10.0.0
+
 targets:
   NeonixEditor:
     type: application
@@ -14,6 +19,11 @@ targets:
           - Resources
       - path: ios-editor/Sources/AppModule/Resources
         buildPhase: resources
+    dependencies:
+      - package: GoogleSignIn
+        products:
+          - GoogleSignIn
+          - GoogleSignInSwift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neonix.editor
@@ -29,9 +39,18 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Neonix needs your photos and videos to fill a template with your own media."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Cho phép truy cập micro để ghi âm giọng nói vào video"
         ENABLE_PREVIEWS: "YES"
+        GOOGLE_IOS_CLIENT_ID: "949351619628-i2krfh34ngj8lfdarm9qqubtmlhhihrv.apps.googleusercontent.com"
+        GOOGLE_WEB_CLIENT_ID: "949351619628-atvncosdpv65q5c0gdg67oaf0kggmfdi.apps.googleusercontent.com"
+        GOOGLE_IOS_URL_SCHEME: "com.googleusercontent.apps.949351619628-i2krfh34ngj8lfdarm9qqubtmlhhihrv"
     info:
       path: Generated-Info.plist
-      properties: {}
+      properties:
+        GIDClientID: "$(GOOGLE_IOS_CLIENT_ID)"
+        GIDServerClientID: "$(GOOGLE_WEB_CLIENT_ID)"
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLSchemes:
+              - "$(GOOGLE_IOS_URL_SCHEME)"
 
   NeonixEditorTests:
     type: bundle.unit-test

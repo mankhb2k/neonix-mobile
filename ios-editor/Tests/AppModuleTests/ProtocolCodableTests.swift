@@ -51,6 +51,32 @@ final class ProtocolCodableTests: XCTestCase {
         XCTAssertEqual(assetId2, "lut-vintage-film")
     }
 
+    func testFeChromaKeyPrimitiveRoundTripsThroughJSON() throws {
+        let json = """
+        { "id": "key", "type": "feChromaKey", "in": "SourceGraphic", "keyColor": "#0ABF47", "similarity": 0.3, "smoothness": 0.25, "shadow": 0.5, "edgeCleanup": 0.2 }
+        """
+        let primitive = try JSONDecoder().decode(V2FilterPrimitive.self, from: Data(json.utf8))
+        guard case .feChromaKey(let base, let color, let similarity, let smoothness, let shadow, let cleanup) = primitive else {
+            return XCTFail("expected .feChromaKey case")
+        }
+        XCTAssertEqual(base.id, "key")
+        XCTAssertEqual(color, "#0ABF47")
+        XCTAssertEqual(similarity, 0.3)
+        XCTAssertEqual(smoothness, 0.25)
+        XCTAssertEqual(shadow, 0.5)
+        XCTAssertEqual(cleanup, 0.2)
+
+        let roundTrip = try JSONDecoder().decode(V2FilterPrimitive.self, from: JSONEncoder().encode(primitive))
+        guard case .feChromaKey(_, let color2, let similarity2, let smoothness2, let shadow2, let cleanup2) = roundTrip else {
+            return XCTFail("expected .feChromaKey after round-trip")
+        }
+        XCTAssertEqual(color2, color)
+        XCTAssertEqual(similarity2, similarity)
+        XCTAssertEqual(smoothness2, smoothness)
+        XCTAssertEqual(shadow2, shadow)
+        XCTAssertEqual(cleanup2, cleanup)
+    }
+
     /// The 2-primitive intensity-blend chain an Editor-tier "Bộ lọc" preset
     /// would compile to — `feColorLUT` always applies at full strength;
     /// partial intensity is this `feComposite` blending its `result` back

@@ -19,6 +19,10 @@ enum EditorTool: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The tools the main row shows. **Effects is hidden for now** (user 2026-10-16: the feature comes later); the case, its icon and its
+    /// sound-effect panel stay, so showing it again is one line here.
+    static var navigationTools: [EditorTool] { allCases.filter { $0 != .effects } }
+
     var title: String {
         switch self {
         case .edit: return "Edit"

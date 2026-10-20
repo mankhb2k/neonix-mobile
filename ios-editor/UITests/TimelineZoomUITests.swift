@@ -136,6 +136,7 @@ final class TimelineTrimUITests: XCTestCase {
     func testHandlesFollowTheFingerWithoutScrubbing() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchEnvironment["EDITOR_NO_SNAP"] = "1"   // this test measures 1:1 travel; snapping (SnapEngine) would pull the edge to a nearby point
         app.launch()
         app.buttons["Folder"].tap()
         let row = app.staticTexts["Trip to Paris"]
@@ -168,8 +169,10 @@ final class TimelineTrimUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.8)
         let centerX = app.windows.firstMatch.frame.midX
         XCTAssertEqual(right.frame.minX, centerX, accuracy: 6, "after a right trim the playhead sits on the clip's end")
-        let endBefore = (Double(timeBefore) ?? 0) + (rightBefore - 14 - centerX) / pxPerMs
-        XCTAssertEqual(Double(timeline.label) ?? .nan, endBefore - 20 / pxPerMs, accuracy: 120, "and it is 20 pt of time earlier than the old end")
+        // The handle lies outside the clip (its inner edge is the clip's end), so the end was 7 pt left of the handle's middle; the playhead
+        // lands one frame (1/30 s) before the end.
+        let endBefore = (Double(timeBefore) ?? 0) + (rightBefore - 7 - centerX) / pxPerMs
+        XCTAssertEqual(Double(timeline.label) ?? .nan, endBefore - 20 / pxPerMs - 1000 / 30, accuracy: 120, "and it is 20 pt of time earlier than the old end")
 
         let left = app.descendants(matching: .any)["trim-handle-leading"].firstMatch
         XCTAssertTrue(left.exists)
@@ -180,7 +183,7 @@ final class TimelineTrimUITests: XCTestCase {
         // ... and after a left trim it sits on the clip's head, 20 pt of time later than the old start.
         Thread.sleep(forTimeInterval: 0.8)
         XCTAssertEqual(left.frame.maxX, centerX, accuracy: 6, "after a left trim the playhead sits on the clip's start")
-        let startBefore = timeBeforeLeft + (leftBefore + 14 - centerX) / pxPerMs
+        let startBefore = timeBeforeLeft + (leftBefore + 7 - centerX) / pxPerMs
         XCTAssertEqual(Double(timeline.label) ?? .nan, startBefore + 20 / pxPerMs, accuracy: 120)
     }
 }

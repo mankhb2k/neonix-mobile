@@ -45,7 +45,8 @@ final class TrimAutoScrollUITests: XCTestCase {
         XCTAssertGreaterThan(slow.held - slow.before, 1000, "holding in the slow zone must move the playhead along")
         // The reading is taken after the finger lifted, i.e. after the 0.2 s glide: the dragged edge sits on the playhead
         // and nothing keeps moving afterwards.
-        XCTAssertEqual(slow.handleX, slow.width / 2 + 14, accuracy: 8, "the handle ends up on the playhead")
+        // The handle lies outside the clip (its inner edge is the clip's end), so its middle is 7 pt past the end - which is on the playhead.
+        XCTAssertEqual(slow.handleX, slow.width / 2 + 7, accuracy: 4, "the handle ends up on the playhead")
         XCTAssertEqual(slow.rested, slow.held, accuracy: 50, "and the timeline is at rest")
     }
 

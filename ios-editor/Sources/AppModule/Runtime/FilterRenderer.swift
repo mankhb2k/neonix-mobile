@@ -74,7 +74,7 @@ enum FilterRenderer {
     /// (`identity`/`linear`/`table` via `CIToneCurve`), `feGaussianBlur`,
     /// `feComposite` (`arithmetic` only), `feConvolveMatrix` (3×3 only),
     /// `feTurbulence` (approximated — see that case's own comment),
-    /// `feMerge`, `feVignette`, `feVibrance`, `feHighlightShadow`, `feTemperatureTint`, and `feUnsharpMask`. Every other primitive type passes
+    /// `feMerge`, `feVignette`, `feVibrance`, `feHighlightShadow`, `feTemperatureTint`, `feUnsharpMask`, and `feChromaKey`. Every other primitive type passes
     /// `input` through unchanged rather than crashing/blanking the layer —
     /// this app's established "no ported validator, fail closed"
     /// convention.
@@ -105,6 +105,9 @@ enum FilterRenderer {
             return temperatureTint(input: input, temperature: temperature, tint: tint)
         case .feUnsharpMask(_, let radius, let intensity):
             return unsharpMask(input: input, radius: radius, intensity: intensity, extent: extent)
+        case .feChromaKey(_, let keyColor, let similarity, let smoothness, let shadow, let edgeCleanup):
+            return ChromaKeyRenderer.apply(to: input, keyColor: keyColor, similarity: similarity,
+                                           smoothness: smoothness, shadow: shadow, edgeCleanup: edgeCleanup)
         default:
             return input
         }

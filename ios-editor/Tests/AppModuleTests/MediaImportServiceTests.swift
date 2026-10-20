@@ -50,6 +50,23 @@ final class MediaImportServiceTests: XCTestCase {
         }
     }
 
+    func testExtractFromAnAssetUsesTheGivenKeyAndAFileWithNoAudioIsRefused() async throws {
+        let key = "lib-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(at: MediaImportService.importedMediaDirectory.appendingPathComponent("extracted-\(key).m4a")) }
+        let asset = try await MediaImportService.extractAudio(from: AVURLAsset(url: sourceURL), cacheKey: key)
+        XCTAssertEqual(asset.id, "extracted-\(key)")
+        XCTAssertEqual(asset.uri, "extracted-\(key).m4a")
+
+        // A source with no tracks at all (a silent video): nothing is exported.
+        do {
+            _ = try await MediaImportService.extractAudio(from: AVMutableComposition(), cacheKey: "silent-\(key)")
+            XCTFail("a source without sound must be refused")
+        } catch MediaImportService.ImportError.noAudio {
+            // expected
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: MediaImportService.importedMediaDirectory.appendingPathComponent("extracted-silent-\(key).m4a").path))
+    }
+
     func testExtractAudioReusesTheCachedFileOnASecondCall() async throws {
         let first = try await MediaImportService.extractAudio(from: sourceURL)
         let second = try await MediaImportService.extractAudio(from: sourceURL)

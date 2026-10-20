@@ -149,6 +149,25 @@ struct V2ImagePreserveAspectRatio: Codable {
     var meetOrSlice: String?
 }
 
+/// The part of a picture or video clip that shows (Crop tool, 2026-10-18; Swift-only like the other Editor-driven additions - the TS package has no crop yet).
+/// `x/y/width/height` are the visible region as fractions (0...1) of the picture; `rotation` straightens the picture (degrees, -20...20) and `flipped`
+/// mirrors it, both applied before the region is taken. The region is shown as large as it fits the layer's frame (`CropLayout`).
+struct V2Crop: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+    var rotation: Double?
+    var flipped: Bool?
+
+    static let full = V2Crop(x: 0, y: 0, width: 1, height: 1, rotation: nil, flipped: nil)
+
+    /// Nothing is cropped, turned or mirrored: the clip is stored without a crop.
+    var isIdentity: Bool {
+        abs(x) < 0.0005 && abs(y) < 0.0005 && abs(width - 1) < 0.0005 && abs(height - 1) < 0.0005 && (rotation ?? 0) == 0 && !(flipped ?? false)
+    }
+}
+
 struct V2ImagePayload: Codable {
     var assetId: String
     var fit: String?
@@ -158,6 +177,7 @@ struct V2ImagePayload: Codable {
     var height: Double?
     var preserveAspectRatio: V2ImagePreserveAspectRatio?
     var imageRendering: String?
+    var crop: V2Crop?
 }
 
 /// One point of a speed curve: at `sourceMs` into the clip's stretch of source footage (0 = its first frame, the last point = its end) the
@@ -185,6 +205,7 @@ struct V2VideoPayload: Codable {
     var speedCurve: [V2SpeedPoint]?
     var audio: V2EmbeddedVideoAudio?
     var framePolicy: String?
+    var crop: V2Crop?
 }
 
 /// The per-type part of a layer: `type` discriminates which payload (and,
@@ -267,6 +288,15 @@ struct V2Layer: Codable {
         switch payload {
         case .image(let p): return p.fit
         case .video(let p): return p.fit
+        default: return nil
+        }
+    }
+
+    /// The Crop tool's region of a picture or video clip, if it has one.
+    var crop: V2Crop? {
+        switch payload {
+        case .image(let p): return p.crop
+        case .video(let p): return p.crop
         default: return nil
         }
     }

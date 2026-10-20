@@ -58,6 +58,8 @@ struct SetBackgroundColorCommand: EditorCommand {
 struct SplitClipCommand: EditorCommand {
     let layerId: String
     let atMs: Double
+    /// Supplying the second half's id lets the editor select it after the split; nil keeps command-only callers self-contained.
+    var secondLayerId: String? = nil
 
     func apply(to project: V2Project) -> V2Project {
         var layers = project.layers
@@ -80,7 +82,7 @@ struct SplitClipCommand: EditorCommand {
             if case .video(var b) = second.payload { b.speedCurve = halves.second.points; second.payload = .video(b) }
         }
         first.timing = V2Timing(start: original.timing.start, duration: firstDuration)
-        second.id = "\(original.id)-split-\(UUID().uuidString.prefix(8))"
+        second.id = secondLayerId ?? "\(original.id)-split-\(UUID().uuidString.prefix(8))"
         second.timing = V2Timing(start: original.timing.start + firstDuration, duration: secondDuration)
         // A video clip's second half must keep playing from where the
         // first half left off in the *source* file, not restart from the
@@ -218,8 +220,9 @@ func packLane(order: Int, in project: V2Project) -> V2Project {
     var starts: [String: Double] = [:]
     var cursor = 0.0
     for (_, clip) in clips {
-        starts[clip.id] = cursor
-        cursor += clip.timing.duration
+        let start = cursor
+        starts[clip.id] = start
+        cursor = start + clip.timing.duration
     }
     guard project.layers.contains(where: { layer in starts[layer.id].map { $0 != layer.timing.start } ?? false }) else { return project }
     let layers = project.layers.map { layer -> V2Layer in
@@ -228,7 +231,7 @@ func packLane(order: Int, in project: V2Project) -> V2Project {
         moved.timing = V2Timing(start: start, duration: layer.timing.duration)
         return moved
     }
-    return project.withLayers(layers)
+    return TransitionWrappers.normalized(project.withLayers(layers))
 }
 
 extension V2Project {
@@ -339,16 +342,15 @@ struct AddAudioClipCommand: EditorCommand {
 }
 
 /// Âm thanh — Xoá: removes one `V2AudioClip` by id from whichever track
-/// holds it. Leaves an empty track in place rather than pruning it — no
-/// user-visible difference, and simpler than re-deriving which tracks are
-/// "real" vs. incidentally empty.
+/// holds it, and the track too when that was its last clip (no empty lanes).
 struct DeleteAudioClipCommand: EditorCommand {
     let clipId: String
 
     func apply(to project: V2Project) -> V2Project {
+        // A track left with no clip is dropped: an empty lane is not shown (user 2026-10-17).
         let tracks = project.audio.tracks.map { track in
             V2AudioTrack(id: track.id, gainDb: track.gainDb, pan: track.pan, muted: track.muted, clips: track.clips.filter { $0.id != clipId })
-        }
+        }.filter { !$0.clips.isEmpty }
         return project.withAudio(V2AudioDomain(sampleRate: project.audio.sampleRate, tracks: tracks))
     }
 }
@@ -433,6 +435,8 @@ struct AddTextLayerCommand: EditorCommand {
 /// Layer ids of stickers start with this (`isPushLane` treats them as free overlays); their asset ids start with `stickerAssetIdPrefix`.
 let stickerLayerIdPrefix = "sticker-"
 let stickerAssetIdPrefix = "sticker-"
+/// Asset ids of the Sound FX library's sounds (`library-<api id>`); distinct from the old bundled `sfx-*` placeholders.
+let soundAssetIdPrefix = "library-"
 
 /// Stickers - drops a sticker picture on the canvas at the playhead: one image layer, centred, sized from the canvas,
 /// 3 s long (`defaultDurationMs`), in its own lane. **Lane placement** reuses a lane of *stickers* that does not overlap
@@ -634,6 +638,12 @@ struct SetAdjustCommand: EditorCommand {
         var layers = project.layers
         guard let index = layers.firstIndex(where: { $0.id == layerId }) else { return project }
 
+        let chromaKey = layers[index].filter.flatMap { filterId in
+            project.filters?.first(where: { $0.id == filterId })?.primitives.first(where: {
+                if case .feChromaKey = $0 { return true }
+                return false
+            })
+        }
         let id = Self.filterId(for: layerId)
         var filters = (project.filters ?? []).filter { $0.id != id }
 
@@ -643,10 +653,17 @@ struct SetAdjustCommand: EditorCommand {
         }
         presets += adjustPresets(for: values)
 
-        if presets.isEmpty {
+        if presets.isEmpty, chromaKey == nil {
             layers[index].filter = nil
         } else {
-            filters.append(compileFilter(id: id, presets: presets))
+            var compiled = compileFilter(id: id, presets: presets)
+            if case .feChromaKey(let existingBase, let keyColor, let similarity, let smoothness, let shadow, let edgeCleanup)? = chromaKey {
+                var base = existingBase
+                base.in = compiled.primitives.last?.base.result ?? "SourceGraphic"
+                compiled.primitives.append(.feChromaKey(base, keyColor: keyColor, similarity: similarity,
+                                                        smoothness: smoothness, shadow: shadow, edgeCleanup: edgeCleanup))
+            }
+            filters.append(compiled)
             layers[index].filter = id
         }
         return project.withLayers(layers).withFilters(filters.isEmpty ? nil : filters)

@@ -66,6 +66,145 @@ final class DesignLabUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["rulerReadout"].waitForExistence(timeout: 2), "Done closes the sheet")
     }
 
+    /// Runs both customer video fixtures through the device-backed chroma lab, saving the actual iPhone frames.
+    func testChromaKeyOnTwoStagedRealVideos() throws {
+        func attachCurrentShot(_ app: XCUIApplication, name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments += ["-appLanguage", "english"]
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.descendants(matching: .any)["lab-chroma-key"]
+        for _ in 0..<8 where !experiment.isHittable { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["chromaClose"].waitForExistence(timeout: 10))
+
+        for name in ["demo-nguoi1.MOV", "demo-nguoi2.MOV"] {
+            let staged = app.buttons["chromaStaged-\(name)"]
+            XCTAssertTrue(staged.waitForExistence(timeout: 10), "staged video \(name) should be available")
+            staged.tap()
+            XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 15))
+            let stage = app.descendants(matching: .any).matching(identifier: "chromaStage").firstMatch
+            XCTAssertTrue(stage.waitForExistence(timeout: 10))
+            app.buttons["Current V2"].tap()
+
+            app.buttons["chromaPicker"].tap()
+            // The second source is landscape letterboxed in the portrait stage; pick from the picture, not its matte bars.
+            let point = name == "demo-nguoi1.MOV"
+                ? CGVector(dx: 0.08, dy: 0.12)
+                : CGVector(dx: 0.90, dy: 0.42)
+            stage.coordinate(withNormalizedOffset: point).tap()
+            sleep(1)
+            let matrixTime = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'ms/frame'")).firstMatch.label
+            print("CHROMA \(name) Current V2: \(matrixTime)")
+            attachCurrentShot(app, name: "chroma-\(name)-matrix")
+
+            app.buttons["Color cube"].tap()
+            sleep(1)
+            let cubeTime = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'ms/frame'")).firstMatch.label
+            print("CHROMA \(name) Color cube: \(cubeTime)")
+            attachCurrentShot(app, name: "chroma-\(name)-cube")
+        }
+    }
+
+    /// Compares the current matrix, a graph composed from supported V2 primitives, and Color Cube at multiple
+    /// exact points in the raw green-screen clip. The readout assertion guards against silently sampling the wrong time.
+    func testChromaKeyAcrossGreenScreenFootage() throws {
+        func attachCurrentShot(_ app: XCUIApplication, name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments += ["-appLanguage", "english"]
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.descendants(matching: .any)["lab-chroma-key"]
+        for _ in 0..<8 where !experiment.isHittable { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["chromaClose"].waitForExistence(timeout: 10))
+
+        let name = "GreenScreen Raw footage.mp4"
+        let staged = app.buttons["chromaStaged-\(name)"]
+        XCTAssertTrue(staged.waitForExistence(timeout: 10), "the new green-screen footage should be staged on device")
+        staged.tap()
+        XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 15))
+
+        let stage = app.descendants(matching: .any).matching(identifier: "chromaStage").firstMatch
+        XCTAssertTrue(stage.waitForExistence(timeout: 10))
+
+        // Pick one clean green patch once and keep it fixed for every sampled time and method.
+        app.sliders["chromaIntensity"].adjust(toNormalizedSliderPosition: 0.8)
+        app.buttons["chromaPicker"].tap()
+        stage.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.40)).tap()
+        sleep(1)
+
+        let sampleTimes: [Double] = [3, 10, 20, 30, 40]
+        let timeSlider = app.sliders["chromaVideoTime"]
+        XCTAssertTrue(timeSlider.waitForExistence(timeout: 5), "the clip time slider should be available")
+        let timeReadout = app.staticTexts["chromaTimeReadout"]
+        let renderReadout = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'ms/frame'")).firstMatch
+        let variants: [(method: String, name: String, shadow: CGFloat?)] = [
+            ("Current V2", "current-v2", nil),
+            ("V2 graph", "v2-graph", nil),
+            ("Color cube", "color-cube", 0),
+            ("Color cube", "color-cube-shadow", 0.5),
+        ]
+
+        for seconds in sampleTimes {
+            // Use the lab's exact seek points; XCTest slider gestures can land several seconds away on device.
+            let previousFrame = stage.value as? String ?? ""
+            app.buttons["chromaSeek-\(Int(seconds))"].tap()
+            let expectedTime = String(format: "%.1f s", seconds)
+            let timeAtTarget = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label == %@", expectedTime),
+                object: timeReadout
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [timeAtTarget], timeout: 5), .completed,
+                           "the video time readout should confirm the requested \(expectedTime) sample")
+
+            let decodedFrame = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value != %@", previousFrame),
+                object: stage
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [decodedFrame], timeout: 10), .completed,
+                           "a new source frame should decode at \(expectedTime)")
+
+            for variant in variants {
+                app.buttons[variant.method].tap()
+                if let shadow = variant.shadow {
+                    app.sliders["chromaShadow"].adjust(toNormalizedSliderPosition: shadow)
+                    if shadow == 0 {
+                        let shadowPercent = Int(app.staticTexts["chromaShadowValue"].label) ?? 100
+                        XCTAssertLessThanOrEqual(shadowPercent, 2,
+                                                 "the base Color Cube comparison keeps shadow matching at the slider minimum")
+                    }
+                }
+                sleep(1)
+                XCTAssertTrue(renderReadout.exists, "\(variant.name) should render at \(expectedTime)")
+                print("CHROMA GreenScreen Raw footage.mp4 @\(expectedTime) \(variant.name): \(renderReadout.label)")
+                attachCurrentShot(app, name: "chroma-green-screen-\(Int(seconds))s-\(variant.name)")
+            }
+        }
+    }
+
     func testPinchOnTheStageMovesTheLayerWhileTheSheetIsOpen() throws {
         let app = openLab()
         app.buttons["chip-scale"].tap()
@@ -347,5 +486,305 @@ final class DesignLabUITests: XCTestCase {
             app.buttons["textDone"].tap()
             sleep(1)
         }
+    }
+
+    /// The Audio waveform lab opens from the list and switches between its three drawings.
+    func testAudioWaveformLabShowsItsThreeDrawings() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Audio waveform"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["audioWaveClose"].waitForExistence(timeout: 10), "the lab opens full screen")
+        XCTAssertTrue(app.descendants(matching: .any)["audioWaveBig"].waitForExistence(timeout: 5))
+        for (index, name) in ["A Smooth", "B Peaks · top", "C Peaks · both"].enumerated() {
+            app.buttons[name].tap()
+            usleep(400_000)
+            let a = XCTAttachment(screenshot: app.screenshot()); a.name = "audiowave-\(index)"; a.lifetime = .keepAlways; add(a)
+            saveShot(app, "audiowave-\(index)")
+        }
+        app.buttons["audioWaveClose"].tap()
+        XCTAssertTrue(app.staticTexts["Audio waveform"].waitForExistence(timeout: 5), "closing returns to the list")
+    }
+
+    /// The Audio fade lab opens from the list and switches between its three drawings.
+    func testAudioFadeLabShowsItsThreeDrawings() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Audio fade"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["audioFadeClose"].waitForExistence(timeout: 10), "the lab opens full screen")
+        XCTAssertTrue(app.descendants(matching: .any)["audioFadeClip48"].waitForExistence(timeout: 5))
+        for (index, name) in ["A Wave as is", "B Scaled wave", "C Scaled + shade"].enumerated() {
+            app.buttons[name].tap()
+            usleep(400_000)
+            let a = XCTAttachment(screenshot: app.screenshot()); a.name = "audiofade-\(index)"; a.lifetime = .keepAlways; add(a)
+        }
+        for (index, name) in ["Dark body", "Light body", "Two-tone 10/45"].enumerated() {
+            app.buttons[name].tap()
+            usleep(400_000)
+            let a = XCTAttachment(screenshot: app.screenshot()); a.name = "audiofade-body-\(index)"; a.lifetime = .keepAlways; add(a)
+        }
+        app.buttons["audioFadeClose"].tap()
+        XCTAssertTrue(app.staticTexts["Audio fade"].waitForExistence(timeout: 5), "closing returns to the list")
+    }
+
+    /// The Sound FX lab: each layout lists the sounds, a tap plays one, Use downloads (once) and lands a clip at the playhead.
+    func testSoundLabListsPlaysAndUsesSoundsInAllThreeLayouts() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Sound FX picker"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["soundClose"].waitForExistence(timeout: 10), "the lab opens full screen")
+        func shot(_ name: String) { let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a) }
+
+        // A: rows. Play, then Use a sound that is not downloaded yet (a pretend download, then the clip appears).
+        app.buttons["soundOpen"].tap()
+        XCTAssertTrue(app.buttons["soundPlay-sfx-pop"].waitForExistence(timeout: 5))
+        app.buttons["soundPlay-sfx-riser"].tap()
+        usleep(700_000)
+        shot("sound-A-playing")
+        app.buttons["soundUse-sfx-whoosh-fast"].tap()
+        XCTAssertTrue(app.staticTexts["Added Whoosh Fast"].waitForExistence(timeout: 5), "Use downloads, then adds the clip")
+        shot("sound-A-added")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "soundAdded").count >= 1)
+        app.buttons["soundChip-ui"].tap()
+        XCTAssertFalse(app.buttons["soundPlay-sfx-boom"].waitForExistence(timeout: 1), "the UI chip hides the impacts")
+        app.buttons["soundDone"].tap()
+
+        // B: waveform rows.
+        app.buttons["B Waveform"].tap()
+        app.buttons["soundOpen"].tap()
+        XCTAssertTrue(app.buttons["soundPlay-sfx-pop"].waitForExistence(timeout: 5))
+        app.buttons["soundPlay-sfx-success"].tap()
+        usleep(500_000)
+        shot("sound-B-playing")
+        app.buttons["soundDone"].tap()
+
+        // C: grid with a Use bar for the picked tile.
+        app.buttons["C Grid"].tap()
+        app.buttons["soundOpen"].tap()
+        XCTAssertTrue(app.buttons["soundTile-sfx-pop"].waitForExistence(timeout: 5))
+        app.buttons["soundChip-game"].tap()
+        XCTAssertTrue(app.buttons["soundTile-sfx-coin"].waitForExistence(timeout: 3))
+        app.buttons["soundTile-sfx-coin"].tap()
+        XCTAssertTrue(app.buttons["soundUse-sfx-coin"].waitForExistence(timeout: 3), "picking a tile shows its Use bar")
+        usleep(300_000)
+        shot("sound-C-picked")
+        app.buttons["soundUse-sfx-coin"].tap()
+        XCTAssertTrue(app.staticTexts["Added Coin"].waitForExistence(timeout: 5))
+    }
+
+    /// The Recorder lab: record (simulated), stop into the review, play, Add lands a take at the playhead; the no-mic state.
+    func testRecorderLabRecordsReviewsAndAddsATake() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Recorder popup"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["recorderClose"].waitForExistence(timeout: 10))
+        func shot(_ name: String) { let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a) }
+
+        app.buttons["recorderOpen"].tap()
+        XCTAssertTrue(app.buttons["recorderButton"].waitForExistence(timeout: 5))
+        shot("recorder-ready")
+        app.buttons["recorderButton"].tap()
+        sleep(3)
+        shot("recorder-recording")
+        XCTAssertNotEqual(app.staticTexts["recorderTime"].label, "00:00.00", "the time runs while recording")
+        app.buttons["recorderButton"].tap()   // stop
+        XCTAssertTrue(app.buttons["recorderAdd"].waitForExistence(timeout: 5), "stopping turns the popup into the review")
+        app.buttons["recorderPlay"].tap()
+        usleep(900_000)
+        shot("recorder-review-playing")
+        app.buttons["recorderPlay"].tap()
+        app.buttons["recorderAdd"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["recorderTake"].waitForExistence(timeout: 5), "Add puts the take on the timeline")
+
+        // No mic access.
+        app.buttons["recorderMenu"].tap()
+        app.buttons["Simulate no mic access"].tap()
+        app.buttons["recorderOpen"].tap()
+        XCTAssertTrue(app.buttons["recorderSettings"].waitForExistence(timeout: 5))
+        shot("recorder-no-mic")
+    }
+
+    /// The Crop lab: in each of the three layouts the frame can be resized by a corner, an aspect locks it, Rotate and Reset work.
+    func testCropLabFrameAspectRotateAndResetInAllThreeLayouts() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Crop"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["cropClose"].waitForExistence(timeout: 10))
+        func shot(_ name: String) { let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a) }
+        func frame() -> [Double] {
+            ((app.descendants(matching: .any)["cropStage"].firstMatch.value as? String) ?? "").split(separator: ",").compactMap { Double($0) }
+        }
+        let stage = app.descendants(matching: .any)["cropStage"].firstMatch
+        XCTAssertTrue(stage.waitForExistence(timeout: 10))
+        usleep(800_000)   // the photo is loaded
+        let full = frame()
+        XCTAssertEqual(full.count, 4)
+
+        // A: drag the top-left corner in, the frame gets smaller; an aspect makes it that shape; Reset puts it back.
+        let origin = stage.coordinate(withNormalizedOffset: .zero)
+        let corner = origin.withOffset(CGVector(dx: full[0] + 4, dy: full[1] + 4))
+        corner.press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: full[0] + 90, dy: full[1] + 120)))
+        usleep(300_000)
+        let smaller = frame()
+        XCTAssertLessThan(smaller[2], full[2] - 40, "dragging a corner made the frame narrower")
+        shot("crop-A-resized")
+        app.buttons["cropAspect-1:1"].tap()
+        usleep(500_000)
+        let square = frame()
+        XCTAssertEqual(square[2], square[3], accuracy: 2, "1:1 makes the frame square")
+        app.descendants(matching: .any)["ruler"].swipeLeft(velocity: .slow)
+        XCTAssertNotEqual(app.staticTexts["rulerReadout"].label, "0°", "the Rotate ruler turns the picture")
+        shot("crop-A-aspect-rotate")
+        app.buttons["cropReset"].tap()
+        usleep(500_000)
+        XCTAssertEqual(frame()[2], full[2], accuracy: 2, "Reset puts the frame back")
+
+        // B: the sheet.
+        app.buttons["B Sheet"].tap()
+        app.buttons["cropOpen"].tap()
+        XCTAssertTrue(app.buttons["sheetAspect-16:9"].waitForExistence(timeout: 5))
+        app.buttons["sheetAspect-16:9"].tap()
+        usleep(500_000)
+        let wide = frame()
+        XCTAssertGreaterThan(wide[2], wide[3], "16:9 is wider than tall")
+        shot("crop-B-aspect")
+        app.buttons["cropParam-rotate"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ruler"].waitForExistence(timeout: 5))
+        shot("crop-B-rotate")
+        app.buttons["cropFlip"].tap()
+        app.buttons["cropSheetDone"].tap()
+
+        // C: Photos style.
+        app.buttons["C Photos"].tap()
+        XCTAssertTrue(app.buttons["cropAspectMenu"].waitForExistence(timeout: 5))
+        app.buttons["cropReset"].tap()
+        shot("crop-C")
+    }
+
+    /// The Mask lab: four shapes on the stage in each of the three layouts, Invert, a ruler, the sheet's sections and the sliders.
+    func testMaskLabShapesRulersAndAllThreeLayouts() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["Account"].tap()
+        let link = app.staticTexts["Design Lab"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 10))
+        link.tap()
+        let experiment = app.staticTexts["Mask"]
+        for _ in 0..<3 where !experiment.exists { app.swipeUp() }
+        XCTAssertTrue(experiment.waitForExistence(timeout: 10))
+        experiment.tap()
+        XCTAssertTrue(app.buttons["maskClose"].waitForExistence(timeout: 10))
+        func shot(_ name: String) { let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a) }
+        func stage() -> [Double] { ((app.descendants(matching: .any)["maskStage"].firstMatch.value as? String) ?? "").split(separator: ",").compactMap { Double($0) } }
+        usleep(1_000_000)
+
+        // A: the sheet with the round shape icons below; every shape, the corner handle, a ruler, a slider and Invert.
+        app.buttons["maskOpen"].tap()
+        XCTAssertTrue(app.buttons["iconShape-circle"].waitForExistence(timeout: 5))
+        for shape in ["horizontal", "mirror", "circle", "rectangle"] {
+            app.buttons["iconShape-\(shape)"].tap()
+            usleep(500_000)
+            shot("mask-A-\(shape)")
+        }
+        XCTAssertEqual(stage().count, 5)
+
+        // The corner handle (top-left, outside the rectangle): pulled in along the diagonal it rounds the corners, and it follows the finger.
+        let frame = app.descendants(matching: .any)["maskStage"].firstMatch.frame
+        let box = frame.insetBy(dx: 14, dy: 14)
+        let aspect = 853.0 / 1280.0
+        let displayWidth = min(Double(box.width), Double(box.height) * aspect), displayHeight = displayWidth / aspect
+        let originX = Double(box.midX) - displayWidth / 2, originY = Double(box.midY) - displayHeight / 2
+        let state = stage()
+        let short = min(displayWidth, displayHeight)
+        let handleX = originX + state[0] * displayWidth - (state[2] * short / 2 + 20)
+        let handleY = originY + state[1] * displayHeight - (state[3] * short / 2 + 20)
+        XCTAssertEqual(state[4], 0, accuracy: 0.001, "square corners to begin with")
+        let window = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        window.withOffset(CGVector(dx: handleX, dy: handleY)).press(forDuration: 0.05, thenDragTo: window.withOffset(CGVector(dx: handleX + 70, dy: handleY + 70)))
+        usleep(400_000)
+        XCTAssertGreaterThan(stage()[4], 0.3, "pulling the corner handle in rounds the corners")
+        shot("mask-A-rounded")
+
+        // Position is two-way: the ruler moves the mask. Feather is one-way: a slider.
+        app.buttons["iconChip-position"].tap()
+        let before = stage()
+        app.descendants(matching: .any).matching(identifier: "ruler").element(boundBy: 0).swipeLeft(velocity: .slow)
+        usleep(400_000)
+        XCTAssertNotEqual(stage()[0], before[0], "the X ruler moves the mask")
+        app.buttons["iconChip-feather"].tap()
+        XCTAssertTrue(app.sliders["iconSlider-feather"].waitForExistence(timeout: 3))
+        app.sliders["iconSlider-feather"].adjust(toNormalizedSliderPosition: 0.3)
+        shot("mask-A-feather")
+        app.buttons["iconInvert"].tap()
+        usleep(400_000)
+        shot("mask-A-inverted")
+        app.buttons["iconShape-none"].tap()
+        app.buttons["maskSheetDone"].tap()
+
+        // B: the sheet.
+        app.buttons["B Sheet"].tap()
+        app.buttons["maskOpen"].tap()
+        XCTAssertTrue(app.buttons["sheetTile-circle"].waitForExistence(timeout: 5))
+        app.buttons["sheetTile-circle"].tap()
+        usleep(500_000)
+        shot("mask-B-circle")
+        app.buttons["maskSection-size"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ruler"].firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.segmentedControls["maskAxis"].exists, "Width / Height share one ruler behind a switch")
+        shot("mask-B-size")
+        app.buttons["maskSection-invert"].tap()
+        app.buttons["maskSheetDone"].tap()
+
+        // C: sliders.
+        app.buttons["C Sliders"].tap()
+        app.buttons["maskOpen"].tap()
+        XCTAssertTrue(app.buttons["sliderTile-mirror"].waitForExistence(timeout: 5))
+        app.buttons["sliderTile-mirror"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ruler"].firstMatch.waitForExistence(timeout: 3), "Position is two-way: the ruler")
+        XCTAssertFalse(app.sliders["maskSlider-x"].exists)
+        shot("mask-C-position")
+        app.buttons["sliderChip-feather"].tap()
+        XCTAssertTrue(app.sliders["maskSlider-feather"].waitForExistence(timeout: 3), "Feather is one-way: a slider")
+        shot("mask-C-feather")
     }
 }

@@ -8,16 +8,11 @@ struct ToolOptionsPanel: View {
     let composition: V2Composition
     /// The currently selected clip, if any (Text and Adjust edit it).
     let selectedLayer: V2Layer?
-    /// Âm thanh — the selected standalone `V2AudioClip`, if any.
-    let selectedAudioClip: V2AudioClip?
     let onSetAspectRatio: (Double, Double) -> Void
     let onSetBackgroundColor: (String) -> Void
     let onPickAudioFile: (URL) -> Void
-    let onSetAudioVolume: (String, Double) -> Void
-    let onDeleteAudio: (String) -> Void
-    /// Ghi âm — same destination as `onPickAudioFile`, just sourced from
-    /// the mic instead of the Files app.
-    let onRecordingFinished: (URL) -> Void
+    /// Audio > Record: the shell opens the recorder popup.
+    let onRecord: () -> Void
     /// Hiệu ứng âm thanh — see `SoundEffectCatalog`'s own doc comment: this
     /// is a one-tap sound-effect library, not a DSP processing effect.
     let onAddSoundEffect: (SoundEffectPreset) -> Void
@@ -25,6 +20,10 @@ struct ToolOptionsPanel: View {
     let onAddText: () -> Void
     /// A feature that is only a button so far (Auto captions): the shell shows its "coming soon" note.
     let onComingSoon: (String) -> Void
+    /// Audio > Extract: the shell opens the video picker.
+    let onExtractAudio: () -> Void
+    /// Audio > Sound FX: the shell opens the sound library sheet.
+    let onSoundFX: () -> Void
 
     var body: some View {
         switch tool {
@@ -34,11 +33,10 @@ struct ToolOptionsPanel: View {
             BackgroundColorOptionsRow(current: composition.background, onSelect: onSetBackgroundColor)
         case .audio:
             AudioOptionsRow(
-                selectedClip: selectedAudioClip,
                 onPickFile: onPickAudioFile,
-                onSetVolume: onSetAudioVolume,
-                onDelete: onDeleteAudio,
-                onRecordingFinished: onRecordingFinished
+                onRecord: onRecord,
+                onExtract: onExtractAudio,
+                onSoundFX: onSoundFX
             )
         case .effects:
             SoundEffectsOptionsRow(onSelect: onAddSoundEffect)
@@ -66,20 +64,16 @@ private struct TextOptionsRow: View {
     let onComingSoon: (String) -> Void
 
     var body: some View {
-        HStack(spacing: 28) {
+        HStack(spacing: BottomBarItem.spacing) {
             choice("Add text", symbol: "text.badge.plus", id: "text-add", action: onAddText)
             choice("Auto captions", symbol: "captions.bubble", id: "text-captions") { onComingSoon("Auto captions") }
         }
+        .padding(.horizontal, 8)
     }
 
     private func choice(_ title: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: symbol).font(.title3)
-                Text(title).font(.caption2).lineLimit(1)
-            }
-            .frame(minWidth: 72)
-            .foregroundColor(.primary)
+            BottomBarItem(title: title, symbol: symbol)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
@@ -114,113 +108,41 @@ private struct SoundEffectsOptionsRow: View {
     }
 }
 
-/// Âm thanh — "Thêm nhạc" (import + place at the playhead) when nothing's
-/// selected, a volume slider + "Xoá" when a standalone clip is selected.
-/// Dragging a clip to reposition/trim it is explicitly deferred (see the
-/// "audio playback foundation" roadmap plan) — this ships exactly what
-/// doesn't need a new timeline gesture.
+/// Âm thanh — the four ways to get sound onto the timeline: Extract, Music, Sound FX, Record. A selected audio clip has its own row
+/// (`SelectionToolbarView`: Split, Volume, Fade, Delete...); Volume opens `VolumeSheet`.
 private struct AudioOptionsRow: View {
-    let selectedClip: V2AudioClip?
     let onPickFile: (URL) -> Void
-    let onSetVolume: (String, Double) -> Void
-    let onDelete: (String) -> Void
-    /// Ghi âm — the finished recording's temp URL, handed to the exact
-    /// same `addAudio(from:)` path `onPickFile` already uses.
-    let onRecordingFinished: (URL) -> Void
+    /// Record opens the recorder popup (`RecorderSheet`).
+    let onRecord: () -> Void
+    /// Extract opens the video picker, Sound FX the library sheet.
+    let onExtract: () -> Void
+    let onSoundFX: () -> Void
 
     @State private var showingPicker = false
-    @StateObject private var recorder = AudioRecorderService()
-    /// 0–1 UI range, converted to/from `gainDb` (0 dB == 1.0, matching the
-    /// clip's own "no clip yet authored" default).
-    @State private var volumeFraction: Double = 1
 
     var body: some View {
-        if let selectedClip {
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Volume").font(.caption2).foregroundColor(.secondary)
-                    Slider(value: $volumeFraction, in: 0...1) { editing in
-                        guard !editing else { return }
-                        onSetVolume(selectedClip.id, dB(fromFraction: volumeFraction))
-                    }
-                    .frame(width: 160)
-                }
-                Button(role: .destructive) {
-                    onDelete(selectedClip.id)
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "trash").font(.title3)
-                        Text("Delete").font(.caption2)
-                    }
-                }
-                .foregroundColor(.red)
-            }
-            .padding(.horizontal)
-            .onAppear { volumeFraction = fraction(fromDB: selectedClip.gainDb ?? 0) }
-            .onChange(of: selectedClip.id) { _, _ in volumeFraction = fraction(fromDB: selectedClip.gainDb ?? 0) }
-        } else {
-            HStack(spacing: 20) {
-                Button {
-                    showingPicker = true
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "music.note.list").font(.title3)
-                        Text("Add Music").font(.caption2)
-                    }
-                }
-                .disabled(recorder.isRecording)
-
-                Button {
-                    if recorder.isRecording {
-                        if let url = recorder.stopRecording() {
-                            onRecordingFinished(url)
-                        }
-                    } else {
-                        Task { await recorder.startRecording() }
-                    }
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: recorder.isRecording ? "stop.circle.fill" : "mic.fill")
-                            .font(.title3)
-                        Text(recorder.isRecording ? formattedElapsed : "Record")
-                            .font(.caption2)
-                    }
-                }
-                .foregroundColor(recorder.isRecording ? .red : .primary)
-
-                if recorder.permissionDenied {
-                    Text("Microphone access needed in Settings")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                } else if !recorder.isRecording {
-                    Text("Select an audio clip on the timeline to adjust volume")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.horizontal)
-            .sheet(isPresented: $showingPicker) {
-                AudioFilePicker(onPick: onPickFile)
-            }
+        // The four ways to get sound onto the timeline, one row like the Text tool's (user 2026-10-16).
+        HStack(spacing: BottomBarItem.spacing) {
+            label("Extract", symbol: "film.stack", id: "audio-extract", action: onExtract)
+            label("Music", symbol: "music.note", id: "audio-music") { showingPicker = true }
+            label("Sound FX", symbol: "speaker.wave.3.fill", id: "audio-sfx", action: onSoundFX)
+            label("Record", symbol: "mic.fill", id: "audio-record", action: onRecord)
+        }
+        .padding(.horizontal, 8)
+        .sheet(isPresented: $showingPicker) {
+            AudioFilePicker(onPick: onPickFile)
         }
     }
 
-    private var formattedElapsed: String {
-        let total = Int(recorder.elapsedSeconds)
-        return String(format: "%02d:%02d", total / 60, total % 60)
+    /// One label, the same item as the Edit row's.
+    private func label(_ title: String, symbol: String, id: String, tint: Color = .primary, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            BottomBarItem(title: title, symbol: symbol, tint: tint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
     }
 
-    /// `gainDb` 0 → fraction 1 (unity); -40dB floor → fraction 0. A plain
-    /// linear 0–1 slider over dB would spend most of its range on barely-
-    /// audible levels, so this maps the slider's own linear travel onto a
-    /// dB range instead of onto linear gain.
-    private func dB(fromFraction fraction: Double) -> Double {
-        -40 * (1 - fraction)
-    }
-
-    private func fraction(fromDB gainDb: Double) -> Double {
-        min(max(1 + gainDb / 40, 0), 1)
-    }
 }
 
 /// Fits a `width:height` ratio inside a `maxDimension × maxDimension` box

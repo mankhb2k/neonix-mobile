@@ -11,15 +11,25 @@ struct NeonixAPIConfig {
     var baseURL: URL
     var auth: NeonixAPIAuth
 
-    /// Debug: localhost (Simulator) or `NEONIX_API_URL` / UserDefaults `apiBaseURL` (a real iPhone
-    /// needs the Mac's LAN address), signed in as the dev user. Release: production, Bearer token.
+    /// Debug defaults to production so an app launched from Xcode can exercise the deployed API.
+    /// Set `NEONIX_API_URL` or the `apiBaseURL` preference to use a local development server.
     static var current: NeonixAPIConfig {
         #if DEBUG
         let raw = ProcessInfo.processInfo.environment["NEONIX_API_URL"]
             ?? UserDefaults.standard.string(forKey: "apiBaseURL")
-            ?? "http://localhost:8080"
+            ?? "https://api.neonix.video"
         let user = UserDefaults.standard.string(forKey: "devUserId") ?? "dev-ios"
-        return NeonixAPIConfig(baseURL: URL(string: raw) ?? URL(string: "http://localhost:8080")!, auth: .devUser(user))
+        let baseURL = URL(string: raw) ?? URL(string: "https://api.neonix.video")!
+        let isLocalDevelopmentServer = baseURL.host == "localhost" || baseURL.host == "127.0.0.1"
+        let auth: NeonixAPIAuth
+        if AuthTokenStore.token != nil {
+            auth = .bearer { AuthTokenStore.token }
+        } else if isLocalDevelopmentServer {
+            auth = .devUser(user)
+        } else {
+            auth = .bearer { AuthTokenStore.token }
+        }
+        return NeonixAPIConfig(baseURL: baseURL, auth: auth)
         #else
         return NeonixAPIConfig(baseURL: URL(string: "https://api.neonix.video")!, auth: .bearer { AuthTokenStore.token })
         #endif
@@ -45,6 +55,33 @@ struct NeonixAPIClient {
     }()
 
     // MARK: Endpoints
+
+    /// Exchanges Google's native ID token for the API's Better Auth bearer session.
+    func signInWithGoogle(idToken: String, accessToken: String?) async throws -> String {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent("api/auth/sign-in/social"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        var payload: [String: Any] = ["provider": "google", "idToken": ["token": idToken]]
+        if let accessToken { payload["idToken"] = ["token": idToken, "accessToken": accessToken] }
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw Self.error(status: http.statusCode, data: data) }
+        guard let token = http.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        return token
+    }
+
+    func accountProfile() async throws -> APIAccountProfile {
+        try await send("GET", "v1/me", as: APIAccountProfile.self)
+    }
+
+    func signOut() async throws {
+        struct Empty: Decodable {}
+        _ = try await send("POST", "api/auth/sign-out", as: Empty.self)
+    }
 
     func balance() async throws -> Int {
         try await send("GET", "v1/billing/balance", as: APIBalance.self).balance
@@ -75,6 +112,10 @@ struct NeonixAPIClient {
 
     func stickers() async throws -> APIStickerCatalogue {
         try await send("GET", "v1/stickers", as: APIStickerCatalogue.self)
+    }
+
+    func sounds() async throws -> APISoundCatalogue {
+        try await send("GET", "v1/sounds", as: APISoundCatalogue.self)
     }
 
     /// Free: credits are spent at export, not at download.

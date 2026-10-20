@@ -143,6 +143,8 @@ struct AssetCell: View {
     let dimmed: Bool
     /// Shown on a dimmed cell ("Too short").
     var dimmedLabel: String?
+    /// A picker that selects (Extract): the cell wears a frame and a check mark.
+    var isSelected = false
     let onTap: () -> Void
 
     @State private var image: UIImage?
@@ -160,6 +162,18 @@ struct AssetCell: View {
                         Text(clock(asset.duration))
                             .font(.caption2.weight(.semibold).monospacedDigit()).foregroundColor(.white)
                             .padding(4).shadow(radius: 2)
+                    }
+                }
+                .overlay {
+                    if isSelected {
+                        Rectangle().strokeBorder(Color.accentColor, lineWidth: 3)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title3).foregroundStyle(.white, Color.accentColor)
+                            .padding(5)
                     }
                 }
                 .overlay {

@@ -32,9 +32,14 @@ final class EditorPlaybackEngine {
     }
 
     /// The single source of truth for the playhead.
+    /// The editor and renderer use the same timeline coordinate.
     private(set) var currentTimeMs: Double = 0
     private(set) var mode: Mode = .idle
     private(set) var maxDurationMs: Double = 1
+    private(set) var previewLayers: [V2Layer] = []
+    private(set) var transitionFramePlan: TransitionFramePlan
+
+    var editorTimeMs: Double { min(currentTimeMs, maxDurationMs) }
 
     var isPlaying: Bool { mode == .playing }
 
@@ -45,9 +50,13 @@ final class EditorPlaybackEngine {
         let assetId: String
         let url: URL
         let mapping: VideoTimeMapping
+        let durationMs: Double
     }
 
     @ObservationIgnored private var videoSources: [VideoSource] = []
+    @ObservationIgnored private var sourceLayers: [String: V2Layer] = [:]
+    @ObservationIgnored private var heldNativeLayerIds = Set<String>()
+    @ObservationIgnored private var renderDurationMs: Double = 1
     /// `init` only reads the project; the `AVPlayer`s and the audio mix are
     /// created by `prepare()`. `EditorShellView.init` builds an engine every
     /// time the view struct is re-created and SwiftUI keeps only the first, so
@@ -58,6 +67,7 @@ final class EditorPlaybackEngine {
     private(set) var mediaGeneration = 0
     @ObservationIgnored private var stageSessions: [String: StagePlayerSession] = [:]
     @ObservationIgnored private var nativeMasterLayerId: String?
+    @ObservationIgnored private var activeNativeLayerIds = Set<String>()
     @ObservationIgnored private var nativeStartGeneration = 0
     @ObservationIgnored private var scrubStartTimeMs: Double = 0
     /// State of the coast in flight (see `MomentumDecay`): position is
@@ -92,6 +102,7 @@ final class EditorPlaybackEngine {
     private static let coastStopMsPerSecond = 50.0
 
     init(project: V2Project) {
+        transitionFramePlan = TransitionFramePlan(project: project)
         PlaybackMetrics.shared.track(.engine, 1)
         update(project: project)
     }
@@ -102,11 +113,15 @@ final class EditorPlaybackEngine {
 
     /// Call whenever the project changes (edit, undo/redo, live trim drag).
     func update(project: V2Project) {
-        latestProject = project
+        transitionFramePlan = TransitionFramePlan(project: project)
+        let renderProject = TransitionRenderPlan.compile(project)
+        latestProject = renderProject
+        previewLayers = renderProject.layers
+        sourceLayers = Dictionary(uniqueKeysWithValues: project.layers.filter { $0.type == "video" }.map { ($0.id, $0) })
         videoSources = project.layers.compactMap { layer in
             guard case .video(let payload) = layer.payload,
                   let mapping = VideoTimeMapping(layer: layer),
-                  let asset = project.assets.first(where: { $0.id == payload.assetId }),
+                  let asset = renderProject.assets.first(where: { $0.id == payload.assetId }),
                   case .video(let videoAsset) = asset,
                   let url = bundledURL(filename: videoAsset.uri)
             else { return nil }
@@ -114,7 +129,8 @@ final class EditorPlaybackEngine {
                 layerId: layer.id,
                 assetId: payload.assetId,
                 url: url,
-                mapping: mapping
+                mapping: mapping,
+                durationMs: videoAsset.duration
             )
         }
         if isPrepared { reconcileStageSessions() }
@@ -122,7 +138,8 @@ final class EditorPlaybackEngine {
         let layerEnds = project.layers.map { $0.timing.start + $0.timing.duration }
         let audioEnds = project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }
         maxDurationMs = max((layerEnds + audioEnds).max() ?? 1, 1)
-        if isPrepared { audioMixEngine.update(project: project) }
+        renderDurationMs = maxDurationMs
+        if isPrepared { audioMixEngine.update(project: renderProject) }
     }
 
     /// Creates the players and the audio mix and positions them at the current
@@ -200,7 +217,7 @@ final class EditorPlaybackEngine {
         nativeStartGeneration &+= 1
         pauseNativeSessions()
         mode = .scrubbing
-        scrubStartTimeMs = currentTimeMs
+        scrubStartTimeMs = editorTimeMs
         // Scrubbing stays silent in this pass (see `AudioMixEngine`'s doc
         // comment) — if Play was already running, stop its audio too.
         audioMixEngine.pause()
@@ -286,14 +303,33 @@ final class EditorPlaybackEngine {
     private func playbackTick(_ dt: Double) {
         guard mode == .playing else { return }
 
+        // During a transition both source players are running underneath the
+        // render-only transition group. Drive the shared render clock across
+        // that short overlap instead of letting the outgoing AVPlayer's end
+        // boundary decide when the incoming clip gets control. Its clock can
+        // stop just before the split, which used to strand playback there.
+        if transitionFramePlan.activeWindow(at: currentTimeMs) != nil {
+            let next = currentTimeMs + dt * 1000
+            if next >= renderDurationMs {
+                setTime(0)
+                pause()
+            } else {
+                setTimeFromNativeClock(next)
+                syncNativeSessions(atMs: next)
+                audioMixEngine.advance(toMs: next)
+            }
+            return
+        }
+
         if hasVideoAtCurrentTime {
             guard let source = sourceCovering(timeMs: currentTimeMs) ?? nativeMasterSource() else {
                 let next = currentTimeMs + dt * 1000
-                if next >= maxDurationMs {
+                if next >= renderDurationMs {
                     setTime(0)
                     pause()
                 } else {
                     setTimeFromNativeClock(next)
+                    syncNativeSessions(atMs: next)
                     audioMixEngine.advance(toMs: next)
                 }
                 return
@@ -319,13 +355,14 @@ final class EditorPlaybackEngine {
                 pause()
             } else {
                 setTimeFromNativeClock(next)
+                syncNativeSessions(atMs: next)
                 audioMixEngine.advance(toMs: next)
             }
             return
         }
 
         let next = currentTimeMs + dt * 1000
-        if next >= maxDurationMs {
+        if next >= renderDurationMs {
             setTime(0)
             pause()
             return
@@ -377,7 +414,7 @@ final class EditorPlaybackEngine {
     }
 
     private func clamped(_ ms: Double) -> Double {
-        min(max(ms, timeFloorMs), maxDurationMs)
+        min(max(ms, timeFloorMs), renderDurationMs)
     }
 
     func setTimeFloor(_ ms: Double) {
@@ -522,7 +559,16 @@ final class EditorPlaybackEngine {
     }
 
     private func switchNativeMaster(to source: VideoSource, atMs ms: Double) {
+        let wasAlreadyPlaying = activeNativeLayerIds.contains(source.layerId)
         nativeMasterLayerId = source.layerId
+        activeNativeLayerIds.insert(source.layerId)
+        // The incoming player has already been running underneath the
+        // transition overlay. Seeking it again at the seam stalls its decoder
+        // for a frame (or longer); promote its existing clock instead.
+        if wasAlreadyPlaying, let session = stageSessions[source.layerId] {
+            session.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
+            return
+        }
         stageSessions[source.layerId]?.seek(
             toSourceSeconds: source.mapping.sourceMs(atTimelineMs: ms) / 1000,
             toleranceSeconds: 0
@@ -549,10 +595,7 @@ final class EditorPlaybackEngine {
         toleranceSeconds: Double,
         completion: ((Bool) -> Void)? = nil
     ) {
-        let targets = videoSources.filter {
-            ms >= $0.mapping.layerStartMs
-                && ms < $0.mapping.layerStartMs + $0.mapping.durationMs
-        }
+        let targets = activeVideoSources(atMs: ms)
 
         guard !targets.isEmpty else {
             completion?(true)
@@ -562,8 +605,9 @@ final class EditorPlaybackEngine {
         var remaining = targets.count
         var allFinished = true
         for source in targets {
+            let sourceTimelineMs = sourceTimelineTime(for: source, atMs: ms)
             stageSessions[source.layerId]?.seek(
-                toSourceSeconds: source.mapping.sourceMs(atTimelineMs: ms) / 1000,
+                toSourceSeconds: sourceSeconds(for: source, timelineTimeMs: sourceTimelineMs),
                 toleranceSeconds: toleranceSeconds
             ) { finished in
                 remaining -= 1
@@ -576,14 +620,75 @@ final class EditorPlaybackEngine {
     }
 
     private func playNativeSessions(atMs ms: Double) {
-        for source in videoSources where
-            ms >= source.mapping.layerStartMs
-                && ms < source.mapping.layerStartMs + source.mapping.durationMs {
-            stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
+        let active = activeVideoSources(atMs: ms)
+        activeNativeLayerIds = Set(active.map(\.layerId))
+        heldNativeLayerIds.removeAll()
+        for source in active {
+            let sourceTime = sourceTimelineTime(for: source, atMs: ms)
+            if sourceTime == ms {
+                stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
+            } else {
+                heldNativeLayerIds.insert(source.layerId)
+                stageSessions[source.layerId]?.pause()
+            }
         }
     }
 
+    /// Starts an additional decoder when playback enters an overlap (a transition), without seeking the already-playing source.
+    private func syncNativeSessions(atMs ms: Double) {
+        let active = activeVideoSources(atMs: ms)
+        let desired = Dictionary(uniqueKeysWithValues: active.map { ($0.layerId, $0) })
+        for id in activeNativeLayerIds.subtracting(desired.keys) { stageSessions[id]?.pause() }
+        let newlyActive = Set(desired.keys).subtracting(activeNativeLayerIds)
+        let nextHeld = Set(active.compactMap { source -> String? in
+            sourceTimelineTime(for: source, atMs: ms) == ms ? nil : source.layerId
+        })
+        let changedHoldState = nextHeld.symmetricDifference(heldNativeLayerIds)
+        activeNativeLayerIds = Set(desired.keys)
+        heldNativeLayerIds = nextHeld
+        for id in newlyActive.union(changedHoldState) {
+            guard let source = desired[id], let session = stageSessions[id] else { continue }
+            let sourceTime = sourceTimelineTime(for: source, atMs: ms)
+            session.seek(toSourceSeconds: sourceSeconds(for: source, timelineTimeMs: sourceTime), toleranceSeconds: 0) { [weak self] finished in
+                guard let self, finished, self.mode == .playing,
+                      self.activeVideoSources(atMs: self.currentTimeMs).contains(where: { $0.layerId == source.layerId }) else { return }
+                let currentSourceTime = self.sourceTimelineTime(for: source, atMs: self.currentTimeMs)
+                if currentSourceTime == self.currentTimeMs {
+                    session.play(rate: Float(source.mapping.rate(atTimelineMs: currentSourceTime)))
+                } else {
+                    session.pause()
+                }
+            }
+        }
+        for source in active where !newlyActive.contains(source.layerId) && !changedHoldState.contains(source.layerId) {
+            if sourceTimelineTime(for: source, atMs: ms) == ms {
+                stageSessions[source.layerId]?.play(rate: Float(source.mapping.rate(atTimelineMs: ms)))
+            }
+        }
+    }
+
+    private func activeVideoSources(atMs ms: Double) -> [VideoSource] {
+        videoSources.filter { source in
+            let inClip = ms >= source.mapping.layerStartMs
+                && ms < source.mapping.layerStartMs + source.mapping.durationMs
+            return inClip || transitionFramePlan.isVisible(source.layerId, at: ms)
+        }
+    }
+
+    private func sourceTimelineTime(for source: VideoSource, atMs ms: Double) -> Double {
+        guard let layer = sourceLayers[source.layerId] else { return ms }
+        return transitionFramePlan.sourceTimelineTime(for: layer, at: ms)
+    }
+
+    private func sourceSeconds(for source: VideoSource, timelineTimeMs: Double) -> Double {
+        let frameMs = 1000 / max(latestProject?.composition.fps ?? 30, 1)
+        let sourceMs = source.mapping.sourceMs(atTimelineMs: timelineTimeMs)
+        return min(max(sourceMs, 0), max(0, source.durationMs - frameMs)) / 1000
+    }
+
     private func pauseNativeSessions() {
+        activeNativeLayerIds.removeAll()
+        heldNativeLayerIds.removeAll()
         for session in stageSessions.values {
             session.pause()
             session.cancelPendingSeeks()

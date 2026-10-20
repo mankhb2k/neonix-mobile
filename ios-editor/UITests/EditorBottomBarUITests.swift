@@ -61,6 +61,65 @@ final class EditorBottomBarUITests: XCTestCase {
         XCTAssertFalse(app.buttons["action-delete"].exists)
     }
 
+    func testMainLaneAddButtonOpensTheMultiSelectAssetPicker() throws {
+        let app = openTripToParis()
+        let addButton = app.buttons["mainLaneAddMedia"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5), "the main lane keeps an add button at the visible trailing edge")
+        addButton.tap()
+
+        XCTAssertTrue(app.staticTexts["Add clips"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["mediaPickerGrid"].exists)
+        XCTAssertTrue(app.buttons["mediaPickerAddSelected"].exists)
+        XCTAssertFalse(app.buttons["mediaPickerAddSelected"].isEnabled, "Add stays disabled until at least one asset is selected")
+
+        app.buttons["mediaPickerCancel"].tap()
+        XCTAssertFalse(app.staticTexts["Add clips"].waitForExistence(timeout: 2))
+    }
+
+    func testMainLaneAddInsertsAfterTheSelectedClipInTheRunningEditor() throws {
+        let app = openTripToParis()
+        let timeline = app.otherElements["timeline"]
+
+        // Move into the middle of the source clip and split it, so the selected first half is not the lane's last clip.
+        let from = timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        from.press(
+            forDuration: 0.05,
+            thenDragTo: timeline.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5)),
+            withVelocity: .slow,
+            thenHoldForDuration: 0.5
+        )
+        let splitTime = Double(timeline.label) ?? 0
+        XCTAssertGreaterThan(splitTime, 0, "scrubbing should move the playhead into the clip")
+
+        app.buttons["tool-edit"].tap()
+        XCTAssertTrue(app.buttons["action-split"].waitForExistence(timeout: 5))
+        app.buttons["action-split"].tap()
+
+        // Tap the first half by its clip accessibility element; the playhead remains at its end cut.
+        XCTAssertTrue(app.otherElements["lane-main"].waitForExistence(timeout: 5))
+        let firstHalf = app.descendants(matching: .any)["timelineClip-demo-layer"]
+        XCTAssertTrue(firstHalf.waitForExistence(timeout: 5))
+        firstHalf.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        XCTAssertTrue((firstHalf.value as? String)?.hasSuffix(", selected") == true, "the first half, rather than the auto-selected second half, is selected")
+        XCTAssertTrue(app.buttons["action-delete"].waitForExistence(timeout: 5), "a main-lane clip is selected")
+
+        app.buttons["mainLaneAddMedia"].tap()
+        XCTAssertTrue(app.staticTexts["Add clips"].waitForExistence(timeout: 5))
+        let photo = app.buttons.matching(identifier: "assetCell").firstMatch
+        XCTAssertTrue(photo.waitForExistence(timeout: 10), "the simulator Photos library contains the test image")
+        photo.tap()
+        let add = app.buttons["mediaPickerAddSelected"]
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+
+        XCTAssertFalse(app.staticTexts["Add clips"].waitForExistence(timeout: 5), "the picker closes after adding")
+        XCTAssertTrue(app.buttons["action-delete"].waitForExistence(timeout: 20), "the imported photo is selected in the editor")
+        let insertionTime = Double(timeline.label) ?? -1
+        XCTAssertGreaterThan(insertionTime, 0)
+        XCTAssertEqual(insertionTime, splitTime, accuracy: 50, "the imported photo starts exactly after the selected first half, not at the old lane end")
+        saveShot(app, "main-lane-add-after-selected-clip")
+    }
+
     /// Adjust opens as a sheet (ruler + round buttons) over the lower part of the screen; Done brings the clip's row back.
     func testAdjustOpensASheetAndDoneReturnsToTheClipsRow() throws {
         let app = openTripToParis()
@@ -494,9 +553,9 @@ final class EditorBottomBarUITests: XCTestCase {
         // A tool that is not built yet.
         let row = app.descendants(matching: .any)["selectionToolbar"]
         var guardCount = 0
-        while !app.buttons["action-speed"].isHittable, guardCount < 4 { row.swipeLeft(); guardCount += 1 }
-        app.buttons["action-speed"].tap()
-        XCTAssertTrue(app.staticTexts["Speed is coming soon"].waitForExistence(timeout: 3))
+        while !app.buttons["action-crop"].isHittable, guardCount < 4 { row.swipeLeft(); guardCount += 1 }
+        app.buttons["action-crop"].tap()
+        XCTAssertTrue(app.staticTexts["Crop is coming soon"].waitForExistence(timeout: 3))
         saveShot(app, "bar-8-coming-soon")
         XCTAssertFalse(app.staticTexts["Speed is coming soon"].waitForExistence(timeout: 0.1) == false && false)
 

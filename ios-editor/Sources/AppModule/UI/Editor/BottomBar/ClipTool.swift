@@ -6,13 +6,16 @@ import Foundation
 enum ClipTool: String, CaseIterable, Identifiable {
     case editText = "edit-text"
     case split, volume, speed, animation
-    case adjust, filter, transform, opacity, crop
+    case adjust, filter, transform, opacity, mask, crop
     case replace, duplicate, overlay
     case removeBackground = "remove-bg"
+    case freeze, reverse
     case unlink
     case style
     case mirror
     case graph
+    /// Audio clips only (labels so far): fade in/out, and beat markers.
+    case fade, beat
     case delete
 
     var id: String { rawValue }
@@ -36,14 +39,19 @@ enum ClipTool: String, CaseIterable, Identifiable {
         case .filter: return "camera.filters"
         case .transform: return "crop.rotate"
         case .opacity: return "circle.lefthalf.striped.horizontal"
+        case .mask: return "theatermasks"
         case .crop: return "crop"
         case .replace: return "arrow.triangle.2.circlepath"
         case .duplicate: return "plus.square.on.square"
         case .overlay: return "square.2.layers.3d"
         case .removeBackground: return "person.crop.rectangle"
+        case .freeze: return "snowflake"
+        case .reverse: return "backward.end"
         case .unlink: return "link"
         case .style: return "textformat.size"
         case .graph: return "chart.xyaxis.line"
+        case .fade: return "waveform.path"
+        case .beat: return "metronome"
         case .mirror: return "arrow.left.and.right.righttriangle.left.righttriangle.right"
         case .delete: return "trash"
         }
@@ -57,8 +65,11 @@ enum ClipTool: String, CaseIterable, Identifiable {
         case .speed: return kind == .video
         case .duplicate: return kind == .video || kind == .image || kind == .text || kind == .sticker
         case .replace, .overlay: return kind == .video || kind == .image
+        case .crop, .mask: return kind == .video || kind == .image
+        case .removeBackground: return kind == .image || kind == .video
         case .style: return kind == .text
-        case .volume: return kind == .audio
+        case .volume: return kind == .audio || kind == .video
+        case .fade: return kind == .audio
         default: return false
         }
     }
@@ -78,16 +89,17 @@ enum ClipTool: String, CaseIterable, Identifiable {
         // Volume / Unlink are always listed for a video; `SelectionToolbarView` dims them when the file has no sound.
         switch kind {
         case .video:
-            return [.split, .transform, .volume, .animation, .graph, .speed, .adjust, .filter, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground, .unlink]
+            return [.split, .transform, .volume, .animation, .graph, .speed, .adjust, .filter, .opacity, .mask, .crop, .replace, .duplicate, .overlay, .removeBackground, .freeze, .reverse, .unlink]
         case .image:
-            return [.split, .transform, .animation, .graph, .adjust, .filter, .opacity, .crop, .replace, .duplicate, .overlay, .removeBackground]
+            return [.split, .transform, .animation, .graph, .adjust, .filter, .opacity, .mask, .crop, .replace, .duplicate, .overlay, .removeBackground]
         case .text:
             // Edit text stays first: it is the only way to change the words of a text clip.
             return [.editText, .split, .transform, .style, .animation, .graph, .duplicate]
         case .sticker:
             return [.split, .transform, .animation, .graph, .duplicate, .mirror]
         case .audio:
-            return [.split, .volume, .speed, .duplicate]
+            // User list 2026-10-16: Split, Volume, Fade, Delete (inserted 4th), Duplicate, Beat, Speed. Fade and Beat are labels only so far.
+            return [.split, .volume, .fade, .duplicate, .beat, .speed]
         case .other:
             return [.split, .transform, .graph, .opacity, .duplicate]
         }

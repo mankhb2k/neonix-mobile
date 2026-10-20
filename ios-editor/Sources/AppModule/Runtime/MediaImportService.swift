@@ -20,9 +20,19 @@ enum MediaImportService {
         return directory
     }
 
-    enum ImportError: Error {
+    enum ImportError: LocalizedError {
         case unreadableDuration
         case exportFailed
+        /// Extract: the video has no sound track.
+        case noAudio
+
+        var errorDescription: String? {
+            switch self {
+            case .unreadableDuration: return "Couldn't read that file's length"
+            case .exportFailed: return "Couldn't take the sound out of that video"
+            case .noAudio: return "That video has no sound"
+            }
+        }
     }
 
     /// Copies `sourceURL` in, reads its real duration, and returns a
@@ -71,12 +81,20 @@ enum MediaImportService {
     /// that one needs a newer deployment target than this project's 17.0
     /// floor.
     static func extractAudio(from videoURL: URL) async throws -> V2AudioAsset {
-        let cacheKey = videoURL.deletingPathExtension().lastPathComponent
+        try await extractAudio(from: AVURLAsset(url: videoURL), cacheKey: videoURL.deletingPathExtension().lastPathComponent)
+    }
+
+    /// The same for any `AVAsset` - Extract passes a library video streamed straight from Photos (no copy of the video), keyed by its
+    /// library id. `cacheKey` must have no dot (the file name is `extracted-<key>.m4a`, see `bundledURL`). A source with no audio track
+    /// throws `ImportError.noAudio`.
+    static func extractAudio(from source: AVAsset, cacheKey: String) async throws -> V2AudioAsset {
         let filename = "extracted-\(cacheKey).m4a"
         let destination = importedMediaDirectory.appendingPathComponent(filename)
 
         if !FileManager.default.fileExists(atPath: destination.path) {
-            try await exportAudioOnly(from: videoURL, to: destination)
+            let audioTracks = try await source.loadTracks(withMediaType: .audio)
+            guard !audioTracks.isEmpty else { throw ImportError.noAudio }
+            try await exportAudioOnly(from: source, to: destination)
         }
 
         let asset = AVURLAsset(url: destination)
@@ -93,8 +111,7 @@ enum MediaImportService {
         )
     }
 
-    private static func exportAudioOnly(from sourceURL: URL, to destination: URL) async throws {
-        let asset = AVURLAsset(url: sourceURL)
+    private static func exportAudioOnly(from asset: AVAsset, to destination: URL) async throws {
         guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw ImportError.exportFailed
         }

@@ -277,4 +277,82 @@ final class FilterRendererTests: XCTestCase {
         XCTAssertEqual(result?.width, source.width)
         XCTAssertEqual(result?.height, source.height)
     }
+
+    func testChromaKeyRemovesGreenAndKeepsSourceSubjectColor() throws {
+        let source = solidColorImage(r: 0, g: 1, b: 0)
+        let key = V2FilterPrimitive.feChromaKey(base(result: "keyed"), keyColor: "#00FF00", similarity: 0.3,
+                                                smoothness: 0.25, shadow: 0, edgeCleanup: 0)
+        let result = try XCTUnwrap(FilterRenderer.apply(makeFilter(primitives: [key]), to: source))
+        XCTAssertLessThan(pixel(of: result).a, 20, "the keyed screen color should become transparent")
+
+        let subject = solidColorImage(r: 0.85, g: 0.25, b: 0.2)
+        let kept = try XCTUnwrap(FilterRenderer.apply(makeFilter(primitives: [key]), to: subject))
+        let sourcePixel = pixel(of: subject), keptPixel = pixel(of: kept)
+        XCTAssertGreaterThan(keptPixel.a, 240, "a non-key subject color should stay opaque")
+        XCTAssertEqual(keptPixel.r, sourcePixel.r, accuracy: 3)
+        XCTAssertEqual(keptPixel.g, sourcePixel.g, accuracy: 3)
+        XCTAssertEqual(keptPixel.b, sourcePixel.b, accuracy: 3)
+    }
+}
+
+/// Checks the Design Lab candidate against actual rendered alpha, independently of its UI controls.
+final class ChromaKeyLabTests: XCTestCase {
+    private func alpha(_ image: CGImage, x: Int, y: Int) -> UInt8 {
+        guard let crop = image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return 255 }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let bitmap = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        bitmap.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return pixel[3]
+    }
+
+    func testSampleGreenScreenBecomesTransparentWhileSubjectRemains() throws {
+        let source = try XCTUnwrap(LabChromaProcessor.sampleImage())
+        let picked = try XCTUnwrap(LabChromaProcessor.color(in: source, at: CGPoint(x: 0.05, y: 0.05)))
+        XCTAssertEqual(picked.green, LabKeyColor.sampleGreen.green, accuracy: 0.02)
+        let cutout = try XCTUnwrap(LabChromaProcessor.render(source, settings: LabChromaSettings()))
+        XCTAssertLessThan(alpha(cutout, x: 25, y: 25), 20)
+        XCTAssertGreaterThan(alpha(cutout, x: 270, y: 350), 220)
+    }
+
+    func testShadowControlRemovesDarkerScreenWithoutRemovingSubject() throws {
+        let source = try XCTUnwrap(LabChromaProcessor.sampleImage())
+        let ordinary = try XCTUnwrap(LabChromaProcessor.render(source, settings: LabChromaSettings()))
+        var settings = LabChromaSettings()
+        settings.shadow = 1
+        let withShadow = try XCTUnwrap(LabChromaProcessor.render(source, settings: settings))
+        XCTAssertGreaterThan(alpha(ordinary, x: 80, y: 550), 200)
+        XCTAssertLessThan(alpha(withShadow, x: 80, y: 550), 50)
+        XCTAssertGreaterThan(alpha(withShadow, x: 270, y: 350), 220)
+    }
+
+    func testCurrentV2MatrixCanKeySampleGreenButCannotKeyNeutralColor() throws {
+        let source = try XCTUnwrap(LabChromaProcessor.sampleImage())
+        let green = try XCTUnwrap(LabChromaProcessor.render(source, settings: LabChromaSettings(), method: .matrix))
+        XCTAssertLessThan(alpha(green, x: 25, y: 25), 40)
+        XCTAssertGreaterThan(alpha(green, x: 270, y: 350), 220)
+
+        var neutral = LabChromaSettings()
+        neutral.key = LabKeyColor(red: 0.2, green: 0.2, blue: 0.2)
+        let unchanged = try XCTUnwrap(LabChromaProcessor.render(source, settings: neutral, method: .matrix))
+        XCTAssertEqual(alpha(unchanged, x: 25, y: 25), 255)
+
+        let bitmap = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        bitmap.setFillColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1)
+        bitmap.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        let graySource = try XCTUnwrap(bitmap.makeImage())
+        let grayCube = try XCTUnwrap(LabChromaProcessor.render(graySource, settings: neutral, method: .colorCube))
+        XCTAssertLessThan(alpha(grayCube, x: 4, y: 4), 40)
+    }
+
+    func testComposedV2GraphKeysSampleGreenAndKeepsSubject() throws {
+        let source = try XCTUnwrap(LabChromaProcessor.sampleImage())
+        var settings = LabChromaSettings()
+        settings.intensity = 0.8
+        let graph = try XCTUnwrap(LabChromaProcessor.render(source, settings: settings, method: .v2Graph))
+
+        XCTAssertLessThan(alpha(graph, x: 25, y: 25), 20, "the green screen should become transparent")
+        XCTAssertGreaterThan(alpha(graph, x: 270, y: 350), 220, "the subject should stay opaque")
+    }
 }
