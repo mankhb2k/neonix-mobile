@@ -6,7 +6,7 @@ final class GoogleLoginUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        app.tabBars.buttons.element(boundBy: 2).tap() // Account
+        app.tabBars.buttons.element(boundBy: 1).tap() // Account
         app.buttons["account-sign-in-entry"].tap()
         app.buttons["account-sign-in-cta"].tap()
 

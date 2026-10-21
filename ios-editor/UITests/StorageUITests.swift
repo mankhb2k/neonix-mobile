@@ -6,7 +6,7 @@ final class StorageUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
-        app.tabBars.buttons.element(boundBy: 2).tap()   // Account
+        app.tabBars.buttons.element(boundBy: 1).tap()   // Account
         app.buttons["row-storage"].firstMatch.tap()
 
         let total = app.staticTexts["storage-total"]

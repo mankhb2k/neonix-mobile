@@ -131,6 +131,7 @@ struct EditorShellView: View {
     /// Same "one undo step per drag" shape as `adjustDragOriginal`.
     @State private var transformDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
+    private let topBarButtonSize = CGSize(width: 68, height: 32)
     /// A tool's options row is exactly as tall as the other rows (user 2026-10-16: the Edit row's height).
     private var toolPanelHeight: CGFloat { toolbarHeight }
     /// The bottom row sits this much lower than the safe-area edge (into the home-indicator margin); the timeline gets the points.
@@ -175,11 +176,21 @@ struct EditorShellView: View {
     /// Set when the project came from a template: Export then spends the template's credits first.
     private let exportContext: TemplateExportContext?
     @State private var exportGate = ExportGate()
+    @State private var exportResolution: ExportResolution = .p720
+    @State private var exportFrameRate = 30
+    @State private var exportBitrateMbps = 5
+    @State private var showingExportQuality = false
 
     init(project: V2Project, exportContext: TemplateExportContext? = nil) {
         self.exportContext = exportContext
         _project = State(initialValue: project)
         _engine = State(initialValue: EditorPlaybackEngine(project: project))
+        let supportedFrameRates = [24, 25, 30, 50, 60]
+        let sourceFrameRate = project.composition.fps
+        let initialFrameRate = supportedFrameRates.min {
+            abs(Double($0) - sourceFrameRate) < abs(Double($1) - sourceFrameRate)
+        } ?? 30
+        _exportFrameRate = State(initialValue: initialFrameRate)
     }
 
     /// Every write to `project` goes through here so the engine always sees
@@ -1497,6 +1508,7 @@ struct EditorShellView: View {
         HStack {
             cancelButton
             Spacer()
+            exportQualityButton
             exportButton
         }
         .padding(.horizontal)
@@ -1505,9 +1517,43 @@ struct EditorShellView: View {
         .background(Color(.systemBackground))
     }
 
+    private var exportQualityButton: some View {
+        Button { showingExportQuality = true } label: {
+            HStack(spacing: 5) {
+                Text(exportResolution.buttonTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .regular))
+            }
+            .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Quality, \(exportResolution.title)")
+        .accessibilityIdentifier("exportQualityButton")
+        .popover(isPresented: $showingExportQuality, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            ExportQualityPopover(
+                selection: exportResolution,
+                frameRate: exportFrameRate,
+                bitrateMbps: exportBitrateMbps,
+                onResolutionChange: { exportResolution = $0 },
+                onFrameRateChange: { exportFrameRate = $0 },
+                onBitrateChange: { exportBitrateMbps = $0 }
+            )
+            .presentationCompactAdaptation(.popover)
+            .preferredColorScheme(.light)
+        }
+    }
+
     @ViewBuilder
     private var cancelButton: some View {
-        let cancel = Button("Cancel") { dismiss() }.controlSize(.small)
+        let cancel = Button("Cancel") { dismiss() }
+            .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
+            .controlSize(.small)
         if #available(iOS 26.0, *) {
             cancel.buttonStyle(.glass)
         } else {
@@ -1516,29 +1562,30 @@ struct EditorShellView: View {
     }
 
     /// Charges first (template projects), shows a spinner meanwhile, and only then renders.
-    @ViewBuilder
     private var exportButton: some View {
-        if #available(iOS 26.0, *) {
-            Button(action: startExport) { exportLabel }
-                .buttonStyle(.glassProminent)
-                .controlSize(.small)
-                .disabled(exportGate.isWorking)
-        } else {
-            Button(action: startExport) { exportLabel }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(exportGate.isWorking)
+        Button(action: startExport) {
+            exportLabel
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.black)
+                .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
+                .background(Color.cyan, in: RoundedRectangle(cornerRadius: 10))
         }
+        .buttonStyle(.plain)
+        .disabled(exportGate.isWorking)
+        .accessibilityIdentifier("exportButton")
     }
 
     @ViewBuilder
     private var exportLabel: some View {
-        if exportGate.isWorking { ProgressView().frame(minWidth: 44) } else { Text("Export") }
+        if exportGate.isWorking { ProgressView().tint(.black) } else { Text("Export") }
     }
 
     private func startExport() {
         Task {
-            await exportGate.export(project: project, context: exportContext)
+            await exportGate.export(project: project, context: exportContext,
+                                    settings: ExportSettings(resolution: exportResolution,
+                                                            frameRate: exportFrameRate,
+                                                            bitrateMbps: exportBitrateMbps))
         }
     }
 

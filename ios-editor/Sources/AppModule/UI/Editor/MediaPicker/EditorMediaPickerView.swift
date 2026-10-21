@@ -4,7 +4,7 @@ import SwiftUI
 /// What a picked photo or video is for: swap the media of this clip (`ReplaceClipCommand`). `minVideoMs`: a video shorter than the footage the
 /// clip plays is dimmed (0 for a photo clip).
 struct MediaPickerPurpose: Identifiable, Equatable {
-    enum Mode { case replace, extractAudio, appendMainLane }
+    enum Mode { case replace, extractAudio, appendMainLane, newProject }
     let layerId: String
     let minVideoMs: Double
     var mode: Mode = .replace
@@ -13,6 +13,7 @@ struct MediaPickerPurpose: Identifiable, Equatable {
         case .replace: return "replace-\(layerId)"
         case .extractAudio: return "extract-audio"
         case .appendMainLane: return "append-main-lane"
+        case .newProject: return "new-project"
         }
     }
     var title: String {
@@ -20,12 +21,14 @@ struct MediaPickerPurpose: Identifiable, Equatable {
         case .replace: return "Replace"
         case .extractAudio: return "Extract audio"
         case .appendMainLane: return "Add clips"
+        case .newProject: return "New project"
         }
     }
 
     /// Audio tool > Extract: pick a video from the library, its sound goes on the audio lane.
     static let extractAudio = MediaPickerPurpose(layerId: "", minVideoMs: 0, mode: .extractAudio)
     static let appendMainLane = MediaPickerPurpose(layerId: "", minVideoMs: 0, mode: .appendMainLane)
+    static let newProject = MediaPickerPurpose(layerId: "", minVideoMs: 0, mode: .newProject)
 }
 
 /// The library grid the editor's Replace and Overlay tools use (All / Videos / Photos): the same cells as the template slot picker. For Replace a
@@ -41,6 +44,11 @@ struct EditorMediaPickerView: View {
     /// Extract picks one video, then confirms with the button at the top right.
     @State private var selected: PHAsset?
     @State private var selectedForAppend: [PHAsset] = []
+    @State private var isSubmittingSelection = false
+
+    private var allowsMultipleSelection: Bool {
+        purpose.mode == .appendMainLane || purpose.mode == .newProject
+    }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
 
@@ -72,7 +80,7 @@ struct EditorMediaPickerView: View {
                             if let asset = library.asset(at: index) {
                                 AssetCell(
                                     library: library, asset: asset, dimmed: !canUse(asset), dimmedLabel: "Too short",
-                                    isSelected: purpose.mode == .appendMainLane
+                                    isSelected: allowsMultipleSelection
                                         ? selectedForAppend.contains(where: { $0.localIdentifier == asset.localIdentifier })
                                         : selected?.localIdentifier == asset.localIdentifier
                                 ) { pick(asset) }
@@ -82,7 +90,7 @@ struct EditorMediaPickerView: View {
                 }
                 .accessibilityIdentifier("mediaPickerGrid")
             }
-            if purpose.mode == .appendMainLane {
+            if allowsMultipleSelection {
                 appendButton
             }
         }
@@ -99,18 +107,32 @@ struct EditorMediaPickerView: View {
                 PickedMedia(asset: asset, kind: asset.mediaType == .video ? .video : .photo, durationMs: asset.duration * 1000)
             }
             guard !picked.isEmpty else { return }
+            if purpose.mode == .newProject { isSubmittingSelection = true }
             onAppend(picked)
         } label: {
-            Text(selectedForAppend.isEmpty ? "Add" : "Add (\(selectedForAppend.count))")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(maxWidth: .infinity).frame(height: 50)
-                .background(selectedForAppend.isEmpty ? Color(.tertiarySystemFill) : Color.accentColor, in: Capsule())
-                .foregroundStyle(selectedForAppend.isEmpty ? Color.secondary : Color.white)
+            Group {
+                if isSubmittingSelection {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(.white)
+                        Text("Importing…")
+                    }
+                } else {
+                    Text(selectedForAppend.isEmpty ? actionTitle : "\(actionTitle) (\(selectedForAppend.count))")
+                }
+            }
+            .font(.system(size: 18, weight: .semibold))
+            .frame(maxWidth: .infinity).frame(height: 50)
+            .background(selectedForAppend.isEmpty ? Color(.tertiarySystemFill) : Color.accentColor, in: Capsule())
+            .foregroundStyle(selectedForAppend.isEmpty ? Color.secondary : Color.white)
         }
         .buttonStyle(.plain)
-        .disabled(selectedForAppend.isEmpty)
+        .disabled(selectedForAppend.isEmpty || isSubmittingSelection)
         .padding(.horizontal, 16).padding(.vertical, 12)
         .accessibilityIdentifier("mediaPickerAddSelected")
+    }
+
+    private var actionTitle: String {
+        purpose.mode == .newProject ? "Create project" : "Add"
     }
 
     /// A big Cancel (a 44 pt capsule, 18 pt semibold - the old plain text button was too small to hit or read), the title and what the picker is for.
@@ -166,7 +188,7 @@ struct EditorMediaPickerView: View {
     }
 
     private func pick(_ asset: PHAsset) {
-        if purpose.mode == .appendMainLane {
+        if allowsMultipleSelection {
             if let index = selectedForAppend.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) {
                 selectedForAppend.remove(at: index)
             } else {

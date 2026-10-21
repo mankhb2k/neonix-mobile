@@ -17,7 +17,38 @@ struct TemplateExportContext {
 @MainActor
 protocol ProjectExporter {
     var isAvailable: Bool { get }
-    func export(_ project: V2Project) async throws -> URL
+    func export(_ project: V2Project, settings: ExportSettings) async throws -> URL
+}
+
+enum ExportResolution: String, CaseIterable, Identifiable {
+    case p480, p720, p1080
+    var id: Self { self }
+    var title: String {
+        switch self { case .p480: "480p"; case .p720: "720p"; case .p1080: "1080p" }
+    }
+    var buttonTitle: String {
+        switch self { case .p480: "480"; case .p720: "720"; case .p1080: "1080" }
+    }
+    var longEdge: Int {
+        switch self { case .p480: 854; case .p720: 1280; case .p1080: 1920 }
+    }
+}
+
+struct ExportSettings: Equatable {
+    var resolution: ExportResolution = .p720
+    var frameRate: Int = 30
+    var bitrateMbps: Int = 5
+
+    /// Preserves the composition aspect ratio and returns encoder-compatible even dimensions.
+    func outputSize(for composition: V2Composition) -> (width: Int, height: Int) {
+        let sourceWidth = max(2, Int(composition.width.rounded()))
+        let sourceHeight = max(2, Int(composition.height.rounded()))
+        let longEdge = resolution.longEdge
+        let scale = Double(longEdge) / Double(max(sourceWidth, sourceHeight))
+        let width = max(2, Int((Double(sourceWidth) * scale).rounded()) / 2 * 2)
+        let height = max(2, Int((Double(sourceHeight) * scale).rounded()) / 2 * 2)
+        return (width, height)
+    }
 }
 
 enum ExportError: LocalizedError {
@@ -28,7 +59,112 @@ enum ExportError: LocalizedError {
 /// Placeholder until the offline render pipeline exists.
 struct UnavailableExporter: ProjectExporter {
     var isAvailable: Bool { false }
-    func export(_ project: V2Project) async throws -> URL { throw ExportError.notAvailable }
+    func export(_ project: V2Project, settings: ExportSettings) async throws -> URL { throw ExportError.notAvailable }
+}
+
+struct ExportQualityPopover: View {
+    let selection: ExportResolution
+    let frameRate: Int
+    let bitrateMbps: Int
+    let onResolutionChange: (ExportResolution) -> Void
+    let onFrameRateChange: (Int) -> Void
+    let onBitrateChange: (Int) -> Void
+
+    private let frameRates = [24, 25, 30, 50, 60]
+    private let bitrates = [5, 10, 20, 50, 100]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Export quality").font(.title3.weight(.semibold))
+                Text("Set resolution, frame rate and bitrate").font(.subheadline).foregroundStyle(.secondary)
+            }
+            qualitySlider(title: "Resolution", value: selection.title, choices: ExportResolution.allCases.map(\.title),
+                          selectedIndex: ExportResolution.allCases.firstIndex(of: selection) ?? 1,
+                          onChange: { onResolutionChange(ExportResolution.allCases[$0]) }, identifier: "resolution")
+            qualitySlider(title: "Frame rate", value: "\(frameRate) fps", choices: frameRates.map(String.init),
+                          selectedIndex: frameRates.firstIndex(of: frameRate) ?? 2,
+                          onChange: { onFrameRateChange(frameRates[$0]) }, identifier: "frameRate")
+            qualitySlider(title: "Bitrate", value: "\(bitrateMbps) Mbps", choices: bitrates.map(String.init),
+                          selectedIndex: bitrates.firstIndex(of: bitrateMbps) ?? 0,
+                          onChange: { onBitrateChange(bitrates[$0]) }, identifier: "bitrate")
+            HStack(spacing: 6) {
+                Image(systemName: "film").font(.footnote)
+                Text("MP4 · H.264").font(.footnote)
+                Text("·").font(.footnote)
+                Text("\(frameRate) fps").font(.footnote)
+            }.foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .frame(minWidth: 340, maxWidth: 380, alignment: .leading)
+        .background(Color(.systemBackground))
+        .accessibilityIdentifier("exportQualityPopover")
+    }
+
+    private func qualitySlider(title: String, value: String, choices: [String], selectedIndex: Int,
+                               onChange: @escaping (Int) -> Void, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.body.weight(.medium))
+                Spacer()
+                Text(value).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            SteppedQualitySlider(choices: choices, selectedIndex: selectedIndex, onChange: onChange)
+                .frame(height: 24)
+                .accessibilityIdentifier("exportQualitySlider-\(identifier)")
+            HStack(spacing: 0) {
+                ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
+                    Text(choice)
+                        .font(.caption)
+                        .foregroundStyle(index == selectedIndex ? .primary : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(alignment: index == 0 ? .leading : (index == choices.count - 1 ? .trailing : .center))
+                }
+            }
+        }
+    }
+}
+
+private struct SteppedQualitySlider: View {
+    let choices: [String]
+    let selectedIndex: Int
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            let inset: CGFloat = 9
+            let railWidth = max(0, geometry.size.width - inset * 2)
+            let fraction = choices.count > 1 ? CGFloat(selectedIndex) / CGFloat(choices.count - 1) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color(.systemGray5)).frame(width: railWidth, height: 4).offset(x: inset)
+                Capsule().fill(Color.cyan).frame(width: railWidth * fraction, height: 4).offset(x: inset)
+                ForEach(choices.indices, id: \.self) { index in
+                    Circle()
+                        .fill(index <= selectedIndex ? Color.cyan : Color(.systemGray3))
+                        .frame(width: 5, height: 5)
+                        .position(x: inset + railWidth * CGFloat(index) / CGFloat(max(choices.count - 1, 1)), y: geometry.size.height / 2)
+                }
+                Circle()
+                    .fill(Color(.systemBackground))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(Color.cyan, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                    .position(x: inset + railWidth * fraction, y: geometry.size.height / 2)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
+                guard choices.count > 1, railWidth > 0 else { return }
+                let position = min(max(gesture.location.x - inset, 0), railWidth) / railWidth
+                onChange(Int((position * CGFloat(choices.count - 1)).rounded()))
+            })
+        }
+        .accessibilityElement()
+        .accessibilityValue(choices.indices.contains(selectedIndex) ? choices[selectedIndex] : "")
+        .accessibilityAdjustableAction { direction in
+            let next = selectedIndex + (direction == .increment ? 1 : -1)
+            onChange(min(max(next, 0), choices.count - 1))
+        }
+    }
 }
 
 struct ExportedVideo: Identifiable {
@@ -84,15 +220,16 @@ struct OfflineProjectExporter: ProjectExporter {
         }
     }
 
-    func export(_ editorProject: V2Project) async throws -> URL {
+    func export(_ editorProject: V2Project, settings: ExportSettings = ExportSettings()) async throws -> URL {
         let framePlan = TransitionFramePlan(project: editorProject)
         let project = framePlan.renderProject(from: editorProject)
         let endMs = max(project.layers.map { $0.timing.start + $0.timing.duration }.max() ?? 0,
                         project.audio.tracks.flatMap(\.clips).map { $0.timing.start + $0.timing.duration }.max() ?? 0)
         guard endMs > 0 else { throw Failure.emptyProject }
-        let fps = min(max(project.composition.fps, 1), 60)
-        let width = max(2, Int(project.composition.width.rounded()) / 2 * 2)
-        let height = max(2, Int(project.composition.height.rounded()) / 2 * 2)
+        let fps = Double(min(max(settings.frameRate, 1), 60))
+        let outputSize = settings.outputSize(for: project.composition)
+        let width = outputSize.width
+        let height = outputSize.height
         let outputDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Exports", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         let stem = UUID().uuidString
@@ -103,7 +240,7 @@ struct OfflineProjectExporter: ProjectExporter {
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width, AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: max(width * height * 5, 1_000_000)]
+            AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: max(settings.bitrateMbps * 1_000_000, 1_000_000)]
         ])
         input.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
@@ -169,7 +306,10 @@ struct OfflineProjectExporter: ProjectExporter {
                 var rawBuffer: CVPixelBuffer?
                 guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &rawBuffer) == kCVReturnSuccess,
                       let buffer = rawBuffer else { throw Failure.cannotRenderFrame }
-                ciContext.render(CIImage(cgImage: image), to: buffer,
+                let sourceImage = CIImage(cgImage: image)
+                let scaledImage = sourceImage.transformed(by: CGAffineTransform(scaleX: CGFloat(width) / sourceImage.extent.width,
+                                                                                y: CGFloat(height) / sourceImage.extent.height))
+                ciContext.render(scaledImage, to: buffer,
                                  bounds: CGRect(x: 0, y: 0, width: width, height: height),
                                  colorSpace: CGColorSpaceCreateDeviceRGB())
                 while !input.isReadyForMoreMediaData {
@@ -309,7 +449,7 @@ final class ExportGate {
         self.chargesWithoutExporter = chargesWithoutExporter
     }
 
-    func export(project: V2Project, context: TemplateExportContext?) async {
+    func export(project: V2Project, context: TemplateExportContext?, settings: ExportSettings = ExportSettings()) async {
         guard !isWorking else { return }
         isWorking = true
         completed = false
@@ -335,7 +475,7 @@ final class ExportGate {
             }
         }
         do {
-            let url = try await exporter.export(project)
+            let url = try await exporter.export(project, settings: settings)
             completed = true
             sharedFile = ExportedVideo(url: url)
         } catch {

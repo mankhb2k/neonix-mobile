@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neonix · 3:4 Simulator Pair Preview</title>
+<style>
+  :root { --bg:#101018; --ink:#fff; --muted:#aaa; --scale:.34; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--ink); font-family:-apple-system,"SF Pro Display",sans-serif; }
+  .bar { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:12px 20px; background:#0d0d14; border-bottom:1px solid #2a2a3a; font-size:14px; }
+  .bar input { width:140px; }
+  .gallery { display:flex; flex-wrap:wrap; gap:24px; padding:24px; align-items:flex-start; }
+  .cell { width:calc(1200px * var(--scale)); }
+  .frame { width:calc(1200px * var(--scale)); height:calc(1600px * var(--scale)); position:relative; overflow:hidden; border-radius:10px; box-shadow:0 8px 30px #0008; }
+  .art { width:1200px; height:1600px; position:relative; overflow:hidden; background:#9bbbd3 url('balloon-blur.png') center/cover no-repeat; }
+  .pair { position:absolute; inset:0; display:flex; justify-content:center; align-items:center; gap:20px; }
+  .phone { position:relative; width:540px; aspect-ratio:1339/2716; flex:none; }
+  .phone .raw { position:absolute; z-index:0; left:6.5%; top:3.15%; width:87%; height:93.7%; object-fit:fill; border-radius:10% / 3%; }
+  .phone .frame-png { position:absolute; z-index:1; inset:0; width:100%; height:100%; object-fit:fill; }
+  .frame .art { transform:scale(var(--scale)); transform-origin:top left; }
+  .cell small { display:block; margin-top:8px; color:var(--muted); font-size:12px; }
+  body.single .bar { display:none; }
+  body.single .gallery { display:block; padding:0; }
+  body.single .cell, body.single .frame { width:1200px; height:1600px; border-radius:0; box-shadow:none; }
+  body.single .cell small { display:none; }
+  body.single .frame .art { transform:none; }
+  @media(max-width:650px) { .gallery { gap:14px; padding:14px; } }
+</style>
+</head>
+<body>
+<div class="bar"><b>Neonix · 6 ảnh · 3:4 · 1200×1600</b><label>Kích thước <input id="scale" type="range" min="20" max="60" value="34"></label><span style="color:var(--muted)">Ghép theo chủ đề / nhóm chức năng</span></div>
+<main class="gallery" id="gallery"></main>
+<script>
+const pairs=[
+  {theme:'Preview & khung hình', files:['01-hero','11-crop']},
+  {theme:'Kiểu chữ & glow', files:['02-text-looks','03-text-glow']},
+  {theme:'Filter & chỉnh màu', files:['04-filter','05-adjust']},
+  {theme:'Biến đổi & chuyển động', files:['06-transform','07-animation']},
+  {theme:'Tốc độ & speed curve', files:['08-speed','09-speed-curve']},
+  {theme:'Hiệu ứng âm thanh & fade', files:['10-sound-fx','12-audio-fade']},
+];
+const gallery=document.querySelector('#gallery');
+const only=Number(new URLSearchParams(location.search).get('only'))||0;
+if(only) document.body.classList.add('single');
+for(let i=0;i<pairs.length;i++) {
+  if(only && only!==i+1) continue;
+  const pair=pairs[i];
+  const cell=document.createElement('section'); cell.className='cell';
+  cell.innerHTML=`<div class="frame"><div class="art"><div class="pair">${pair.files.map(name=>`<div class="phone"><img class="raw" src="raw/${name}.png" alt="Neonix ${name} preview"><img class="frame-png" src="phone-frame.png" alt=""></div>`).join('')}</div></div></div><small>${String(i+1).padStart(2,'0')} · ${pair.theme} — ${pair.files.join(' + ')}</small>`;
+  gallery.append(cell);
+}
+document.querySelector('#scale').oninput=e=>document.documentElement.style.setProperty('--scale',e.target.value/100);
+</script>
+</body>
+</html>

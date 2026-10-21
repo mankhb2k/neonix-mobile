@@ -1871,7 +1871,7 @@
 				GOOGLE_WEB_CLIENT_ID = "949351619628-atvncosdpv65q5c0gdg67oaf0kggmfdi.apps.googleusercontent.com";
 				INFOPLIST_FILE = "Generated-Info.plist";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Cho phép truy cập micro để ghi âm giọng nói vào video";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Neonix needs your photos and videos to fill a template with your own media.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Neonix needs access to import photos and videos into your projects.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1921,7 +1921,7 @@
 				GOOGLE_WEB_CLIENT_ID = "949351619628-atvncosdpv65q5c0gdg67oaf0kggmfdi.apps.googleusercontent.com";
 				INFOPLIST_FILE = "Generated-Info.plist";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Cho phép truy cập micro để ghi âm giọng nói vào video";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Neonix needs your photos and videos to fill a template with your own media.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Neonix needs access to import photos and videos into your projects.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (

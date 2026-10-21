@@ -13,6 +13,20 @@ final class TemplateFlowTests: XCTestCase {
     private func photo(_ id: String) -> V2Asset { .image(V2ImageAsset(id: id, uri: "\(id).jpg", width: 1000, height: 1500)) }
     private func video(_ id: String) -> V2Asset { .video(V2VideoAsset(id: id, uri: "\(id).mov", width: 1080, height: 1920, duration: 20_000)) }
 
+    func testExportResolutionPreservesAspectRatioAtEachSupportedLevel() {
+        let portrait = V2Composition(width: 360, height: 640, fps: 30, background: "#000000")
+        XCTAssertEqual(ExportSettings(resolution: .p480).outputSize(for: portrait).width, 480)
+        XCTAssertEqual(ExportSettings(resolution: .p480).outputSize(for: portrait).height, 854)
+        XCTAssertEqual(ExportSettings(resolution: .p720).outputSize(for: portrait).width, 720)
+        XCTAssertEqual(ExportSettings(resolution: .p720).outputSize(for: portrait).height, 1280)
+        XCTAssertEqual(ExportSettings(resolution: .p1080).outputSize(for: portrait).width, 1080)
+        XCTAssertEqual(ExportSettings(resolution: .p1080).outputSize(for: portrait).height, 1920)
+
+        let landscape = V2Composition(width: 1920, height: 1080, fps: 30, background: "#000000")
+        XCTAssertEqual(ExportSettings(resolution: .p720).outputSize(for: landscape).width, 1280)
+        XCTAssertEqual(ExportSettings(resolution: .p720).outputSize(for: landscape).height, 720)
+    }
+
     // MARK: Slot rules
 
     func testSlotRulesForPhotosAndVideos() {
@@ -152,12 +166,21 @@ final class TemplateFlowTests: XCTestCase {
         let available: Bool
         let log: ExportLog
         var isAvailable: Bool { available }
-        func export(_ project: V2Project) async throws -> URL {
+        func export(_ project: V2Project, settings: ExportSettings) async throws -> URL {
             log.exported += 1
+            log.resolution = settings.resolution
+            log.frameRate = settings.frameRate
+            log.bitrateMbps = settings.bitrateMbps
             return FileManager.default.temporaryDirectory.appendingPathComponent("stub-export.mp4")
         }
     }
-    final class ExportLog { var charged = 0; var exported = 0 }
+    final class ExportLog {
+        var charged = 0
+        var exported = 0
+        var resolution: ExportResolution?
+        var frameRate: Int?
+        var bitrateMbps: Int?
+    }
 
     private let context = TemplateExportContext(templateId: "t", versionId: nil, creditCost: 6)
 
@@ -179,9 +202,13 @@ final class TemplateFlowTests: XCTestCase {
         let log = ExportLog()
         let paid = try result(charged: true, balance: 14)
         let gate = ExportGate(charge: { _ in log.charged += 1; return paid }, exporter: StubExporter(available: true, log: log), chargesWithoutExporter: false)
-        await gate.export(project: compile(try repoTemplate("photo-slideshow").document), context: context)
+        await gate.export(project: compile(try repoTemplate("photo-slideshow").document), context: context,
+                          settings: ExportSettings(resolution: .p720, frameRate: 50, bitrateMbps: 20))
         XCTAssertEqual(log.charged, 1)
         XCTAssertEqual(log.exported, 1)
+        XCTAssertEqual(log.resolution, .p720, "the selected quality reaches the exporter")
+        XCTAssertEqual(log.frameRate, 50, "the selected frame rate reaches the exporter")
+        XCTAssertEqual(log.bitrateMbps, 20, "the selected bitrate reaches the exporter")
         XCTAssertTrue(gate.completed)
         XCTAssertNil(gate.alert)
     }

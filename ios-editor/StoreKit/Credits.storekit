@@ -46,6 +46,51 @@
       "productID": "com.neonix.editor.credits.300",
       "referenceName": "300 credits",
       "type": "Consumable"
+    },
+    {
+      "displayPrice": "1.99",
+      "familyShareable": false,
+      "internalID": "6700000103",
+      "localizations": [
+        {
+          "description": "Optional one-time tip to support Neonix development",
+          "displayName": "Small tip",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.donate.small",
+      "referenceName": "Small tip",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "4.99",
+      "familyShareable": false,
+      "internalID": "6700000104",
+      "localizations": [
+        {
+          "description": "Optional one-time tip to support Neonix development",
+          "displayName": "Supporter tip",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.donate.medium",
+      "referenceName": "Supporter tip",
+      "type": "Consumable"
+    },
+    {
+      "displayPrice": "9.99",
+      "familyShareable": false,
+      "internalID": "6700000105",
+      "localizations": [
+        {
+          "description": "Optional one-time tip to support Neonix development",
+          "displayName": "Generous tip",
+          "locale": "en_US"
+        }
+      ],
+      "productID": "com.neonix.editor.donate.large",
+      "referenceName": "Generous tip",
+      "type": "Consumable"
     }
   ],
   "settings": {},

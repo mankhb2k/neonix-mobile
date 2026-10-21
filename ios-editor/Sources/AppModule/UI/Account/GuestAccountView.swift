@@ -16,7 +16,7 @@ struct GuestAccountView: View {
                             Text("Your Neonix account")
                                 .font(.headline.weight(.semibold))
                                 .foregroundStyle(.primary)
-                            Text("Sign in to manage credits and export")
+                            Text("Sign in to manage your account")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -80,6 +80,13 @@ struct GuestAccountView: View {
                         } label: {
                             accountRow("Send feedback", detail: nil, icon: "envelope")
                         }
+                        divider
+                        NavigationLink {
+                            DonateView()
+                        } label: {
+                            accountRow("Donate", detail: nil, icon: "heart")
+                        }
+                        .accessibilityIdentifier("row-donate")
                     }
                     .padding(.horizontal, 16)
                     .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -145,7 +152,7 @@ struct GuestAccountView: View {
                     .font(.system(size: 31, weight: .bold, design: .rounded))
                     .lineSpacing(-2)
                     .foregroundStyle(.white)
-                Text("One Google sign-in for credits and exports.")
+                Text("One Google sign-in to manage your account.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.84))
             }

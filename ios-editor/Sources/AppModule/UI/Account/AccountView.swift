@@ -1,10 +1,10 @@
 import SwiftUI
+import Observation
+import StoreKit
 
 struct AccountView: View {
     @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system
     @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
-    /// Last balance the server gave (-1 = never); shown at once and refreshed below, so the row is never empty.
-    @AppStorage(CreditsView.lastBalanceKey) private var lastBalance = -1
     @StateObject private var account = GoogleAccountSession()
     @State private var showingSignIn = false
 
@@ -20,15 +20,11 @@ struct AccountView: View {
         }
         .fullScreenCover(isPresented: $showingSignIn) {
             GoogleLoginView(account: account) {
-                if let balance = try? await NeonixAPIClient(config: .current).balance() {
-                    lastBalance = balance
-                }
                 showingSignIn = false
             }
         }
         .task {   // refreshed each time the tab appears
             await account.restore()
-            if let balance = try? await NeonixAPIClient(config: .current).balance() { lastBalance = balance }
         }
     }
 
@@ -53,7 +49,7 @@ struct AccountView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(account.profile?.displayName ?? (account.isSignedIn ? "Neonix Account" : "Guest"))
                             .font(.body.weight(.semibold))
-                        Text(account.email ?? (account.isSignedIn ? "Google account" : "Sign in to export and manage credits"))
+                        Text(account.email ?? (account.isSignedIn ? "Google account" : "Sign in to manage your account"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -63,7 +59,6 @@ struct AccountView: View {
                     Button("Sign out", role: .destructive) {
                         Task {
                             await account.signOut()
-                            lastBalance = -1
                         }
                     }
                     .disabled(account.isLoading)
@@ -75,16 +70,6 @@ struct AccountView: View {
 
             Section("Account") {
                 accountLabel("Edit profile", symbol: "person.crop.circle.fill")
-                NavigationLink {
-                    CreditsView()
-                } label: {
-                    HStack {
-                        accountLabel("Credits", symbol: "bitcoinsign.circle.fill")
-                        Spacer()
-                        Text(verbatim: lastBalance >= 0 ? String(lastBalance) : "—").foregroundColor(.secondary)
-                    }
-                }
-                .accessibilityIdentifier("row-credits")
                 NavigationLink {
                     StorageView()
                 } label: {
@@ -134,6 +119,12 @@ struct AccountView: View {
                 } label: {
                     accountLabel("Send feedback", symbol: "envelope.fill")
                 }
+                NavigationLink {
+                    DonateView()
+                } label: {
+                    accountLabel("Donate", symbol: "heart.fill")
+                }
+                .accessibilityIdentifier("row-donate")
             }
 
             #if DEBUG
@@ -164,6 +155,151 @@ struct AccountView: View {
         HStack(spacing: 12) {
             AccountGradientIcon(systemName: symbol, size: 32)
             Text(title)
+        }
+    }
+}
+
+@Observable @MainActor
+final class DonationStore {
+    static let productIDs = [
+        "com.neonix.editor.donate.small",
+        "com.neonix.editor.donate.medium",
+        "com.neonix.editor.donate.large",
+    ]
+
+    private(set) var products: [Product] = []
+    private(set) var isLoading = false
+    private(set) var purchasingID: String?
+    var message: String?
+    var didDonate = false
+    @ObservationIgnored private var updatesTask: Task<Void, Never>?
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await Product.products(for: Self.productIDs)
+            products = loaded.sorted {
+                (Self.productIDs.firstIndex(of: $0.id) ?? .max) < (Self.productIDs.firstIndex(of: $1.id) ?? .max)
+            }
+            listenForTransactionsIfNeeded()
+        } catch {
+            message = "Donation options couldn't be loaded. Please try again later."
+        }
+    }
+
+    func donate(_ product: Product) async {
+        guard purchasingID == nil else { return }
+        purchasingID = product.id
+        defer { purchasingID = nil }
+        do {
+            switch try await product.purchase() {
+            case .success(let result):
+                guard case .verified(let transaction) = result else {
+                    message = "The App Store couldn't verify this purchase."
+                    return
+                }
+                await transaction.finish()
+                didDonate = true
+            case .pending:
+                message = "Your purchase is waiting for approval."
+            case .userCancelled:
+                break
+            @unknown default:
+                message = "The purchase couldn't be completed. Please try again."
+            }
+        } catch {
+            message = "The purchase couldn't be completed. Please try again."
+        }
+    }
+
+    private func listenForTransactionsIfNeeded() {
+        guard updatesTask == nil else { return }
+        updatesTask = Task {
+            for await result in Transaction.updates {
+                guard case .verified(let transaction) = result,
+                      Self.productIDs.contains(transaction.productID) else { continue }
+                await transaction.finish()
+                didDonate = true
+            }
+        }
+    }
+}
+
+struct DonateView: View {
+    @State private var store = DonationStore()
+
+    var body: some View {
+        List {
+            Section {
+                VStack(spacing: 12) {
+                    AccountGradientIcon(systemName: "heart.fill", size: 58)
+                    Text("Support Neonix")
+                        .font(.title3.weight(.semibold))
+                    Text("Your optional tip helps fund ongoing development. Neonix's editing features remain available to everyone.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .listRowBackground(Color.clear)
+            }
+
+            Section {
+                if store.isLoading && store.products.isEmpty {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if store.products.isEmpty {
+                    Text("Donation options are unavailable right now.")
+                        .foregroundStyle(.secondary)
+                    Button("Try again") { Task { await store.load() } }
+                } else {
+                    ForEach(store.products, id: \.id) { product in
+                        Button {
+                            Task { await store.donate(product) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "heart")
+                                    .foregroundStyle(.tint)
+                                    .frame(width: 26)
+                                Text(product.displayName.isEmpty ? "One-time tip" : product.displayName)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if store.purchasingID == product.id {
+                                    ProgressView()
+                                } else {
+                                    Text(product.displayPrice)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .disabled(store.purchasingID != nil)
+                        .accessibilityIdentifier("donate-\(product.id)")
+                    }
+                }
+            } header: {
+                Text("Choose a tip")
+            } footer: {
+                Text("Tips are optional, one-time purchases processed by the App Store.")
+            }
+        }
+        .navigationTitle("Donate")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await store.load() }
+        .alert("Thank you", isPresented: $store.didDonate) {
+            Button("Done", role: .cancel) { }
+        } message: {
+            Text("Thanks for supporting Neonix development.")
+        }
+        .alert("Purchase", isPresented: Binding(
+            get: { store.message != nil },
+            set: { if !$0 { store.message = nil } }
+        )) {
+            Button("OK", role: .cancel) { store.message = nil }
+        } message: {
+            Text(store.message ?? "")
         }
     }
 }

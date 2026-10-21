@@ -15,22 +15,6 @@ struct HelpCenterView: View {
     }
 
     static let topics: [Topic] = [
-        Topic(title: "Templates", entries: [
-            Entry(question: "How do I make a video from a template?",
-                  answer: "Open a template on Home, tap use, then fill each slot with a photo or video. Change the texts and music if you like, then tap Export."),
-            Entry(question: "Why was my video clip refused for a slot?",
-                  answer: "A video must be at least as long as its slot. A longer video is cropped to the slot's length, and you choose where it starts."),
-            Entry(question: "Can I change the template's text and music?",
-                  answer: "Yes. The result screen has a Text section with the template's texts and an Audio switch for the music."),
-        ]),
-        Topic(title: "Credits", entries: [
-            Entry(question: "What are credits for?",
-                  answer: "Credits unlock templates. A template is bought once, with its first export."),
-            Entry(question: "Do I pay every time I export?",
-                  answer: "No. After the first export of a template it is yours: later exports of it are free."),
-            Entry(question: "How do I get a refund for credits?",
-                  answer: "Credit purchases go through the App Store, so refunds are handled by Apple at reportaproblem.apple.com. Credits that were refunded are taken back from your balance."),
-        ]),
         Topic(title: "Editing", entries: [
             Entry(question: "How do I trim or split a clip?",
                   answer: "Tap a clip on the timeline. The bottom row then shows that clip's tools, including Split. Drag a clip's handles to trim it."),
@@ -42,6 +26,10 @@ struct HelpCenterView: View {
         Topic(title: "Your data", entries: [
             Entry(question: "The app can't see my photos or microphone.",
                   answer: "Open the Settings app, choose Neonix, and allow Photos or Microphone access."),
+        ]),
+        Topic(title: "Support Neonix", entries: [
+            Entry(question: "How does Donate work?",
+                  answer: "Donations are optional one-time tips that support Neonix development. They do not unlock app features."),
         ]),
     ]
 

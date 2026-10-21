@@ -66,3 +66,53 @@ final class CreditStoreTests: XCTestCase {
         XCTAssertEqual(afterRetry, afterBuy)
     }
 }
+
+
+import StoreKitTest
+import XCTest
+@testable import NeonixEditor
+
+@MainActor
+final class DonationStoreTests: XCTestCase {
+    private var session: SKTestSession!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("StoreKit/Credits.storekit")
+        session = try SKTestSession(contentsOf: file)
+        session.resetToDefaultState()
+        session.disableDialogs = true
+        session.clearTransactions()
+    }
+
+    func testTipProductsLoadAndPurchaseAsOneTimeTips() async throws {
+        let store = DonationStore()
+        await store.load()
+
+        XCTAssertEqual(store.products.map(\.id), DonationStore.productIDs)
+        XCTAssertEqual(store.products.map(\.displayPrice), ["$1.99", "$4.99", "$9.99"])
+        let product = try XCTUnwrap(store.products.first)
+        await store.donate(product)
+
+        XCTAssertTrue(store.didDonate)
+        XCTAssertTrue(session.allTransactions().contains { $0.productIdentifier == product.id && $0.state == .purchased })
+    }
+}
+
+final class ProjectCreationTests: XCTestCase {
+    func testNewProjectUsesPortraitCanvasAndAddsPickedMediaInOrder() {
+        let photo = V2Asset.image(V2ImageAsset(id: "photo-1", uri: "photo.jpg", width: 1200, height: 1600))
+        let video = V2Asset.video(V2VideoAsset(id: "video-1", uri: "video.mov", width: 1920, height: 1080, duration: 8_500))
+        let project = ProjectsView.makeNewProject(items: [
+            MainLaneMediaItem(asset: photo, layerId: "layer-photo"),
+            MainLaneMediaItem(asset: video, layerId: "layer-video"),
+        ])
+
+        XCTAssertEqual(project.composition.width / project.composition.height, 9.0 / 16.0, accuracy: 0.0001)
+        XCTAssertEqual(project.layers.map(\.id), ["layer-photo", "layer-video"])
+        XCTAssertEqual(project.layers.map(\.timing.start), [0, 3_000])
+        XCTAssertEqual(project.layers.map(\.timing.duration), [3_000, 8_500])
+        XCTAssertEqual(Set(project.assets.map(\.id)), Set(["photo-1", "video-1"]))
+    }
+}

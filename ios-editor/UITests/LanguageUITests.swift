@@ -13,7 +13,7 @@ final class LanguageUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
-        app.tabBars.buttons.element(boundBy: 2).tap()   // Account (its label is translated)
+        app.tabBars.buttons.element(boundBy: 1).tap()   // Account (its label is translated)
 
         // A known start: English.
         openLanguage(app)
@@ -29,9 +29,9 @@ final class LanguageUITests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Giao diện"].waitForExistence(timeout: 5), "Appearance row should read Giao diện")
         app.staticTexts["Trung tâm trợ giúp"].tap()
-        XCTAssertTrue(app.staticTexts["Làm video từ mẫu như thế nào?"].waitForExistence(timeout: 5)
-                      || app.buttons["Làm video từ mẫu như thế nào?"].waitForExistence(timeout: 2),
-                      "String-typed text goes through AppLanguage.string")
+        XCTAssertTrue(app.staticTexts["Làm sao để cắt hoặc chia một clip?"].waitForExistence(timeout: 5)
+                      || app.buttons["Làm sao để cắt hoặc chia một clip?"].waitForExistence(timeout: 2),
+                      "the help center only lists currently available editor features")
 
         app.navigationBars.buttons.firstMatch.tap()
         openLanguage(app)

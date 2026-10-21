@@ -10,6 +10,7 @@ struct ProjectSample: Identifiable {
     let gradient: [Color]
     let compositionWidth: Double
     let compositionHeight: Double
+    var editorProject: V2Project? = nil
 }
 
 private struct ProjectRow: View {
@@ -55,6 +56,10 @@ struct ProjectsView: View {
     // `fullScreenCover`, not `NavigationLink` — a pushed page inside a
     // `TabView` leaves this tab's own tab bar showing underneath it.
     @State private var openedProject: ProjectSample?
+    @State private var newProjectPicker: MediaPickerPurpose?
+    @State private var projectToOpenAfterPickerDismisses: ProjectSample?
+    @State private var isCreatingProject = false
+    @State private var creationError: String?
 
     var body: some View {
         List {
@@ -71,15 +76,100 @@ struct ProjectsView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    projects.insert(ProjectSample(name: "New Project", lastEdited: "Just now", gradient: [.gray, .black], compositionWidth: 360, compositionHeight: 640), at: 0)
+                    newProjectPicker = .newProject
                 } label: {
                     Image(systemName: "plus")
                 }
+                .accessibilityLabel("Create project")
+                .accessibilityIdentifier("createProjectButton")
             }
+        }
+        .fullScreenCover(item: $newProjectPicker, onDismiss: {
+            if let project = projectToOpenAfterPickerDismisses {
+                projectToOpenAfterPickerDismisses = nil
+                openedProject = project
+            }
+        }) { purpose in
+            EditorMediaPickerView(
+                purpose: purpose,
+                onPick: { _ in },
+                onAppend: { picked in
+                    Task { await createProject(from: picked) }
+                },
+                onCancel: { newProjectPicker = nil }
+            )
         }
         .fullScreenCover(item: $openedProject) { project in
             EditorShellView(project: Self.openEditorProject(for: project))
         }
+        .overlay {
+            if isCreatingProject {
+                ZStack {
+                    Color.black.opacity(0.32).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Creating project…").font(.subheadline.weight(.medium))
+                    }
+                    .padding(22)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .accessibilityIdentifier("creatingProjectProgress")
+            }
+        }
+        .alert("Couldn't create project", isPresented: Binding(
+            get: { creationError != nil },
+            set: { if !$0 { creationError = nil } }
+        )) {
+            Button("OK", role: .cancel) { creationError = nil }
+        } message: {
+            Text(creationError ?? "Please select a photo or video and try again.")
+        }
+    }
+
+    @MainActor
+    private func createProject(from picked: [PickedMedia]) async {
+        guard !picked.isEmpty else { return }
+        isCreatingProject = true
+        defer { isCreatingProject = false }
+
+        var items: [MainLaneMediaItem] = []
+        var firstImportError: Error?
+        for media in picked {
+            let layerId = "main-\(UUID().uuidString.prefix(8).lowercased())"
+            let assetId = "media-\(UUID().uuidString.prefix(8).lowercased())"
+            do {
+                let asset = try await PhotoImporter.importMedia(media.asset, kind: media.kind, assetId: assetId)
+                items.append(MainLaneMediaItem(asset: asset, layerId: layerId))
+            } catch {
+                if firstImportError == nil { firstImportError = error }
+            }
+        }
+
+        guard !items.isEmpty else {
+            creationError = firstImportError?.localizedDescription ?? "Couldn't import the selected media."
+            newProjectPicker = nil
+            return
+        }
+
+        let project = Self.makeNewProject(items: items)
+        let composition = project.composition
+        let sample = ProjectSample(
+            name: "New Project",
+            lastEdited: "Just now",
+            gradient: [.gray, .black],
+            compositionWidth: composition.width,
+            compositionHeight: composition.height,
+            editorProject: project
+        )
+        projects.insert(sample, at: 0)
+        projectToOpenAfterPickerDismisses = sample
+        newProjectPicker = nil
+    }
+
+    static func makeNewProject(items: [MainLaneMediaItem]) -> V2Project {
+        let composition = V2Composition(width: 360, height: 640, fps: 30, background: "#000000")
+        let emptyProject = V2Project(id: UUID().uuidString, composition: composition, assets: [], layers: [])
+        return AppendMainLaneMediaCommand(items: items).apply(to: emptyProject)
     }
 
     /// "Trip to Paris" (the 9:16 sample) gets extra demo content — a
@@ -118,6 +208,7 @@ struct ProjectsView: View {
     }
 
     static func openEditorProject(for project: ProjectSample) -> V2Project {
+        if let editorProject = project.editorProject { return editorProject }
         let videoProject = compile(SampleProjectBuilder.makeDocument(
             media: .videoPortrait, inOption: .none, outOption: .none,
             effectOption: .none, easingOption: .linear,

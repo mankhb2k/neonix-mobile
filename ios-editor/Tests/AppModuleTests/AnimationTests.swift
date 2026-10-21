@@ -63,7 +63,8 @@ final class AnimationTests: XCTestCase {
             let transitioned = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: kind, durationMs: 150).apply(to: project)
             XCTAssertEqual(TransitionWrappers.applied(for: "b", in: transitioned.layers)?.kind, kind)
             XCTAssertEqual(transitioned.layers.first { $0.id == "b" }?.tracks?.first?.id, "own-move")
-            let output = try await OfflineProjectExporter().export(transitioned)
+            let output = try await OfflineProjectExporter().export(
+                transitioned, settings: ExportSettings(resolution: .p480, frameRate: 30, bitrateMbps: 5))
             defer { try? FileManager.default.removeItem(at: output) }
             XCTAssertGreaterThan(try Data(contentsOf: output).count, 1000, kind.rawValue)
             let exported = AVURLAsset(url: output)

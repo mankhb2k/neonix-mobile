@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" width="360" height="360" role="img" aria-label="Neonix">
+  <title>Neonix</title>
+  <!-- Four viewfinder corners: butt-capped strokes, rounded outer corners -->
+  <g fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="butt" stroke-linejoin="round">
+    <path d="M105 25H37A16 16 0 0 0 21 41V107"/>
+    <path d="M255 25H323A16 16 0 0 1 339 41V107"/>
+    <path d="M21 253V319A16 16 0 0 0 37 335H105"/>
+    <path d="M339 253V319A16 16 0 0 1 323 335H255"/>
+  </g>
+  <!-- Play triangle: inset triangle + a wide round-joined stroke gives the rounded corners -->
+  <path d="M135 106L254 177L135 248Z" fill="currentColor" stroke="currentColor" stroke-width="24" stroke-linejoin="round"/>
+</svg>
