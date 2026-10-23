@@ -8,6 +8,11 @@ import SwiftUI
 private struct LayerTreeNode {
     var layer: V2Layer
     var children: [LayerTreeNode]
+
+    func containsPrimaryMedia(order: Int) -> Bool {
+        (layer.order == order && (layer.type == "video" || layer.type == "image"))
+            || children.contains { $0.containsPrimaryMedia(order: order) }
+    }
 }
 
 /// Protocol V2 stores layers as a flat array; only `parentLayerId`
@@ -83,21 +88,70 @@ struct PreviewCanvas: View {
 
     private var content: some View {
         let tree = LayerTree.build(from: layers)
+        let primaryLaneOrder = layers.filter { $0.type == "video" || $0.type == "image" }.map(\.order).min()
+        let mainLaneNodes = tree.filter { node in
+            primaryLaneOrder.map { node.containsPrimaryMedia(order: $0) } ?? false
+        }
+        let mainLaneRootIDs = Set(mainLaneNodes.map(\.layer.id))
+        let firstMainLaneIndex = tree.firstIndex { mainLaneRootIDs.contains($0.layer.id) }
         return ZStack {
             Color(hex: composition.background)
-            ForEach(tree, id: \.layer.id) { node in
-                LayerNodeView(
-                    node: node,
-                    atMs: atMs,
-                    assets: assets,
-                    filters: filters,
-                    masks: masks,
-                    playerEngine: playerEngine,
-                    exportFrames: exportFrames,
-                    transitionFramePlan: transitionFramePlan
-                )
+            ForEach(Array(tree.enumerated()), id: \.element.layer.id) { index, node in
+                if mainLaneRootIDs.contains(node.layer.id) {
+                    if index == firstMainLaneIndex {
+                        MainLaneCompositor(
+                            nodes: mainLaneNodes,
+                            atMs: atMs,
+                            assets: assets,
+                            allLayers: layers,
+                            filters: filters,
+                            masks: masks,
+                            playerEngine: playerEngine,
+                            exportFrames: exportFrames,
+                            transitionFramePlan: transitionFramePlan
+                        )
+                    }
+                } else {
+                    LayerNodeView(
+                        node: node,
+                        atMs: atMs,
+                        assets: assets,
+                        allLayers: layers,
+                        filters: filters,
+                        masks: masks,
+                        playerEngine: playerEngine,
+                        exportFrames: exportFrames,
+                        transitionFramePlan: transitionFramePlan
+                    )
+                }
             }
         }
+        .clipped()
+    }
+}
+
+/// The main video lane is resolved and composited as one bounded surface.
+/// Overlays remain separate siblings so their authored z-order is preserved.
+private struct MainLaneCompositor: View {
+    let nodes: [LayerTreeNode]
+    let atMs: Double
+    let assets: [V2Asset]
+    let allLayers: [V2Layer]
+    let filters: [V2Filter]
+    let masks: [V2Mask]
+    let playerEngine: EditorPlaybackEngine
+    let exportFrames: [String: CGImage]?
+    let transitionFramePlan: TransitionFramePlan?
+
+    var body: some View {
+        ZStack {
+            ForEach(nodes, id: \.layer.id) { node in
+                LayerNodeView(node: node, atMs: atMs, assets: assets, allLayers: allLayers,
+                              filters: filters, masks: masks, playerEngine: playerEngine,
+                              exportFrames: exportFrames, transitionFramePlan: transitionFramePlan)
+            }
+        }
+        .compositingGroup()
         .clipped()
     }
 }
@@ -109,6 +163,7 @@ private struct LayerNodeView: View {
     let node: LayerTreeNode
     let atMs: Double
     let assets: [V2Asset]
+    let allLayers: [V2Layer]
     let filters: [V2Filter]
     let masks: [V2Mask]
     let playerEngine: EditorPlaybackEngine
@@ -117,8 +172,9 @@ private struct LayerNodeView: View {
 
     /// A layer is visible only inside its own timing window. Video views stay mounted below so their player sessions remain prepared.
     private var isOutsideItsTime: Bool {
-        if node.layer.type == "video", transitionFramePlan?.isVisible(node.layer.id, at: atMs) == true { return false }
-        return atMs < node.layer.timing.start || atMs > node.layer.timing.start + node.layer.timing.duration
+        if transitionFramePlan?.isVisible(node.layer.id, at: atMs, layers: allLayers) == true { return false }
+        let resolved = transitionFramePlan?.renderLayer(node.layer, at: atMs, layers: allLayers) ?? node.layer
+        return atMs < resolved.timing.start || atMs > resolved.timing.start + resolved.timing.duration
     }
 
     var body: some View {
@@ -135,7 +191,8 @@ private struct LayerNodeView: View {
     }
 
     @ViewBuilder private var drawn: some View {
-        let frame = PlaybackMetrics.shared.measure(.sampleLayerMs) { sampleLayer(node.layer, atMs: atMs) }
+        let renderLayer = transitionFramePlan?.renderLayer(node.layer, at: atMs, layers: allLayers) ?? node.layer
+        let frame = PlaybackMetrics.shared.measure(.sampleLayerMs) { sampleLayer(renderLayer, atMs: atMs) }
         Group {
             if node.layer.type == "group" {
                 ZStack {
@@ -144,6 +201,7 @@ private struct LayerNodeView: View {
                             node: child,
                             atMs: atMs,
                             assets: assets,
+                            allLayers: allLayers,
                             filters: filters,
                             masks: masks,
                             playerEngine: playerEngine,

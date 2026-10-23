@@ -45,14 +45,23 @@ private struct ProjectRow: View {
 }
 
 struct ProjectsView: View {
-    @State private var projects: [ProjectSample] = [
-        ProjectSample(name: "Trip to Paris", lastEdited: "2 hours ago", gradient: [.blue, .teal], compositionWidth: 360, compositionHeight: 640), // 9:16
-        ProjectSample(name: "Product Launch", lastEdited: "Yesterday", gradient: [.pink, .purple], compositionWidth: 640, compositionHeight: 360), // 16:9
-        ProjectSample(name: "Birthday Recap", lastEdited: "3 days ago", gradient: [.orange, .yellow], compositionWidth: 480, compositionHeight: 480), // 1:1
-        // Remove BG on video: the two clips with real people (`public/preview/video/demo-nguoi1/2.MOV`, copied into `Documents/ImportedMedia`), one project each.
-        ProjectSample(name: ProjectsView.selfieProjectName, lastEdited: "Test project", gradient: [.green, .mint], compositionWidth: 360, compositionHeight: 640),
-        ProjectSample(name: ProjectsView.crowdProjectName, lastEdited: "Test project", gradient: [.teal, .indigo], compositionWidth: 360, compositionHeight: 640),
-    ]
+    @State private var projects: [ProjectSample] = {
+        var samples = [
+            ProjectSample(name: "Trip to Paris", lastEdited: "2 hours ago", gradient: [.blue, .teal], compositionWidth: 360, compositionHeight: 640), // 9:16
+            ProjectSample(name: "Product Launch", lastEdited: "Yesterday", gradient: [.pink, .purple], compositionWidth: 640, compositionHeight: 360), // 16:9
+            ProjectSample(name: "Birthday Recap", lastEdited: "3 days ago", gradient: [.orange, .yellow], compositionWidth: 480, compositionHeight: 480), // 1:1
+            // Remove BG on video: the two clips with real people (`public/preview/video/demo-nguoi1/2.MOV`, copied into `Documents/ImportedMedia`), one project each.
+            ProjectSample(name: ProjectsView.selfieProjectName, lastEdited: "Test project", gradient: [.green, .mint], compositionWidth: 360, compositionHeight: 640),
+            ProjectSample(name: ProjectsView.crowdProjectName, lastEdited: "Test project", gradient: [.teal, .indigo], compositionWidth: 360, compositionHeight: 640),
+        ]
+        #if DEBUG
+        samples.insert(ProjectSample(name: "Cuts Without Transition", lastEdited: "Debug fixture · 4 clips", gradient: [.cyan, .indigo], compositionWidth: 360, compositionHeight: 640,
+                                     editorProject: ProjectsView.makeTransitionDebugProject(withTransitions: false)), at: 1)
+        samples.insert(ProjectSample(name: "Three Transition Cuts", lastEdited: "Debug fixture · Mix, Fade, Push", gradient: [.indigo, .cyan], compositionWidth: 360, compositionHeight: 640,
+                                     editorProject: ProjectsView.makeTransitionDebugProject(withTransitions: true)), at: 2)
+        #endif
+        return samples
+    }()
     // `fullScreenCover`, not `NavigationLink` — a pushed page inside a
     // `TabView` leaves this tab's own tab bar showing underneath it.
     @State private var openedProject: ProjectSample?
@@ -171,6 +180,34 @@ struct ProjectsView: View {
         let emptyProject = V2Project(id: UUID().uuidString, composition: composition, assets: [], layers: [])
         return AppendMainLaneMediaCommand(items: items).apply(to: emptyProject)
     }
+
+    #if DEBUG
+    /// The same four clips with and without effects, so cut playback and render
+    /// costs can be compared on the Simulator without changing source media.
+    static func makeTransitionDebugProject(withTransitions: Bool) -> V2Project {
+        let composition = V2Composition(width: 360, height: 640, fps: 30, background: "#000000")
+        let firstAsset = SampleMedia.videoPortrait.asset
+        let secondAsset = SampleMedia.videoLandscape.asset
+        let clips = (0..<4).map { index in
+            V2Layer(
+                id: "transition-debug-\(index)", order: 0,
+                frame: V2Frame(width: 360, height: 640), transform: .identity,
+                timing: V2Timing(start: Double(index) * 3_000, duration: 3_000),
+                payload: .video(V2VideoPayload(assetId: index.isMultiple(of: 2) ? "video-a" : "video-b",
+                                               fit: "cover", playbackRate: 1))
+            )
+        }
+        var project = V2Project(id: withTransitions ? "three-transition-cuts" : "plain-cuts",
+                                composition: composition, assets: [firstAsset, secondAsset], layers: clips)
+        if withTransitions {
+            for (index, kind) in [TransitionKind.mix, .fadeBlack, .push].enumerated() {
+                project = SetTransitionCommand(outgoingId: clips[index].id, incomingId: clips[index + 1].id,
+                                               kind: kind, durationMs: 1_000).apply(to: project)
+            }
+        }
+        return project
+    }
+    #endif
 
     /// "Trip to Paris" (the 9:16 sample) gets extra demo content — a
     /// standalone audio track + a text lane — so the Timeline's lane UI

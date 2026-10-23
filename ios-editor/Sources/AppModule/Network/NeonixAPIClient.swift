@@ -74,6 +74,42 @@ struct NeonixAPIClient {
         return token
     }
 
+    /// Exchanges Apple's native ID token for the API's Better Auth bearer session.
+    func signInWithApple(
+        idToken: String,
+        nonce: String,
+        email: String?,
+        firstName: String?,
+        lastName: String?
+    ) async throws -> String {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent("api/auth/sign-in/social"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        var appleUser: [String: Any] = [:]
+        if let email, !email.isEmpty { appleUser["email"] = email }
+        var name: [String: String] = [:]
+        if let firstName, !firstName.isEmpty { name["firstName"] = firstName }
+        if let lastName, !lastName.isEmpty { name["lastName"] = lastName }
+        if !name.isEmpty { appleUser["name"] = name }
+
+        var appleToken: [String: Any] = ["token": idToken, "nonce": nonce]
+        if !appleUser.isEmpty { appleToken["user"] = appleUser }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "provider": "apple",
+            "idToken": appleToken
+        ])
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw Self.error(status: http.statusCode, data: data) }
+        guard let token = http.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        return token
+    }
+
     func accountProfile() async throws -> APIAccountProfile {
         try await send("GET", "v1/me", as: APIAccountProfile.self)
     }
@@ -81,6 +117,10 @@ struct NeonixAPIClient {
     func signOut() async throws {
         struct Empty: Decodable {}
         _ = try await send("POST", "api/auth/sign-out", as: Empty.self)
+    }
+
+    func deleteAccount() async throws {
+        _ = try await sendData("DELETE", "v1/me")
     }
 
     func balance() async throws -> Int {
@@ -155,6 +195,11 @@ struct NeonixAPIClient {
     // MARK: Transport
 
     private func send<T: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, as type: T.Type) async throws -> T {
+        let data = try await sendData(method, path, query: query, body: body)
+        return try Self.decoder.decode(T.self, from: data)
+    }
+
+    private func sendData(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil) async throws -> Data {
         var components = URLComponents(url: config.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         var request = URLRequest(url: components.url!)
@@ -171,7 +216,7 @@ struct NeonixAPIClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw Self.error(status: http.statusCode, data: data) }
-        return try Self.decoder.decode(T.self, from: data)
+        return data
     }
 
     private static func error(status: Int, data: Data) -> APIError {

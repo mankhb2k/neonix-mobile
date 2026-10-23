@@ -41,6 +41,10 @@ final class PlaybackMetrics: @unchecked Sendable {
         case coastEndedEdge = "coast_ended_edge"
         case coastInterrupted = "coast_interrupted"
         case pinchEvents = "pinch_events"
+        case transitionActiveTicks = "transition_active_ticks"
+        case playerRateSetCalls = "player_rate_set_calls"
+        case playerRateWrites = "player_rate_writes"
+        case playbackRegressions = "playback_regressions"
     }
 
     /// Durations in milliseconds; each second reports p50 / p95 / max.
@@ -106,6 +110,7 @@ final class PlaybackMetrics: @unchecked Sendable {
         case coastFriction = "coast_friction"
         /// Slack of the scrub seek most recently issued, in ms.
         case scrubToleranceMs = "scrub_tolerance_ms"
+        case transitionProgress = "transition_progress"
     }
 
     /// Objects whose live count must stay flat. Tallied always (not only while

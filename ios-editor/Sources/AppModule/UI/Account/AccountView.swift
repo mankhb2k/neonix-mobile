@@ -49,7 +49,7 @@ struct AccountView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(account.profile?.displayName ?? (account.isSignedIn ? "Neonix Account" : "Guest"))
                             .font(.body.weight(.semibold))
-                        Text(account.email ?? (account.isSignedIn ? "Google account" : "Sign in to manage your account"))
+                        Text(account.email ?? (account.isSignedIn ? "Neonix account" : "Sign in to manage your account"))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -69,7 +69,11 @@ struct AccountView: View {
             }
 
             Section("Account") {
-                accountLabel("Edit profile", symbol: "person.crop.circle.fill")
+                NavigationLink {
+                    EditProfileView(account: account)
+                } label: {
+                    accountLabel("Edit profile", symbol: "person.crop.circle.fill")
+                }
                 NavigationLink {
                     StorageView()
                 } label: {

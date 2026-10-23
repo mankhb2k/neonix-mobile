@@ -4,14 +4,13 @@ This document describes the architecture implemented in this repository and the 
 
 ## 1. Current architecture
 
-The iOS app is the current product. SwiftUI editor commands change a `V2Project`; playback and export consume that project. The protocol is renderer-oriented: a project contains composition settings, assets, ordered layers, animation tracks, and reusable definitions such as filters, masks, clip paths, markers, and paint servers. Preset names and UI state are editor concepts and are represented as concrete V2 values before playback/export.
+The iOS app is the current product. Most SwiftUI editor commands change a `V2Project`; playback and export consume a render-ready project. Transition choices are editor authoring intent: they are stored as `EditorTransitionIntent` values associated with adjacent clip IDs, then compiled into temporary V2 groups/tracks only for preview and export. They are not part of Protocol V2 JSON. The protocol is renderer-oriented: a project contains composition settings, assets, ordered layers, animation tracks, and reusable definitions such as filters, masks, clip paths, markers, and paint servers.
 
-`V2Project` currently serves as the editor's main project value as well as the playback/export input. Some editor-only authoring helpers exist in `EditorDocument/`, but the repository does not currently have the separate persistent Editor Project + command log + compiler pipeline described by the older version of this document. The Swift protocol models are hand-maintained `Codable` models; comments in those files refer to a TypeScript/Zod source package, but no `packages/motion-protocol` directory or generated JSON Schema is present in this checkout.
+`V2Project` still serves as the main editable value for most features. The active editor keeps transition intents alongside that value and removes legacy transition wrappers when opening a project; playback/export compile those intents into a temporary render projection. Template `EditorDocument` JSON also stores transitions directly. The repository does not yet have a complete persistent Editor Project + command log + compiler pipeline for every editor feature. The Swift protocol models are hand-maintained `Codable` models; comments in those files refer to a TypeScript/Zod source package, but no `packages/motion-protocol` directory or generated JSON Schema is present in this checkout.
 
 ```text
-SwiftUI editor commands ──> V2Project (Codable JSON)
-                                  ├──> playback / preview
-                                  └──> export
+SwiftUI editor commands ──> V2Project ───────────────┐
+Editor transition intent ────────────────────────────┴──> render compiler ──> preview / export
 ```
 
 This protocol is a semantic document format, not an instruction to use a particular rendering framework. The current renderer is iOS-native. Cross-platform rendering and real-time collaboration are not implemented.

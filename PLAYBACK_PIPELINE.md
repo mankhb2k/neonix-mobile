@@ -902,3 +902,17 @@ nội dung; lấy từ `PlayerSeekCoordinator.lastLandedSeconds`, vì `AVPlayer.
 chuyển động playhead, trần 0.2 s). Tiêu chí: `visual_lag` p95 ≤ 25 ms ở dải chậm và vừa, **không** làm seek service p95 > 35 ms
 hay seek/s < 50. Lưu ý: lần thử dung sai thích ứng trước (H10) đánh giá bằng `landing_error` nội dung, không phải độ trễ
 theo thời gian, nên kết luận "tệ hơn" của nó cần xem lại bằng phép đo mới.
+
+## 14. Split/transition playback handoff — 2026-10-23
+
+Measured with three 1080p/60 fps HEVC videos at cuts 5/10/15 s. V2 source mappings were continuous; the repeatable hitch came from an exact seek and rate start on a second `AVPlayer` at the split. Transition playback also advanced its display clock before the media clock, then sought the outgoing player at the cut. This produced a 117–167 ms timestamp gap. Apple documents the decode cost of zero-tolerance seeks, paused-player preroll, and host-clock scheduling with `setRate(_:time:atHostTime:)`.
+
+The engine now pre-seeks and prerolls the next clip within 3 s of a cut; it schedules the player about 250 ms ahead using the outgoing item timebase converted to host time. The seam promotes the already-running player. Transition timeline time follows the currently moving player's clock; the outgoing clip is paused without another seek. Pending work is invalidated on pause, scrub, and project update. The two V2 clip layers and transition intent remain separate.
+
+Final simulator comparison: 27/27 windows passed; worst split PTS gap 16.7 ms and host gap 21.1 ms, versus 29.7 ms / 171 ms before; worst transition PTS gap 33.4 ms versus 167 ms before. Four selected regression cases passed, including full playback over three cuts, and the final two cadence cases passed after the cancellation change. `diagnostics/split-transition-fix-2026-10-23.md` has the sources, detailed measurements, limitations, and screen recording. The iPhone 13 was unavailable; physical-device validation is still outstanding.
+
+## 15. Dark canvas gap during chained Push — 2026-10-23
+
+The editor screenshot showed the incoming clip shifted right during Push, with the left side showing the canvas background. A regression test reproduced it with two adjacent transitions: when the middle clip became outgoing, its video leaf and new Push wrapper were active after the cut, but the *previous incoming transition group* still ended at the cut. `LayerNodeView` hid that whole subtree, leaving no outgoing frame to fill the left side. This was a V2 render-group timing issue, not missing keyframes in the media or the intended Push appearance. The same `PreviewCanvas` tree is used for live preview and offline export.
+
+`TransitionFramePlan.renderProject` now extends the outgoing clip's ancestor groups through the active transition window. End-anchored animation keyframes on an extended group are fixed at their original resolved times, so extending visibility does not move an authored out-animation later. The authored clip timings, source frame mapping, transition intent, and timeline UI stay unchanged. On iPhone 17 Simulator, the new chained-transition structure test failed before the fix and passed afterward; a `PreviewCanvas` pixel test at 75% Push confirmed outgoing and incoming frames on opposite sides. The existing offline export test for Mix, Fade, and Push also passed. A real-device visual check remains outstanding.

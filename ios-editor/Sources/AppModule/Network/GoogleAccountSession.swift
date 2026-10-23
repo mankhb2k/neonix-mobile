@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import GoogleSignIn
+import AuthenticationServices
 
 @MainActor
 final class GoogleAccountSession: ObservableObject {
@@ -66,13 +67,56 @@ final class GoogleAccountSession: ObservableObject {
         }
     }
 
+    func signInWithApple(credential: ASAuthorizationAppleIDCredential, nonce: String) async {
+        guard let tokenData = credential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8) else {
+            errorMessage = "Apple did not return an identity token. Please try again."
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        let previousToken = AuthTokenStore.token
+        let previousProfile = profile
+        let previousEmail = email
+        do {
+            AuthTokenStore.token = try await api.signInWithApple(
+                idToken: idToken,
+                nonce: nonce,
+                email: credential.email,
+                firstName: credential.fullName?.givenName,
+                lastName: credential.fullName?.familyName
+            )
+            email = credential.email ?? previousEmail
+            profile = try await api.accountProfile()
+        } catch {
+            AuthTokenStore.token = previousToken
+            profile = previousProfile
+            email = previousEmail
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func signOut() async {
         isLoading = true
         defer { isLoading = false }
         do { try await api.signOut() } catch { /* Clear local credentials even if the network is unavailable. */ }
+        clearLocalAccount()
+    }
+
+    func deleteAccount() async throws {
+        isLoading = true
+        defer { isLoading = false }
+        try await api.deleteAccount()
+        clearLocalAccount()
+    }
+
+    private func clearLocalAccount() {
         AuthTokenStore.token = nil
         profile = nil
         email = nil
+        errorMessage = nil
         GIDSignIn.sharedInstance.signOut()
     }
 }

@@ -18,6 +18,7 @@ struct DesignLabView: View {
     @State private var showingCrop = false
     @State private var showingMask = false
     @State private var showingChromaKey = false
+    @State private var showingExportButtons = false
 
     var body: some View {
         List {
@@ -129,6 +130,15 @@ struct DesignLabView: View {
                     }
                 }
                 .accessibilityIdentifier("lab-chroma-key")
+
+                Button { showingExportButtons = true } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Export buttons").font(.body.weight(.semibold)).foregroundColor(.primary)
+                        Text("Compare the current Quality and Export controls with native iOS bordered, prominent and glass button styles.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("lab-export-buttons")
             } header: {
                 Text("Experiments")
             } footer: {
@@ -148,6 +158,7 @@ struct DesignLabView: View {
         .fullScreenCover(isPresented: $showingCrop) { CropLabView() }
         .fullScreenCover(isPresented: $showingMask) { MaskLabView() }
         .fullScreenCover(isPresented: $showingChromaKey) { ChromaKeyLabView() }
+        .fullScreenCover(isPresented: $showingExportButtons) { ExportButtonsLabView() }
     }
 }
 

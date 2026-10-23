@@ -46,14 +46,17 @@ struct TemplateEditView: View {
             tabBar
         }
         .background(Color(.systemBackground).ignoresSafeArea())
+        .overlay {
+            if exportGate.showsProgress {
+                ExportProgressOverlay(progress: exportGate.progress, title: exportGate.progressTitle,
+                                      isComplete: exportGate.completed)
+            }
+        }
         .task { engine.prepare() }
         .onChange(of: model.revision) { _, _ in engine.update(project: model.project) }
         .onDisappear { engine.pause() }
         .alert(item: $exportGate.alert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
-        }
-        .sheet(item: $exportGate.sharedFile) { file in
-            ExportResultSheet(url: file.url) { exportGate.sharedFile = nil }
         }
         .alert("Couldn't update", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}

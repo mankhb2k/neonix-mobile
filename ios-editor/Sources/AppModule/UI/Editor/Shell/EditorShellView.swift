@@ -16,6 +16,8 @@ struct EditorShellView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var project: V2Project
+    /// Cut-level authoring intent belongs to the editor document. V2 transition groups are built only for rendering.
+    @State private var transitionIntents: [EditorTransitionIntent]
     /// Owns the playhead clock, Play/Pause, scrubbing + momentum
     /// (`Playback/EditorPlaybackEngine.swift`). This view only sends it
     /// commands and reads from it — it never writes the time.
@@ -53,6 +55,7 @@ struct EditorShellView: View {
     /// so an entire drag gesture collapses into a single undo step. `nil`
     /// whenever no trim drag is in progress.
     @State private var trimDragOriginal: V2Project?
+    @State private var trimDragOriginalTransitions: [EditorTransitionIntent]?
     /// Tuỳ chỉnh — the last slider values set per layer this *session*
     /// (never persisted to `project`/exported). Needed because a compiled
     /// `V2Filter` has no cheap way to read brightness/contrast/saturation/
@@ -131,7 +134,7 @@ struct EditorShellView: View {
     /// Same "one undo step per drag" shape as `adjustDragOriginal`.
     @State private var transformDragOriginal: V2Project?
     private let toolbarHeight: CGFloat = 58
-    private let topBarButtonSize = CGSize(width: 68, height: 32)
+    private let topBarButtonSize = CGSize(width: 68, height: 30)
     /// A tool's options row is exactly as tall as the other rows (user 2026-10-16: the Edit row's height).
     private var toolPanelHeight: CGFloat { toolbarHeight }
     /// The bottom row sits this much lower than the safe-area edge (into the home-indicator margin); the timeline gets the points.
@@ -176,15 +179,17 @@ struct EditorShellView: View {
     /// Set when the project came from a template: Export then spends the template's credits first.
     private let exportContext: TemplateExportContext?
     @State private var exportGate = ExportGate()
-    @State private var exportResolution: ExportResolution = .p720
+    @State private var exportResolution: ExportResolution = .p1080
     @State private var exportFrameRate = 30
     @State private var exportBitrateMbps = 5
     @State private var showingExportQuality = false
 
     init(project: V2Project, exportContext: TemplateExportContext? = nil) {
         self.exportContext = exportContext
-        _project = State(initialValue: project)
-        _engine = State(initialValue: EditorPlaybackEngine(project: project))
+        let extracted = TransitionWrappers.extracting(from: project)
+        _project = State(initialValue: extracted.project)
+        _transitionIntents = State(initialValue: extracted.transitions)
+        _engine = State(initialValue: EditorPlaybackEngine(project: extracted.project, transitions: extracted.transitions))
         let supportedFrameRates = [24, 25, 30, 50, 60]
         let sourceFrameRate = project.composition.fps
         let initialFrameRate = supportedFrameRates.min {
@@ -196,27 +201,50 @@ struct EditorShellView: View {
     /// Every write to `project` goes through here so the engine always sees
     /// the same layers the Stage and Timeline render.
     private func setProject(_ newProject: V2Project) {
-        let normalized = TransitionWrappers.normalized(AnimationWrappers.normalized(newProject))   // generated wrappers follow their clips
+        let normalized = AnimationWrappers.normalized(newProject)
+        transitionIntents = TransitionWrappers.validIntents(transitionIntents, for: normalized)
         project = normalized
-        engine.update(project: normalized)
+        engine.update(project: normalized, transitions: transitionIntents)
+    }
+
+    private func recordHistory(current: V2Project, transitions: [EditorTransitionIntent]? = nil) {
+        history.record(current: current, transitions: transitions ?? transitionIntents)
     }
 
     /// The one path every edit must go through — see `EditorHistory`'s own
     /// doc comment on why this snapshots the whole document rather than
     /// asking each `EditorCommand` to carry its own inverse.
     private func apply(_ command: EditorCommand) {
-        history.record(current: project)
+        recordHistory(current: project)
+        if let transitionCommand = command as? SetTransitionCommand {
+            let candidate = EditorTransitionIntent(outgoingId: transitionCommand.outgoingId,
+                                                   incomingId: transitionCommand.incomingId,
+                                                   kind: transitionCommand.kind,
+                                                   durationMs: transitionCommand.durationMs ?? 0)
+            transitionIntents.removeAll { $0.incomingId == candidate.incomingId }
+            if transitionCommand.durationMs != nil {
+                let projection = TransitionWrappers.compiling([candidate], into: project)
+                if let normalized = TransitionWrappers.applied(for: candidate.incomingId, in: projection.layers) {
+                    transitionIntents.append(normalized)
+                }
+            }
+            transitionIntents = TransitionWrappers.validIntents(transitionIntents, for: project)
+            engine.update(project: project, transitions: transitionIntents)
+            return
+        }
         setProject(command.apply(to: project))
     }
 
     private func undo() {
-        guard let previous = history.undo(current: project) else { return }
-        setProject(previous)
+        guard let previous = history.undo(current: project, transitions: transitionIntents) else { return }
+        transitionIntents = previous.transitions
+        setProject(previous.project)
     }
 
     private func redo() {
-        guard let next = history.redo(current: project) else { return }
-        setProject(next)
+        guard let next = history.redo(current: project, transitions: transitionIntents) else { return }
+        transitionIntents = next.transitions
+        setProject(next.project)
     }
 
     /// Âm thanh — "Thêm nhạc": the file picker hands back a raw URL
@@ -289,7 +317,7 @@ struct EditorShellView: View {
             if textSessionIsNew { selectedLayerId = nil }
             return
         }
-        if textSessionIsNew || textValues != textSessionInitial { history.record(current: original) }
+        if textSessionIsNew || textValues != textSessionInitial { recordHistory(current: original) }
     }
 
     /// Called once when a trim-handle drag starts — snapshots the
@@ -298,6 +326,7 @@ struct EditorShellView: View {
     private func beginTrim() {
         guard trimDragOriginal == nil else { return }
         trimDragOriginal = project
+        trimDragOriginalTransitions = transitionIntents
     }
 
     /// Called on every `DragGesture.onChanged` tick while trimming —
@@ -316,8 +345,9 @@ struct EditorShellView: View {
         // Main-lane magnet: a trim leaves a hole in the main lane; close it now, in the same undo step.
         let packed = PackMainLaneCommand().apply(to: project)
         withAnimation(.easeOut(duration: 0.2)) { setProject(packed) }
-        history.record(current: original)
+        recordHistory(current: original, transitions: trimDragOriginalTransitions)
         trimDragOriginal = nil
+        trimDragOriginalTransitions = nil
         // The playhead goes to the edge that was dragged: a left handle -> the clip's head, a right handle -> its tail
         // minus one frame (after packing/rippling). The time floor lowered for a main-lane left trim is restored once it has landed.
         if let layer = packed.layers.first(where: { $0.id == layerId }) {
@@ -419,7 +449,7 @@ struct EditorShellView: View {
 
     private func endFilter() {
         guard let original = filterDragOriginal else { return }
-        history.record(current: original)
+        recordHistory(current: original)
         filterDragOriginal = nil
     }
 
@@ -552,7 +582,7 @@ struct EditorShellView: View {
             }
             return clips + videos
         }
-        if summary(original) != summary(project) { history.record(current: original) }
+        if summary(original) != summary(project) { recordHistory(current: original) }
     }
 
     // MARK: Mask
@@ -593,7 +623,7 @@ struct EditorShellView: View {
         guard let original = maskSessionOriginal else { return }
         defer { maskSessionOriginal = nil }
         let sameNames = original.layers.map(\.mask) == project.layers.map(\.mask)
-        if !(sameNames && sameMaskGeometry(original, project)) { history.record(current: original) }
+        if !(sameNames && sameMaskGeometry(original, project)) { recordHistory(current: original) }
     }
 
     private func sameMaskGeometry(_ a: V2Project, _ b: V2Project) -> Bool {
@@ -659,7 +689,7 @@ struct EditorShellView: View {
         guard let original = chromaKeySessionOriginal else { return }
         chromaKeySessionOriginal = nil
         guard let before = try? JSONEncoder().encode(original), let after = try? JSONEncoder().encode(project), before != after else { return }
-        history.record(current: original)
+        recordHistory(current: original)
     }
 
     private func openChromaKeySheet() {
@@ -802,7 +832,7 @@ struct EditorShellView: View {
         guard let original = speedSessionOriginal else { return }
         defer { speedSessionOriginal = nil }
         let changed = zip(original.layers, project.layers).contains { $0.timing.duration != $1.timing.duration || $0.timing.start != $1.timing.start }
-        if changed { history.record(current: original) }
+        if changed { recordHistory(current: original) }
     }
 
     // MARK: Animation
@@ -863,7 +893,7 @@ struct EditorShellView: View {
 
     private func endTransform() {
         guard let original = transformDragOriginal else { return }
-        history.record(current: original)
+        recordHistory(current: original)
         transformDragOriginal = nil
     }
 
@@ -884,7 +914,7 @@ struct EditorShellView: View {
 
     private func endAdjust() {
         guard let original = adjustDragOriginal else { return }
-        history.record(current: original)
+        recordHistory(current: original)
         adjustDragOriginal = nil
     }
 
@@ -897,9 +927,15 @@ struct EditorShellView: View {
                 windowedShell
             }
         }
-        // Developer-only, hidden unless switched on in Account > Developer.
-        // See PLAYBACK_PIPELINE.md.
+#if DEBUG
         .overlay(alignment: .top) { PlaybackMetricsHUD().padding(.top, 52) }
+#endif
+        .overlay {
+            if exportGate.showsProgress {
+                ExportProgressOverlay(progress: exportGate.progress, title: exportGate.progressTitle,
+                                      isComplete: exportGate.completed)
+            }
+        }
         // Ignore `0` — a transient artifact during the cover's presentation
         // animation, not a real measurement (see ui-design-note.md).
         .onPreferenceChange(TitlebarHeightKey.self) { newValue in
@@ -941,9 +977,6 @@ struct EditorShellView: View {
         #endif
         .alert(item: $exportGate.alert) { alert in
             Alert(title: Text(alert.title), message: Text(alert.message), dismissButton: .default(Text("OK")))
-        }
-        .sheet(item: $exportGate.sharedFile) { file in
-            ExportResultSheet(url: file.url) { exportGate.sharedFile = nil }
         }
         .sheet(isPresented: $showingAdjustSheet) { adjustSheet }
         .sheet(isPresented: $showingCoverEditor) {
@@ -1325,6 +1358,7 @@ struct EditorShellView: View {
                         layers: project.layers,
                         assets: project.assets,
                         audio: project.audio,
+                        transitionIntents: transitionIntents,
                         engine: engine,
                         coverImageOverride: coverImageOverride,
                         onEditCover: { showingCoverEditor = true },
@@ -1337,7 +1371,7 @@ struct EditorShellView: View {
                         keyframeTimes: selectedLayer.map(TransformKeyframes.visibleTimelineTimes) ?? [],
                         onMoveClip: apply,
                         onTransition: { outgoingId, incomingId in
-                            let existing = TransitionWrappers.applied(for: incomingId, in: project.layers)
+                            let existing = transitionIntents.first { $0.incomingId == incomingId && $0.outgoingId == outgoingId }
                             transitionPickerTarget = TransitionPickerTarget(
                                 outgoingId: outgoingId,
                                 incomingId: incomingId,
@@ -1551,21 +1585,25 @@ struct EditorShellView: View {
 
     @ViewBuilder
     private var cancelButton: some View {
-        let cancel = Button("Cancel") { dismiss() }
-            .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
-            .controlSize(.small)
-        if #available(iOS 26.0, *) {
-            cancel.buttonStyle(.glass)
-        } else {
-            cancel.foregroundColor(.primary)
+        Button { dismiss() } label: {
+            Text("Cancel")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+                }
         }
+        .buttonStyle(.plain)
     }
 
     /// Charges first (template projects), shows a spinner meanwhile, and only then renders.
     private var exportButton: some View {
         Button(action: startExport) {
             exportLabel
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.black)
                 .frame(width: topBarButtonSize.width, height: topBarButtonSize.height)
                 .background(Color.cyan, in: RoundedRectangle(cornerRadius: 10))
@@ -1582,7 +1620,8 @@ struct EditorShellView: View {
 
     private func startExport() {
         Task {
-            await exportGate.export(project: project, context: exportContext,
+            let renderProject = TransitionWrappers.compiling(transitionIntents, into: project)
+            await exportGate.export(project: renderProject, context: exportContext,
                                     settings: ExportSettings(resolution: exportResolution,
                                                             frameRate: exportFrameRate,
                                                             bitrateMbps: exportBitrateMbps))

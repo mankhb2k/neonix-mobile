@@ -129,4 +129,5 @@ final class EditorTransformTests: XCTestCase {
         guard case .video(let payload) = v2.payload else { return XCTFail("expected video") }
         XCTAssertEqual(payload.trimStart, 1000)
     }
+
 }

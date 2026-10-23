@@ -36,6 +36,9 @@
     "%@ credits" : {
 
     },
+    "%@ fps" : {
+
+    },
     "%@ is coming soon" : {
 
     },
@@ -118,6 +121,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tài khoản"
+          }
+        }
+      }
+    },
+    "Account details" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thông tin tài khoản"
           }
         }
       }
@@ -278,6 +291,9 @@
     "Canvas" : {
 
     },
+    "Choose a tip" : {
+
+    },
     "Choose the language of the app." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -316,6 +332,12 @@
         }
       }
     },
+    "Compare the current Quality and Export controls with native iOS bordered, prominent and glass button styles." : {
+
+    },
+    "Compare the editor header buttons. Tap any Quality button to test resolution, frame rate and bitrate." : {
+
+    },
     "Contact us" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -330,6 +352,17 @@
     "Continue to your account" : {
 
     },
+    "Couldn't delete account" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể xóa tài khoản"
+          }
+        }
+      }
+    },
     "Couldn't load your credits." : {
       "localizations" : {
         "vi" : {
@@ -339,6 +372,9 @@
           }
         }
       }
+    },
+    "Creating project…" : {
+
     },
     "Credit purchases go through the App Store, so refunds are handled by Apple at reportaproblem.apple.com. Credits that were refunded are taken back from your balance." : {
       "extractionState" : "stale",
@@ -403,6 +439,17 @@
     "Curves" : {
 
     },
+    "Danger Zone" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vùng nguy hiểm"
+          }
+        }
+      }
+    },
     "Dark" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -410,6 +457,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tối"
+          }
+        }
+      }
+    },
+    "Delete account" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa tài khoản"
+          }
+        }
+      }
+    },
+    "Delete your Neonix account?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa tài khoản Neonix?"
+          }
+        }
+      }
+    },
+    "Deleting account…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang xóa tài khoản…"
           }
         }
       }
@@ -424,6 +504,9 @@
           }
         }
       }
+    },
+    "Donation options are unavailable right now." : {
+
     },
     "Downloaded templates" : {
       "extractionState" : "stale",
@@ -482,6 +565,9 @@
         }
       }
     },
+    "Editor preview" : {
+
+    },
     "Email your feedback to %@." : {
       "localizations" : {
         "vi" : {
@@ -510,6 +596,12 @@
           }
         }
       }
+    },
+    "Export buttons" : {
+
+    },
+    "Export quality" : {
+
     },
     "Export refunded" : {
       "extractionState" : "stale",
@@ -640,6 +732,9 @@
     "Image" : {
 
     },
+    "Importing…" : {
+
+    },
     "Include device info" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -739,6 +834,9 @@
       }
     },
     "Microphone access is off" : {
+
+    },
+    "MP4 · H.264" : {
 
     },
     "N" : {
@@ -843,6 +941,9 @@
         }
       }
     },
+    "NOW" : {
+
+    },
     "OK" : {
       "localizations" : {
         "vi" : {
@@ -856,7 +957,7 @@
     "On a dark panel" : {
 
     },
-    "One Google sign-in for credits and exports." : {
+    "One Google sign-in to manage your account." : {
 
     },
     "Open a template on Home, tap use, then fill each slot with a photo or video. Change the texts and music if you like, then tap Export." : {
@@ -891,6 +992,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Khác"
+          }
+        }
+      }
+    },
+    "Permanently delete your account and associated account data. This action cannot be undone." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Xóa vĩnh viễn tài khoản Neonix và dữ liệu liên quan. Bạn không thể hoàn tác thao tác này."
           }
         }
       }
@@ -1000,6 +1111,16 @@
     "Sample" : {
 
     },
+    "Selected · %@ · %@ fps · %@ Mbps" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Selected · %1$@ · %2$@ fps · %3$@ Mbps"
+          }
+        }
+      }
+    },
     "Send" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1022,11 +1143,21 @@
         }
       }
     },
-    "Sign in to manage credits and export" : {
+    "Set resolution, frame rate and bitrate" : {
 
     },
-    "Sign in to Neonix with Google" : {
+    "Sign in to manage your account" : {
 
+    },
+    "Sign in to Neonix" : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đăng nhập vào Neonix"
+          }
+        }
+      }
     },
     "Sign in with Google" : {
 
@@ -1110,6 +1241,9 @@
         }
       }
     },
+    "Support Neonix" : {
+
+    },
     "System" : {
       "localizations" : {
         "vi" : {
@@ -1189,6 +1323,9 @@
     "Text picker" : {
 
     },
+    "Thanks for supporting Neonix development." : {
+
+    },
     "The 20 starter sounds with pretend playback and download: rows with a play button, rows with a waveform that fills while it plays, or a grid with a Use bar; Use puts the sound at the playhead." : {
 
     },
@@ -1225,10 +1362,23 @@
     "The stickers could not be loaded" : {
 
     },
+    "This permanently deletes your Neonix account and associated data. You won't be able to recover it." : {
+      "localizations" : {
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thao tác này sẽ xóa vĩnh viễn tài khoản Neonix và dữ liệu liên quan. Bạn sẽ không thể khôi phục tài khoản."
+          }
+        }
+      }
+    },
     "This template has no text to edit" : {
 
     },
     "Three keyframes on a moving layer; pick each segment's graph from a row of curves, a grid sheet or a big live curve, or edit it with two handles." : {
+
+    },
+    "Tips are optional, one-time purchases processed by the App Store." : {
 
     },
     "Transform controls" : {
@@ -1290,9 +1440,6 @@
     "Video" : {
 
     },
-    "Video ready" : {
-
-    },
     "What are credits for?" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1344,6 +1491,9 @@
 
     },
     "Your Neonix account" : {
+
+    },
+    "Your optional tip helps fund ongoing development. Neonix's editing features remain available to everyone." : {
 
     },
     "Your purchase is waiting for approval." : {

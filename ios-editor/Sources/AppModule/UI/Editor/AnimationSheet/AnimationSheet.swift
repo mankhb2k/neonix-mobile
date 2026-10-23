@@ -277,10 +277,27 @@ private struct TransitionPreviewTile: View {
                                 .opacity(progress)
                             Color.black.opacity(max(0, 1 - abs(progress - 0.5) * 2))
                         case .push:
-                            shot(color: Color(red: 0.12, green: 0.56, blue: 0.66), size: size)
-                                .offset(x: -progress * size.width)
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .opacity(progress)
+                                .offset(x: (1 - progress) * size.width)
+                        case .slideLeft:
                             shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
                                 .offset(x: (1 - progress) * size.width)
+                        case .slideRight:
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .offset(x: -(1 - progress) * size.width)
+                        case .slideUp:
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .offset(y: (1 - progress) * size.height)
+                        case .slideDown:
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .offset(y: -(1 - progress) * size.height)
+                        case .zoomIn:
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .scaleEffect(0.78 + 0.22 * progress)
+                        case .zoomOut:
+                            shot(color: Color(red: 0.43, green: 0.32, blue: 0.68), size: size)
+                                .scaleEffect(1.22 - 0.22 * progress)
                         }
                     } else {
                         Color(.tertiarySystemBackground)

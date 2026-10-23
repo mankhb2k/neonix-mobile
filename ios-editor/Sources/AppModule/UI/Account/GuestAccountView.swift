@@ -229,7 +229,7 @@ struct NeonixBrandMark: View {
                     .font(.system(size: size * 0.47, weight: .semibold))
                     .foregroundStyle(.white)
                     .overlay {
-                        Text("N")
+                        Image(systemName: "play.fill")
                             .font(.system(size: size * 0.25, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
                     }

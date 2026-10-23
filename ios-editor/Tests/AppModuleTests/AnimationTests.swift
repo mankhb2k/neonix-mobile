@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import SwiftUI
 import XCTest
 @testable import NeonixEditor
 
@@ -16,10 +17,31 @@ final class AnimationTests: XCTestCase {
         XCTAssertEqual(project.layers.filter { $0.type == "video" }.count, 2, "transition must not create a media clip")
         XCTAssertTrue(project.layers.contains { $0.type == "group" && $0.tracks?.contains { $0.path == "transform.translate.x" } == true })
         let rendered = TransitionRenderPlan.compile(project)
-        XCTAssertEqual(rendered.layers.first { $0.id == "b" }?.timing.start, 500,
-                       "render planning must not move a media clip")
-        XCTAssertEqual(rendered.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" }?.timing.start, 400,
-                       "the transition wrapper is centered on the cut")
+        XCTAssertEqual(rendered.layers.map(\.id), project.layers.map(\.id), "render planning must retain V2 layer identity and order")
+        let renderTransition = try XCTUnwrap(rendered.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" })
+        XCTAssertEqual(renderTransition.timing.start, 400, "only the render projection spans across the split")
+        XCTAssertEqual(renderTransition.timing.duration, 600)
+    }
+
+    func testTransitionIntentStaysOutsideAuthoringV2AndUndoSnapshot() throws {
+        let source = transitionProject()
+        let authored = EditorTransitionIntent(outgoingId: "a", incomingId: "b", kind: .push, durationMs: 200)
+        let renderProject = TransitionWrappers.compiling([authored], into: source)
+        let extracted = TransitionWrappers.extracting(from: renderProject)
+
+        XCTAssertEqual(extracted.transitions, [authored])
+        XCTAssertFalse(extracted.project.layers.contains { TransitionWrappers.parse($0.id) != nil })
+        XCTAssertFalse(extracted.project.layers.contains { TransitionWrappers.parseOutgoing($0.id) != nil })
+        XCTAssertEqual(extracted.project.layers.filter { $0.type == "video" }.map(\.id), ["a", "b", "c"])
+
+        var history = EditorHistory()
+        history.record(current: extracted.project, transitions: [])
+        let restored = try XCTUnwrap(history.undo(current: renderProject, transitions: [authored]))
+        XCTAssertTrue(restored.transitions.isEmpty)
+        XCTAssertFalse(restored.project.layers.contains { TransitionWrappers.parse($0.id) != nil })
+
+        let recompiled = TransitionWrappers.compiling(extracted.transitions, into: extracted.project)
+        XCTAssertEqual(TransitionWrappers.applied(in: recompiled.layers)["b"], authored)
     }
 
     @MainActor
@@ -75,6 +97,24 @@ final class AnimationTests: XCTestCase {
             let duration = try await exported.load(.duration)
             XCTAssertEqual(CMTimeGetSeconds(duration), 0.6, accuracy: 0.12,
                            "\(kind.rawValue): a transition does not compress the editor timeline")
+            let frameReport = try inspectExportedFrames(exported, expectedFPS: 30)
+            NSLog("[TransitionFrameTest] kind=%@ frames=%d measuredFPS=%.3f maxBlackCoverage=%.4f fullBlackFrames=%d",
+                  kind.rawValue, frameReport.frameCount, frameReport.measuredFPS, frameReport.maxBlackCoverage,
+                  frameReport.fullBlackFrameCount)
+            XCTAssertGreaterThanOrEqual(frameReport.frameCount, 16, "\(kind.rawValue): export lost decoded frames")
+            XCTAssertLessThanOrEqual(frameReport.frameCount, 20, "\(kind.rawValue): unexpected duplicate frames")
+            XCTAssertEqual(frameReport.measuredFPS, 30, accuracy: 1.5, "\(kind.rawValue): output frame cadence")
+            if kind == .fadeBlack {
+                XCTAssertLessThanOrEqual(frameReport.maxBlackCoverage, 1,
+                                         "Fade intentionally reaches full black at its midpoint")
+                XCTAssertLessThanOrEqual(frameReport.fullBlackFrameCount, 1,
+                                         "Fade should have at most one fully black frame at 30 fps")
+            } else {
+                XCTAssertLessThan(frameReport.maxBlackCoverage, 0.98,
+                                  "\(kind.rawValue): an unintended full-screen black frame was exported")
+                XCTAssertEqual(frameReport.fullBlackFrameCount, 0,
+                               "\(kind.rawValue): no output frame may be fully black")
+            }
             let frameGenerator = AVAssetImageGenerator(asset: exported)
             frameGenerator.appliesPreferredTrackTransform = true
             frameGenerator.requestedTimeToleranceBefore = .zero
@@ -98,6 +138,145 @@ final class AnimationTests: XCTestCase {
         }
         XCTAssertNotEqual(transitionFrameColors[.fadeBlack], transitionFrameColors[.mix],
                           "fade and mix must encode visibly different overlap frames")
+    }
+
+    func testAllNineTransitionsResolveFiniteTracksAtEveryFrame() throws {
+        let base = transitionProject()
+        let fps = base.composition.fps
+        let frameCount = Int((TransitionWrappers.defaultDurationMs * fps / 1000).rounded())
+        XCTAssertEqual(TransitionKind.allCases.count, 9)
+        for kind in TransitionKind.allCases {
+            let project = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: kind,
+                                               durationMs: TransitionWrappers.defaultDurationMs).apply(to: base)
+            let intent = try XCTUnwrap(TransitionWrappers.applied(for: "b", in: project.layers), kind.rawValue)
+            XCTAssertEqual(intent.kind, kind)
+            let plan = TransitionFramePlan(project: project)
+            let incoming = try XCTUnwrap(project.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" }, kind.rawValue)
+            for frame in 0...frameCount {
+                let timeMs = plan.windows[0].startMs + Double(frame) * 1000 / fps
+                let resolved = plan.renderLayer(incoming, at: timeMs, layers: project.layers)
+                let sample = sampleLayer(resolved, atMs: timeMs)
+                XCTAssertTrue(sample.opacity.isFinite, "\(kind.rawValue) frame \(frame): non-finite opacity")
+                XCTAssertTrue(sample.translateX.isFinite && sample.translateY.isFinite,
+                              "\(kind.rawValue) frame \(frame): non-finite position")
+                XCTAssertTrue(sample.scaleX.isFinite && sample.scaleY.isFinite,
+                              "\(kind.rawValue) frame \(frame): non-finite scale")
+            }
+        }
+    }
+
+    @MainActor
+    func testPreviewCanvasHasNoUnexpectedBlackFrameAcrossEveryTransitionFrame() throws {
+        func solidImage(_ color: UIColor) throws -> CGImage {
+            let context = try XCTUnwrap(CGContext(data: nil, width: 96, height: 170,
+                                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                                  space: CGColorSpaceCreateDeviceRGB(),
+                                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(color.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 96, height: 170))
+            return try XCTUnwrap(context.makeImage())
+        }
+        func blackCoverage(_ image: CGImage) -> Double {
+            let width = image.width
+            let height = image.height
+            let rowBytes = width * 4
+            var pixels = [UInt8](repeating: 0, count: rowBytes * height)
+            return pixels.withUnsafeMutableBytes { storage in
+                guard let context = CGContext(data: storage.baseAddress, width: width, height: height,
+                                              bitsPerComponent: 8, bytesPerRow: rowBytes,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 1 }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                var black = 0
+                for index in Swift.stride(from: 0, to: storage.count, by: 4) {
+                    if storage[index] < 8 && storage[index + 1] < 8 && storage[index + 2] < 8 { black += 1 }
+                }
+                return Double(black) / Double(max(width * height, 1))
+            }
+        }
+
+        let red = try solidImage(.red)
+        let blue = try solidImage(.blue)
+        let base = V2Project(composition: V2Composition(width: 96, height: 170, fps: 30, background: "#000000"),
+                             assets: [], layers: [
+                                V2Layer(id: "a", order: 0, frame: V2Frame(width: 96, height: 170), transform: .identity,
+                                        timing: V2Timing(start: 0, duration: 2000), payload: .video(V2VideoPayload(assetId: "a"))),
+                                V2Layer(id: "b", order: 0, frame: V2Frame(width: 96, height: 170), transform: .identity,
+                                        timing: V2Timing(start: 2000, duration: 2000), payload: .video(V2VideoPayload(assetId: "b")))
+                             ])
+        let expectedFadeBlackFrames = 1
+        for kind in TransitionKind.allCases {
+            let project = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: kind, durationMs: 400).apply(to: base)
+            let plan = TransitionFramePlan(project: project)
+            let window = try XCTUnwrap(plan.windows.first)
+            var fullBlackFrames = 0
+            let frameCount = Int((window.durationMs * project.composition.fps / 1000).rounded())
+            for frame in 0..<frameCount {
+                let timeMs = window.startMs + Double(frame) * 1000 / project.composition.fps
+                let canvas = PreviewCanvas(composition: project.composition, assets: [], layers: project.layers,
+                                           atMs: timeMs, transitionFramePlan: plan,
+                                           playerEngine: EditorPlaybackEngine(project: project),
+                                           exportFrames: ["a": red, "b": blue])
+                    .frame(width: 96, height: 170)
+                let renderer = ImageRenderer(content: canvas)
+                renderer.scale = 1
+                let image = try XCTUnwrap(renderer.uiImage?.cgImage, "\(kind.rawValue) frame \(frame)")
+                let coverage = blackCoverage(image)
+                if coverage >= 0.98 { fullBlackFrames += 1 }
+            }
+            NSLog("[TransitionPreviewFrameTest] kind=%@ frames=%d fullBlackFrames=%d",
+                  kind.rawValue, frameCount, fullBlackFrames)
+            if kind == .fadeBlack {
+                XCTAssertLessThanOrEqual(fullBlackFrames, expectedFadeBlackFrames, "Fade has at most one planned black midpoint frame")
+            } else {
+                XCTAssertEqual(fullBlackFrames, 0, "\(kind.rawValue): SwiftUI preview must not expose a black canvas frame")
+            }
+        }
+    }
+
+    private func inspectExportedFrames(_ asset: AVAsset, expectedFPS: Double) throws ->
+        (frameCount: Int, measuredFPS: Double, maxBlackCoverage: Double, fullBlackFrameCount: Int) {
+        let tracks = try XCTUnwrap(asset.tracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: tracks, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        output.alwaysCopiesSampleData = false
+        XCTAssertTrue(reader.canAdd(output))
+        reader.add(output)
+        XCTAssertTrue(reader.startReading())
+
+        var timestamps: [Double] = []
+        var maximumBlackCoverage = 0.0
+        var fullBlackFrameCount = 0
+        while let sample = output.copyNextSampleBuffer() {
+            timestamps.append(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)))
+            guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(buffer) else { continue }
+            let width = CVPixelBufferGetWidth(buffer)
+            let height = CVPixelBufferGetHeight(buffer)
+            let stride = CVPixelBufferGetBytesPerRow(buffer)
+            let bytes = base.assumingMemoryBound(to: UInt8.self)
+            var black = 0
+            let total = width * height
+            for y in 0..<height {
+                for x in 0..<width {
+                    let offset = y * stride + x * 4
+                    if bytes[offset] < 8 && bytes[offset + 1] < 8 && bytes[offset + 2] < 8 { black += 1 }
+                }
+            }
+            let coverage = Double(black) / Double(max(total, 1))
+            maximumBlackCoverage = max(maximumBlackCoverage, coverage)
+            if coverage >= 0.98 { fullBlackFrameCount += 1 }
+        }
+        XCTAssertEqual(reader.status, .completed, "frame reader failed: \(String(describing: reader.error))")
+        let durations = zip(timestamps, timestamps.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }
+        let meanDuration = durations.isEmpty ? 0 : durations.reduce(0, +) / Double(durations.count)
+        let measuredFPS = meanDuration > 0 ? 1 / meanDuration : 0
+        XCTAssertEqual(measuredFPS, expectedFPS, accuracy: 1.5)
+        return (timestamps.count, measuredFPS, maximumBlackCoverage, fullBlackFrameCount)
     }
     private func project() -> V2Project {
         let base = V2Project(composition: V2Composition(width: 360, height: 640, fps: 30, background: "#000000"), assets: [], layers: [])
@@ -239,12 +418,13 @@ final class AnimationTests: XCTestCase {
         let clip = try XCTUnwrap(p.layers.first { $0.id == "b" })
         XCTAssertEqual(clip.timing.start, 2000)
         XCTAssertEqual(TransitionWrappers.parse(transition.id)?.outgoingId, "a")
-        XCTAssertEqual(sampleLayer(transition, atMs: 1800).opacity, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(transition, atMs: 2000).opacity, 0.5, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(transition, atMs: 2200).opacity, 1, accuracy: 1e-6)
+        let plan = TransitionFramePlan(project: p)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(transition, at: 1800, layers: p.layers), atMs: 1800).opacity, 0, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(transition, at: 2000, layers: p.layers), atMs: 2000).opacity, 0.5, accuracy: 1e-5)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(transition, at: 2200, layers: p.layers), atMs: 2200).opacity, 1, accuracy: 1e-6)
         XCTAssertEqual(sampleLayer(animation, atMs: 2200).opacity, 0.5708792066370367, accuracy: 1e-6)
         XCTAssertEqual(sampleLayer(clip, atMs: 2200).translateX, 10, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(transition, atMs: 2000).opacity * sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6,
+        XCTAssertEqual(sampleLayer(plan.renderLayer(transition, at: 2000, layers: p.layers), atMs: 2000).opacity * sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6,
                        "the transition and the clip's own fade compose as separate nested opacity factors")
         XCTAssertEqual(clip.tracks?.map(\.id), ["b-move"], "transition generation must not rewrite authored clip keyframes")
         XCTAssertEqual(AnimationWrappers.applied(for: "b", in: p.layers)[.in]?.presetId, "fade")
@@ -260,9 +440,11 @@ final class AnimationTests: XCTestCase {
         XCTAssertEqual(p.layers.first { $0.id == "c" }?.timing.start, 4000)
 
         let render = TransitionRenderPlan.compile(p)
-        XCTAssertEqual(render.layers.first { $0.id == "b" }?.timing.start, 2000)
-        XCTAssertEqual(render.layers.first { $0.id == "c" }?.timing.start, 4000)
         XCTAssertEqual(render.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" }?.timing.start, 1750)
+        XCTAssertEqual(render.layers.first { $0.id == "c" }?.timing.start, 4000)
+        XCTAssertEqual(render.layers.map(\.id), p.layers.map(\.id))
+        XCTAssertEqual(render.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" }?.timing.duration, 2250)
+        XCTAssertEqual(p.layers.first { $0.id == "b" }?.timing.start, 2000, "authoring clip timing stays unchanged")
 
         p = SetTransitionCommand(outgoingId: "a", incomingId: "b", durationMs: nil).apply(to: p)
         XCTAssertNil(TransitionWrappers.applied(for: "b", in: p.layers))
@@ -294,14 +476,16 @@ final class AnimationTests: XCTestCase {
 
         let transition = try XCTUnwrap(render.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" })
         let animation = try XCTUnwrap(render.layers.first { AnimationWrappers.parse($0.id)?.clipId == "b" })
-        XCTAssertEqual(transition.timing.start, 1800)
-        XCTAssertEqual(transition.timing.duration, 2200, "the transition wrapper remains alive through the incoming clip")
-        XCTAssertEqual(animation.timing.duration, 2200)
+        XCTAssertEqual(transition.timing.start, 1800, "render transition starts before the cut")
+        XCTAssertEqual(transition.timing.duration, 2200, "render transition remains alive through the incoming clip")
+        XCTAssertEqual(animation.timing.duration, 2000, "authored animation timing remains aligned to the clip")
         XCTAssertEqual(TransitionWrappers.parse(transition.id)?.outgoingId, "a")
         XCTAssertEqual(AnimationWrappers.parse(animation.id)?.applied.presetId, "fade")
-        XCTAssertEqual(sampleLayer(transition, atMs: 2000).opacity, 0.5, accuracy: 1e-6)
+        let plan = TransitionFramePlan(project: p)
+        let transientTransition = plan.renderLayer(transition, at: 2000, layers: p.layers)
+        XCTAssertEqual(sampleLayer(transientTransition, atMs: 2000).opacity, 0.5, accuracy: 1e-5)
         XCTAssertEqual(sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(transition, atMs: 2000).opacity * sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(transientTransition, atMs: 2000).opacity * sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6)
     }
 
     func testFadeBlackUsesItsOwnOverlayAndComposesWithIncomingAnimationAndKeyframes() throws {
@@ -325,41 +509,94 @@ final class AnimationTests: XCTestCase {
 
         XCTAssertNil(transition.tracks, "Fade keeps the dip overlay independent from the incoming clip opacity")
         XCTAssertEqual(transition.timing.start, 1800)
-        XCTAssertEqual(transition.timing.duration, 2200)
-        XCTAssertEqual(contentFade.timing.duration, 2200, "the content group must not hide the clip after the fade")
-        XCTAssertEqual(black.timing.duration, 400, "only the black dip ends with the transition window")
-        XCTAssertEqual(sampleLayer(contentFade, atMs: 1800).opacity, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(contentFade, atMs: 2000).opacity, 0.5, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(black, atMs: 1800).opacity, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(black, atMs: 2000).opacity, 1, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(black, atMs: 2200).opacity, 0, accuracy: 1e-6)
+        XCTAssertEqual(contentFade.timing.duration, 2200, "the incoming source remains alive after the transition window")
+        XCTAssertEqual(black.timing.duration, 400, "the black dip exists only during the transition window")
+        let plan = TransitionFramePlan(project: p)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(contentFade, at: 1800, layers: p.layers), atMs: 1800).opacity, 0, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(contentFade, at: 2000, layers: p.layers), atMs: 2000).opacity, 0.5, accuracy: 1e-5)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(black, at: 1800, layers: p.layers), atMs: 1800).opacity, 0, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(black, at: 2000, layers: p.layers), atMs: 2000).opacity, 1, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(black, at: 2200, layers: p.layers), atMs: 2200).opacity, 0, accuracy: 1e-6)
         XCTAssertEqual(clip.tracks?.map(\.id), [authoredTrack.id])
         XCTAssertEqual(AnimationWrappers.applied(for: "b", in: p.layers)[.in]?.presetId, "fade")
         XCTAssertEqual(sampleLayer(animation, atMs: 2000).opacity, 0, accuracy: 1e-6)
     }
 
-    func testPushMovesBothClipsAndKeepsAuthoredAnimationTracksSeparate() throws {
+    func testPushSlidesIncomingOverStationaryOutgoingAndKeepsAuthoredAnimationTracksSeparate() throws {
         var p = transitionProject()
         p = SetAnimationCommand(layerId: "b", slot: .in, presetId: "fade", durationMs: 500).apply(to: p)
         p = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: .push, durationMs: 400).apply(to: p)
         let render = TransitionRenderPlan.compile(p)
 
         let incoming = try XCTUnwrap(render.layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" })
-        let outgoing = try XCTUnwrap(render.layers.first { $0.id.contains("~transition-out~") })
         let clip = try XCTUnwrap(render.layers.first { $0.id == "b" })
         XCTAssertEqual(TransitionWrappers.parse(incoming.id)?.kind, .push)
         XCTAssertEqual(incoming.timing.start, 1800)
         XCTAssertEqual(incoming.timing.duration, 2200)
-        XCTAssertEqual(outgoing.timing.start, 0)
-        XCTAssertEqual(outgoing.timing.duration, 2200)
-        XCTAssertEqual(sampleLayer(incoming, atMs: 1800).translateX, 360, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(incoming, atMs: 2000).translateX, 180, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(incoming, atMs: 2200).translateX, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(outgoing, atMs: 1800).translateX, 0, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(outgoing, atMs: 2000).translateX, -180, accuracy: 1e-6)
-        XCTAssertEqual(sampleLayer(outgoing, atMs: 2200).translateX, -360, accuracy: 1e-6)
+        XCTAssertFalse(render.layers.contains { $0.id.contains("~transition-out~") },
+                       "the previous clip remains fixed below the entering clip to prevent uncovered canvas")
+        let plan = TransitionFramePlan(project: p)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(incoming, at: 1800, layers: p.layers), atMs: 1800).translateX, 360, accuracy: 1e-6)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(incoming, at: 2000, layers: p.layers), atMs: 2000).translateX, 180, accuracy: 1e-3)
+        XCTAssertEqual(sampleLayer(plan.renderLayer(incoming, at: 2200, layers: p.layers), atMs: 2200).translateX, 0, accuracy: 1e-6)
         XCTAssertNil(clip.tracks)
         XCTAssertEqual(AnimationWrappers.applied(for: "b", in: p.layers)[.in]?.presetId, "fade")
+    }
+
+    func testChainedPushKeepsOutgoingSubtreeVisiblePastCut() throws {
+        for firstKind in TransitionKind.allCases {
+            var project = transitionProject()
+            project = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: firstKind, durationMs: 400).apply(to: project)
+            project = SetTransitionCommand(outgoingId: "b", incomingId: "c", kind: .push, durationMs: 400).apply(to: project)
+            let plan = TransitionFramePlan(project: project)
+            let sampleTime = 4100.0 // 75% through b -> c; b must still cover the left quarter.
+            let byId = Dictionary(uniqueKeysWithValues: project.layers.map { ($0.id, $0) })
+            var parentId = try XCTUnwrap(byId["b"]?.parentLayerId)
+            while let parent = byId[parentId] {
+                XCTAssertTrue(plan.isVisible(parent.id, at: sampleTime, layers: project.layers),
+                              "\(firstKind): resolver must keep ancestor \(parent.id) mounted during chained Push")
+                guard let nextId = parent.parentLayerId else { break }
+                parentId = nextId
+            }
+        }
+    }
+
+    @MainActor
+    func testChainedPushPreviewDrawsBothSidesAfterCut() throws {
+        func solidFrame(_ color: UIColor) throws -> CGImage {
+            let context = try XCTUnwrap(CGContext(data: nil, width: 2, height: 2,
+                                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                                  space: CGColorSpaceCreateDeviceRGB(),
+                                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(color.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+            return try XCTUnwrap(context.makeImage())
+        }
+        func pixel(_ image: CGImage, x: Int) -> [UInt8] {
+            var rgba = [UInt8](repeating: 0, count: 4)
+            CIContext().render(CIImage(cgImage: image), toBitmap: &rgba, rowBytes: 4,
+                               bounds: CGRect(x: x, y: 320, width: 1, height: 1),
+                               format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+            return rgba
+        }
+
+        var project = transitionProject()
+        project = SetTransitionCommand(outgoingId: "a", incomingId: "b", kind: .mix, durationMs: 400).apply(to: project)
+        project = SetTransitionCommand(outgoingId: "b", incomingId: "c", kind: .push, durationMs: 400).apply(to: project)
+        let framePlan = TransitionFramePlan(project: project)
+        let render = framePlan.renderProject(from: project)
+        let canvas = PreviewCanvas(composition: render.composition, assets: [], layers: render.layers,
+                                   atMs: 4100, transitionFramePlan: framePlan,
+                                   playerEngine: EditorPlaybackEngine(project: project),
+                                   exportFrames: ["b": try solidFrame(.red), "c": try solidFrame(.blue)])
+            .frame(width: 360, height: 640)
+        let renderer = ImageRenderer(content: canvas)
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.uiImage?.cgImage)
+        let left = pixel(image, x: 45)
+        let right = pixel(image, x: 180)
+        XCTAssertGreaterThan(Int(left[0]), Int(left[2]) + 100, "outgoing clip must fill the left side")
+        XCTAssertGreaterThan(Int(right[2]), Int(right[0]) + 100, "incoming clip must fill the right side")
     }
 
     func testChangingTransitionKindReplacesGeneratedLayersWithoutChangingEditorTiming() throws {
@@ -368,10 +605,11 @@ final class AnimationTests: XCTestCase {
 
         XCTAssertEqual(TransitionWrappers.applied(for: "b", in: p.layers)?.kind, .push)
         XCTAssertEqual(p.layers.filter { $0.id.contains("~transition~") }.count, 1)
-        XCTAssertEqual(p.layers.filter { $0.id.contains("~transition-out~") }.count, 1)
+        XCTAssertEqual(p.layers.filter { $0.id.contains("~transition-out~") }.count, 0,
+                       "push keeps the outgoing clip stationary under the incoming clip")
         XCTAssertNil(p.layers.first { $0.id.contains("~transition~") && $0.id.contains("mix") })
         XCTAssertEqual(p.layers.first { $0.id == "b" }?.timing.start, 2000)
-        XCTAssertEqual(TransitionRenderPlan.compile(p).layers.first { $0.id == "b" }?.timing.start, 2000)
+        XCTAssertEqual(TransitionRenderPlan.compile(p).layers.first { TransitionWrappers.parse($0.id)?.incomingId == "b" }?.timing.start, 1800)
     }
 
     func testTransitionRequiresAdjacentVideosOnThePrimaryLane() {

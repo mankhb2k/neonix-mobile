@@ -2,6 +2,7 @@ import AVFoundation
 import CoreImage
 import Foundation
 import Observation
+import Photos
 import SwiftUI
 
 /// Where an editor session came from, so Export knows which template to charge for.
@@ -18,6 +19,16 @@ struct TemplateExportContext {
 protocol ProjectExporter {
     var isAvailable: Bool { get }
     func export(_ project: V2Project, settings: ExportSettings) async throws -> URL
+    func export(_ project: V2Project, settings: ExportSettings, progress: @escaping (Double) -> Void) async throws -> URL
+}
+
+extension ProjectExporter {
+    func export(_ project: V2Project, settings: ExportSettings, progress: @escaping (Double) -> Void) async throws -> URL {
+        progress(0)
+        let url = try await export(project, settings: settings)
+        progress(1)
+        return url
+    }
 }
 
 enum ExportResolution: String, CaseIterable, Identifiable {
@@ -35,7 +46,7 @@ enum ExportResolution: String, CaseIterable, Identifiable {
 }
 
 struct ExportSettings: Equatable {
-    var resolution: ExportResolution = .p720
+    var resolution: ExportResolution = .p1080
     var frameRate: Int = 30
     var bitrateMbps: Int = 5
 
@@ -167,37 +178,36 @@ private struct SteppedQualitySlider: View {
     }
 }
 
-struct ExportedVideo: Identifiable {
-    let id = UUID()
-    let url: URL
-}
+enum ExportPhotoLibrary {
+    enum Failure: LocalizedError {
+        case permissionDenied
+        case saveFailed(String)
 
-struct ExportResultSheet: View {
-    let url: URL
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 42))
-                .foregroundStyle(.tint)
-            Text("Video ready")
-                .font(.headline)
-                .accessibilityIdentifier("exportReady")
-            HStack(spacing: 14) {
-                Button("Done", action: onDone)
-                    .buttonStyle(.bordered)
-                ShareLink(item: url) {
-                    Label("Share video", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("shareExportedVideo")
+        var errorDescription: String? {
+            switch self {
+            case .permissionDenied: "Allow Neonix to add videos to Photos in Settings, then try exporting again."
+            case .saveFailed(let message): message
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(24)
-        .background(Color(.systemBackground))
-        .presentationDetents([.height(230)])
+    }
+
+    static func saveVideo(at url: URL) async throws {
+        var status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if status == .notDetermined {
+            status = await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { continuation.resume(returning: $0) }
+            }
+        }
+        guard status == .authorized || status == .limited else { throw Failure.permissionDenied }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+            } completionHandler: { success, error in
+                if success { continuation.resume() }
+                else { continuation.resume(throwing: Failure.saveFailed(error?.localizedDescription ?? "Photos couldn't save this video.")) }
+            }
+        }
     }
 }
 
@@ -221,6 +231,10 @@ struct OfflineProjectExporter: ProjectExporter {
     }
 
     func export(_ editorProject: V2Project, settings: ExportSettings = ExportSettings()) async throws -> URL {
+        try await export(editorProject, settings: settings, progress: { _ in })
+    }
+
+    func export(_ editorProject: V2Project, settings: ExportSettings, progress: @escaping (Double) -> Void) async throws -> URL {
         let framePlan = TransitionFramePlan(project: editorProject)
         let project = framePlan.renderProject(from: editorProject)
         let endMs = max(project.layers.map { $0.timing.start + $0.timing.duration }.max() ?? 0,
@@ -320,6 +334,7 @@ struct OfflineProjectExporter: ProjectExporter {
                 guard adaptor.append(buffer, withPresentationTime: presentationTime) else {
                     throw writer.error ?? Failure.cannotRenderFrame
                 }
+                progress(Double(index + 1) / Double(max(count, 1)) * 0.92)
                 await Task.yield()
             }
             input.markAsFinished()
@@ -329,7 +344,9 @@ struct OfflineProjectExporter: ProjectExporter {
                     else { continuation.resume(throwing: writer.error ?? Failure.cannotCreateWriter) }
                 }
             }
+            progress(0.95)
             try await muxAudio(project: project, videoURL: silentURL, outputURL: finalURL)
+            progress(1)
             try? FileManager.default.removeItem(at: silentURL)
             return finalURL
         } catch {
@@ -420,12 +437,15 @@ final class ExportGate {
 
     private(set) var isWorking = false
     private(set) var completed = false
-    var sharedFile: ExportedVideo?
+    private(set) var showsProgress = false
+    private(set) var progress = 0.0
+    private(set) var progressTitle = "Preparing export"
     var alert: Alert?
 
     private let charge: Charge
     private let exporter: ProjectExporter
     private let chargesWithoutExporter: Bool
+    private let saveToPhotos: @MainActor (URL) async throws -> Void
 
     /// Debug builds charge even though nothing can be rendered yet, so the credit flow can be tried;
     /// release builds do not take credits for a video they cannot produce.
@@ -442,19 +462,27 @@ final class ExportGate {
             try await NeonixAPIClient(config: .current).createExport(templateId: context.templateId, versionId: context.versionId)
         },
         exporter: ProjectExporter? = nil,
-        chargesWithoutExporter: Bool = ExportGate.defaultChargesWithoutExporter
+        chargesWithoutExporter: Bool = ExportGate.defaultChargesWithoutExporter,
+        saveToPhotos: @escaping @MainActor (URL) async throws -> Void = { try await ExportPhotoLibrary.saveVideo(at: $0) }
     ) {
         self.charge = charge
         self.exporter = exporter ?? OfflineProjectExporter()
         self.chargesWithoutExporter = chargesWithoutExporter
+        self.saveToPhotos = saveToPhotos
     }
 
     func export(project: V2Project, context: TemplateExportContext?, settings: ExportSettings = ExportSettings()) async {
         guard !isWorking else { return }
         isWorking = true
         completed = false
-        sharedFile = nil
-        defer { isWorking = false }
+        showsProgress = true
+        progress = 0.02
+        progressTitle = "Preparing export"
+        alert = nil
+        defer {
+            isWorking = false
+            if !completed { showsProgress = false }
+        }
 
         if !exporter.isAvailable && !(context != nil && chargesWithoutExporter) {
             alert = Alert(title: "Export isn't available yet", message: "Video export is coming soon. No credits were used.")
@@ -475,11 +503,82 @@ final class ExportGate {
             }
         }
         do {
-            let url = try await exporter.export(project, settings: settings)
+            progressTitle = "Rendering video"
+            let url = try await exporter.export(project, settings: settings, progress: { [weak self] value in
+                self?.progress = min(max(value, 0), 1) * 0.9
+            })
+            progressTitle = "Saving to Photos"
+            progress = 0.96
+            try await saveToPhotos(url)
+            progress = 1
+            progressTitle = "Saved to Photos"
             completed = true
-            sharedFile = ExportedVideo(url: url)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1.2))
+                self?.showsProgress = false
+            }
         } catch {
             alert = Alert(title: "Export failed", message: error.localizedDescription)
         }
+    }
+}
+
+struct ExportProgressOverlay: View {
+    let progress: Double
+    let title: String
+    let isComplete: Bool
+
+    private var percent: Int { Int((min(max(progress, 0), 1) * 100).rounded()) }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.34).ignoresSafeArea()
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 7)
+                    Circle()
+                        .trim(from: 0, to: min(max(progress, 0), 1))
+                        .stroke(Color.cyan, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    if isComplete {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 25, weight: .semibold))
+                            .foregroundStyle(Color.cyan)
+                    } else {
+                        Text("\(percent)%")
+                            .font(.system(size: 21, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .frame(width: 82, height: 82)
+                .accessibilityLabel("Export progress, \(percent) percent")
+
+                VStack(spacing: 5) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(isComplete ? "Your video is in Photos." : "Keep Neonix open while this finishes.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 26)
+            .frame(width: 260)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+            .accessibilityIdentifier("exportProgressOverlay")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.2), value: progress)
+        .zIndex(10_000)
     }
 }

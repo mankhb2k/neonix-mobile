@@ -128,6 +128,12 @@ enum TransitionKind: String, Codable, CaseIterable, Identifiable {
     case mix
     case fadeBlack = "fade-black"
     case push
+    case slideLeft = "slide-left"
+    case slideRight = "slide-right"
+    case slideUp = "slide-up"
+    case slideDown = "slide-down"
+    case zoomIn = "zoom-in"
+    case zoomOut = "zoom-out"
 
     var id: String { rawValue }
     var title: String {
@@ -135,6 +141,12 @@ enum TransitionKind: String, Codable, CaseIterable, Identifiable {
         case .mix: "Mix"
         case .fadeBlack: "Fade"
         case .push: "Push"
+        case .slideLeft: "Slide Left"
+        case .slideRight: "Slide Right"
+        case .slideUp: "Slide Up"
+        case .slideDown: "Slide Down"
+        case .zoomIn: "Zoom In"
+        case .zoomOut: "Zoom Out"
         }
     }
     var symbol: String {
@@ -142,6 +154,12 @@ enum TransitionKind: String, Codable, CaseIterable, Identifiable {
         case .mix: "circle.lefthalf.filled"
         case .fadeBlack: "sun.max"
         case .push: "arrow.left.and.right"
+        case .slideLeft: "arrow.left"
+        case .slideRight: "arrow.right"
+        case .slideUp: "arrow.up"
+        case .slideDown: "arrow.down"
+        case .zoomIn: "plus.magnifyingglass"
+        case .zoomOut: "minus.magnifyingglass"
         }
     }
 }
@@ -151,9 +169,10 @@ enum TransitionKind: String, Codable, CaseIterable, Identifiable {
 enum TransitionWrappers {
     static let marker = "~transition~"
     static let outgoingMarker = "~transition-out~"
-    private static let fadeContentMarker = "~transition-fade-content~"
-    private static let fadeBlackMarker = "~transition-fade-black~"
+    static let fadeContentMarker = "~transition-fade-content~"
+    static let fadeBlackMarker = "~transition-fade-black~"
     static let defaultDurationMs = 500.0
+    private static let transitionEasing = V2Easing.cubicBezier(x1: 0.42, y1: 0, x2: 0.58, y2: 1)
 
     /// The same editor intent type used in saved EditorDocument JSON.
     typealias Applied = EditorTransitionIntent
@@ -188,7 +207,7 @@ enum TransitionWrappers {
         return Applied(outgoingId: outgoingId, incomingId: incomingId, kind: kind, durationMs: duration)
     }
 
-    private static func outgoingWrapperId(_ applied: Applied) -> String {
+    static func outgoingWrapperId(_ applied: Applied) -> String {
         "\(applied.outgoingId)\(outgoingMarker)\(encode(applied.incomingId))~\(applied.kind.rawValue)~\(Int(applied.durationMs.rounded()))"
     }
 
@@ -209,6 +228,42 @@ enum TransitionWrappers {
 
     static func applied(for incomingId: String, in layers: [V2Layer]) -> Applied? {
         layers.lazy.compactMap { parse($0.id) }.first { $0.incomingId == incomingId }
+    }
+
+    /// Extracts legacy transitions that were serialized as generated V2 groups, then removes only those groups.
+    /// The returned project remains a normal authoring project; callers keep the intents beside it in EditorDocument.
+    static func extracting(from project: V2Project) -> (project: V2Project, transitions: [Applied]) {
+        let intents = Array(applied(in: project.layers).values).sorted {
+            ($0.outgoingId, $0.incomingId) < ($1.outgoingId, $1.incomingId)
+        }
+        let stripped = intents.reduce(project) { current, intent in
+            setting(current, outgoingId: intent.outgoingId, incomingId: intent.incomingId,
+                    kind: intent.kind, durationMs: nil)
+        }
+        return (stripped, intents)
+    }
+
+    /// Returns the render-only V2 projection of editor transition intents.
+    static func compiling(_ transitions: [Applied], into project: V2Project) -> V2Project {
+        transitions.reduce(project) { current, intent in
+            setting(current, outgoingId: intent.outgoingId, incomingId: intent.incomingId,
+                    kind: intent.kind, durationMs: intent.durationMs)
+        }
+    }
+
+    /// Retains only intents that still describe adjacent primary-lane video clips after an edit.
+    static func validIntents(_ transitions: [Applied], for project: V2Project) -> [Applied] {
+        let primaryOrder = primaryVideoLaneOrder(of: project.layers)
+        let lane = project.layers.enumerated()
+            .filter { $0.element.order == primaryOrder && isPushLane($0.element) }
+            .sorted { ($0.element.timing.start, $0.offset) < ($1.element.timing.start, $1.offset) }
+            .map(\.element)
+        return transitions.filter { intent in
+            guard let index = lane.firstIndex(where: { $0.id == intent.outgoingId }), index + 1 < lane.count,
+                  lane[index + 1].id == intent.incomingId,
+                  lane[index].type == "video", lane[index + 1].type == "video" else { return false }
+            return true
+        }
     }
 
     private static func isTransitionWrapper(_ id: String, for clipId: String) -> Bool {
@@ -245,23 +300,60 @@ enum TransitionWrappers {
         layers.removeAll { $0.id == wrapperId || childIds.contains($0.id) }
     }
 
-    private static func transitionTracks(id: String, kind: TransitionKind, durationMs: Double, canvasWidth: Double, isOutgoing: Bool) -> [V2Track] {
+    private static func transitionTracks(id: String, kind: TransitionKind, durationMs: Double,
+                                         canvasWidth: Double, canvasHeight: Double, isOutgoing: Bool) -> [V2Track] {
         switch kind {
         case .mix:
             return [V2Track(id: "\(id)-opacity", path: "opacity", keyframes: [
-                V2Keyframe(time: .absolute(0), value: 0), V2Keyframe(time: .absolute(durationMs), value: 1)
+                V2Keyframe(time: .absolute(0), value: 0, easing: transitionEasing),
+                V2Keyframe(time: .absolute(durationMs), value: 1)
             ], animation: nil)]
         case .fadeBlack:
             return [] // The incoming fade and black dip are separate child layers in `setting`.
         case .push:
+            // Keep the outgoing frame stationary underneath the incoming one.
+            // Moving two independently decoded surfaces can expose a gap when
+            // their fitted bounds differ by even a pixel (black flash on export).
+            guard !isOutgoing else { return [] }
             let path = "transform.translate.x"
-            let from = isOutgoing ? 0.0 : canvasWidth
-            let to = isOutgoing ? -canvasWidth : 0.0
-            let start: V2KeyframeTime = isOutgoing ? .anchored(anchor: .end, offsetMs: durationMs) : .absolute(0)
-            let end: V2KeyframeTime = isOutgoing ? .anchored(anchor: .end, offsetMs: 0) : .absolute(durationMs)
-            return [V2Track(id: "\(id)-translate-x", path: path, keyframes: [
-                V2Keyframe(time: start, value: from), V2Keyframe(time: end, value: to)
+            return [
+                V2Track(id: "\(id)-translate-x", path: path, keyframes: [
+                    V2Keyframe(time: .absolute(0), value: canvasWidth, easing: transitionEasing),
+                    V2Keyframe(time: .absolute(durationMs), value: 0)
+                ], animation: nil),
+                V2Track(id: "\(id)-opacity", path: "opacity", keyframes: [
+                    V2Keyframe(time: .absolute(0), value: 0, easing: transitionEasing),
+                    V2Keyframe(time: .absolute(durationMs), value: 1)
+                ], animation: nil)
+            ]
+        case .slideLeft, .slideRight, .slideUp, .slideDown:
+            guard !isOutgoing else { return [] }
+            let axis: String
+            let distance: Double
+            switch kind {
+            case .slideLeft: axis = "x"; distance = canvasWidth
+            case .slideRight: axis = "x"; distance = -canvasWidth
+            case .slideUp: axis = "y"; distance = canvasHeight
+            case .slideDown: axis = "y"; distance = -canvasHeight
+            default: fatalError("Handled slide transition")
+            }
+            return [V2Track(id: "\(id)-translate-\(axis)", path: "transform.translate.\(axis)", keyframes: [
+                V2Keyframe(time: .absolute(0), value: distance, easing: transitionEasing),
+                V2Keyframe(time: .absolute(durationMs), value: 0)
             ], animation: nil)]
+        case .zoomIn, .zoomOut:
+            guard !isOutgoing else { return [] }
+            let start = kind == .zoomIn ? 0.78 : 1.22
+            return [
+                V2Track(id: "\(id)-scale-x", path: "transform.scale.x", keyframes: [
+                    V2Keyframe(time: .absolute(0), value: start, easing: transitionEasing),
+                    V2Keyframe(time: .absolute(durationMs), value: 1)
+                ], animation: nil),
+                V2Track(id: "\(id)-scale-y", path: "transform.scale.y", keyframes: [
+                    V2Keyframe(time: .absolute(0), value: start, easing: transitionEasing),
+                    V2Keyframe(time: .absolute(durationMs), value: 1)
+                ], animation: nil)
+            ]
         }
     }
 
@@ -283,7 +375,6 @@ enum TransitionWrappers {
         let maxDuration = min(outgoing.timing.duration, project.layers[incomingIndex].timing.duration) - frameMs
         guard maxDuration >= frameMs else { return project }
         let duration = min(max(durationMs, frameMs), maxDuration)
-        let applied = Applied(outgoingId: outgoingId, incomingId: incomingId, kind: kind, durationMs: duration)
 
         func addWrapper(for clipId: String, wrapperId: String, tracks: [V2Track], timing: V2Timing, frame: V2Frame, order: Int) {
             guard let root = wrappedRoot(for: clipId, layers: layers), let rootIndex = layers.firstIndex(where: { $0.id == root.id }) else { return }
@@ -298,7 +389,8 @@ enum TransitionWrappers {
         let incoming = layers.first { $0.id == incomingId }!
         let incomingWrapperId = wrapperId(outgoingId: outgoingId, incomingId: incomingId, kind: kind, durationMs: duration)
         let incomingTracks = transitionTracks(id: incomingWrapperId, kind: kind, durationMs: duration,
-                                              canvasWidth: project.composition.width, isOutgoing: false)
+                                              canvasWidth: project.composition.width, canvasHeight: project.composition.height,
+                                              isOutgoing: false)
         addWrapper(for: incomingId, wrapperId: incomingWrapperId, tracks: incomingTracks,
                    timing: incoming.timing, frame: incoming.frame, order: incoming.order)
 
@@ -310,13 +402,14 @@ enum TransitionWrappers {
             layers[rootIndex].parentLayerId = contentId
             let content = V2Layer(id: contentId, parentLayerId: incomingWrapperId, order: incoming.order, frame: incoming.frame,
                                   transform: .identity, timing: incoming.timing, tracks: [V2Track(id: "\(contentId)-opacity", path: "opacity", keyframes: [
-                                    V2Keyframe(time: .absolute(0), value: 0), V2Keyframe(time: .absolute(duration), value: 1)
+                                    V2Keyframe(time: .absolute(0), value: 0, easing: transitionEasing),
+                                    V2Keyframe(time: .absolute(duration), value: 1)
                                   ], animation: nil)], payload: .group(render3d: nil))
             let black = V2Layer(id: blackId, parentLayerId: incomingWrapperId, order: incoming.order,
                                 frame: V2Frame(width: project.composition.width, height: project.composition.height), transform: .identity,
                                 timing: incoming.timing, tracks: [V2Track(id: "\(blackId)-opacity", path: "opacity", keyframes: [
-                                    V2Keyframe(time: .absolute(0), value: 0),
-                                    V2Keyframe(time: .absolute(duration / 2), value: 1),
+                                    V2Keyframe(time: .absolute(0), value: 0, easing: transitionEasing),
+                                    V2Keyframe(time: .absolute(duration / 2), value: 1, easing: transitionEasing),
                                     V2Keyframe(time: .absolute(duration), value: 0)
                                 ], animation: nil)],
                                 payload: .shape(.rectangle(cornerRadius: nil, rx: nil, ry: nil, pathLength: nil),
@@ -325,13 +418,6 @@ enum TransitionWrappers {
             layers.insert(contentsOf: [content, black], at: wrapperIndex + 1)
         }
 
-        if kind == .push {
-            let outgoingWrapper = outgoingWrapperId(applied)
-            let outgoingTracks = transitionTracks(id: outgoingWrapper, kind: .push, durationMs: duration,
-                                                  canvasWidth: project.composition.width, isOutgoing: true)
-            addWrapper(for: outgoingId, wrapperId: outgoingWrapper, tracks: outgoingTracks,
-                       timing: outgoing.timing, frame: outgoing.frame, order: outgoing.order)
-        }
         return project.withLayers(layers)
     }
 
@@ -398,19 +484,34 @@ enum TransitionWrappers {
 enum TransitionLowerer {
     static func apply(_ project: V2Project, outgoingId: String, incomingId: String,
                       kind: TransitionKind, durationMs: Double?) -> V2Project {
-        guard let source = project.layers.first(where: { $0.id == outgoingId }), isPushLane(source) else { return project }
-        guard source.order == primaryVideoLaneOrder(of: project.layers) else { return project }
+        TransitionDiagnostics.log("lower.request pair=\(outgoingId)->\(incomingId) kind=\(kind.rawValue) duration=\(durationMs.map { String(format: "%.1f", $0) } ?? "remove") layers=\(project.layers.count)")
+        guard let source = project.layers.first(where: { $0.id == outgoingId }), isPushLane(source) else {
+            TransitionDiagnostics.log("lower.reject reason=outgoing-not-primary-video id=\(outgoingId)")
+            return project
+        }
+        guard source.order == primaryVideoLaneOrder(of: project.layers) else {
+            TransitionDiagnostics.log("lower.reject reason=outgoing-order-mismatch id=\(outgoingId) order=\(source.order)")
+            return project
+        }
         let clips = project.layers.enumerated()
             .filter { $0.element.order == source.order && isPushLane($0.element) }
             .sorted { ($0.element.timing.start, $0.offset) < ($1.element.timing.start, $1.offset) }
             .map(\.element)
         guard let index = clips.firstIndex(where: { $0.id == outgoingId }), index + 1 < clips.count,
-              clips[index + 1].id == incomingId, clips[index].type == "video", clips[index + 1].type == "video" else { return project }
+              clips[index + 1].id == incomingId, clips[index].type == "video", clips[index + 1].type == "video" else {
+            TransitionDiagnostics.log("lower.reject reason=clips-not-adjacent-video pair=\(outgoingId)->\(incomingId) primaryClips=\(clips.map(\.id).joined(separator: ","))")
+            return project
+        }
 
         let changed = TransitionWrappers.setting(project, outgoingId: outgoingId, incomingId: incomingId, kind: kind, durationMs: durationMs)
         let nextDuration = TransitionWrappers.applied(for: incomingId, in: changed.layers)?.durationMs ?? 0
-        if durationMs != nil && nextDuration == 0 { return project }
-        return TransitionWrappers.normalized(AnimationWrappers.normalized(changed))
+        if durationMs != nil && nextDuration == 0 {
+            TransitionDiagnostics.log("lower.reject reason=wrapper-not-generated pair=\(outgoingId)->\(incomingId) requestedDuration=\(String(describing: durationMs))")
+            return project
+        }
+        let result = TransitionWrappers.normalized(AnimationWrappers.normalized(changed))
+        TransitionDiagnostics.logProject(result, stage: "lower.output")
+        return result
     }
 }
 
@@ -468,66 +569,224 @@ struct TransitionFramePlan {
         return min(max(timeMs, layer.timing.start), layer.timing.start + layer.timing.duration)
     }
 
-    /// Builds only render metadata. The media clip timings and every later clip
-    /// stay untouched; generated wrappers cover the transition and keep the incoming clip's render span alive afterward.
-    func renderProject(from project: V2Project) -> V2Project {
-        guard !windows.isEmpty else { return project }
-        var result = project
-        var layers = result.layers
-        for window in windows {
-            let transitionId = layers.first { TransitionWrappers.parse($0.id)?.incomingId == window.incomingId }?.id
-            let outgoingId = layers.first { TransitionWrappers.parseOutgoing($0.id)?.outgoingId == window.outgoingId }?.id
-            let incomingEndMs = project.layers.first { $0.id == window.incomingId }
-                .map { $0.timing.start + $0.timing.duration } ?? window.endMs
-            let outgoingStartMs = project.layers.first { $0.id == window.outgoingId }?.timing.start ?? window.startMs
-            let expandedIds = Set(layers.compactMap { layer -> String? in
-                guard let animation = AnimationWrappers.parse(layer.id), animation.clipId == window.incomingId else { return nil }
-                return layer.id
-            })
-            for index in layers.indices {
-                let id = layers[index].id
-                let isIncomingTransition = id == transitionId
-                let isOutgoingTransition = id == outgoingId
-                let isFadeChild = transitionId.map { id.hasPrefix($0) && id != $0 } ?? false
-                guard isIncomingTransition || isOutgoingTransition || isFadeChild || expandedIds.contains(id) else { continue }
-                var layer = layers[index]
-                let originalStart = layer.timing.start
-                if expandedIds.contains(id) || isIncomingTransition || (isFadeChild && layer.type == "group") {
-                    // Keep the incoming subtree alive for the rest of its clip. The transition track reaches its final value
-                    // at window.endMs and then holds it; ending this wrapper at the cut window would blank the clip.
-                    layer.timing = V2Timing(start: window.startMs, duration: max(0, incomingEndMs - window.startMs))
-                } else if isOutgoingTransition {
-                    // A push starts at the outgoing clip's normal position, moves during the window, then remains off-canvas.
-                    layer.timing = V2Timing(start: outgoingStartMs, duration: max(0, window.endMs - outgoingStartMs))
-                } else {
-                    // The Fade black shape is the only generated child that should disappear at the end of the window.
-                    layer.timing = V2Timing(start: window.startMs, duration: window.durationMs)
-                }
-                if expandedIds.contains(id), var tracks = layer.tracks {
-                    // Preserve the clip's authored animation start: its local
-                    // keyframes move with the expanded wrapper's new start.
-                    let lead = max(0, originalStart - window.startMs)
-                    tracks = tracks.map { track in
-                        let keyframes = track.keyframes.map { keyframe in
-                            guard case .absolute(let ms) = keyframe.time else { return keyframe }
-                            return V2Keyframe(time: .absolute(ms + lead), value: keyframe.value, easing: keyframe.easing)
-                        }
-                        return V2Track(id: track.id, path: track.path, keyframes: keyframes, animation: track.animation)
-                    }
-                    layer.tracks = tracks
-                }
-                layers[index] = layer
+    /// True for a transition participant, its wrappers and the complete source
+    /// subtrees they contain. This is evaluated from the immutable editor V2.
+    func isVisible(_ layerId: String, at timeMs: Double, layers: [V2Layer]) -> Bool {
+        guard let window = activeWindow(at: timeMs) else { return false }
+        let activeRoots = [window.outgoingId, window.incomingId].compactMap { id in
+            layers.first { $0.id == id }?.parentLayerId
+        }
+        if layerId == window.outgoingId || layerId == window.incomingId { return true }
+
+        // Keep every ancestor of each source live so an animation/transition
+        // wrapper ending at the cut cannot unmount a nested player mid-frame.
+        for clipId in [window.outgoingId, window.incomingId] {
+            var parentId = layers.first { $0.id == clipId }?.parentLayerId
+            while let id = parentId, let parent = layers.first(where: { $0.id == id }) {
+                if parent.id == layerId { return true }
+                parentId = parent.parentLayerId
             }
         }
-        result = result.withLayers(layers)
-        return result
+
+        // Fade's black shape is a sibling of the incoming source subtree.
+        if activeRoots.contains(where: { layerId.hasPrefix($0) && layerId != $0 }) { return true }
+        return false
     }
+
+    /// Returns a transient render-time layer value. Only generated transition
+    /// wrapper timings are virtualized; authored V2 remains byte-for-byte
+    /// unchanged. The normal keyframe sampler still evaluates the tracks.
+    func renderLayer(_ layer: V2Layer, at timeMs: Double, layers: [V2Layer]) -> V2Layer {
+        let fadeContentApplied = layer.id.range(of: TransitionWrappers.fadeContentMarker)
+            .flatMap { TransitionWrappers.parse(String(layer.id[..<$0.lowerBound])) }
+        let fadeBlackApplied = layer.id.range(of: TransitionWrappers.fadeBlackMarker)
+            .flatMap { TransitionWrappers.parse(String(layer.id[..<$0.lowerBound])) }
+        let incomingApplied = TransitionWrappers.parse(layer.id) ?? fadeContentApplied ?? fadeBlackApplied
+        let outgoingApplied = TransitionWrappers.parseOutgoing(layer.id)
+        guard let applied = incomingApplied ?? outgoingApplied,
+              let window = windows.first(where: { $0.outgoingId == applied.outgoingId && $0.incomingId == applied.incomingId }) else { return layer }
+        let incomingWrapperId = layers.first {
+            guard let value = TransitionWrappers.parse($0.id) else { return false }
+            return value.outgoingId == window.outgoingId && value.incomingId == window.incomingId
+        }?.id ?? TransitionWrappers.wrapperId(outgoingId: window.outgoingId, incomingId: window.incomingId,
+                                              kind: window.kind, durationMs: applied.durationMs)
+        let outgoingWrapperId = layers.first {
+            guard let value = TransitionWrappers.parseOutgoing($0.id) else { return false }
+            return value.outgoingId == window.outgoingId && value.incomingId == window.incomingId
+        }?.id ?? TransitionWrappers.outgoingWrapperId(applied)
+        let incomingEnd = layers.first { $0.id == window.incomingId }
+            .map { $0.timing.start + $0.timing.duration } ?? window.endMs
+
+        var resolved = layer
+        if layer.id == incomingWrapperId || fadeContentApplied != nil {
+            // Track time zero begins at the visible window, and the wrapper
+            // then holds its final value through the incoming clip's lifetime.
+            resolved.timing = V2Timing(start: window.startMs, duration: max(window.durationMs, incomingEnd - window.startMs))
+        } else if layer.id == outgoingWrapperId {
+            resolved.timing = V2Timing(start: window.startMs, duration: window.durationMs)
+        } else if fadeBlackApplied != nil {
+            resolved.timing = V2Timing(start: window.startMs, duration: window.durationMs)
+        }
+        return resolved
+    }
+
+    /// Kept as a compatibility entry point while call sites migrate. A render
+    /// plan is now an identity view over the same immutable V2 document.
+    func renderProject(from project: V2Project) -> V2Project { project }
 }
 
 enum TransitionRenderPlan {
     static func compile(_ editorProject: V2Project) -> V2Project {
-        TransitionFramePlan(project: editorProject).renderProject(from: editorProject)
+        guard editorProject.layers.contains(where: { TransitionWrappers.parse($0.id) != nil }) else {
+            return editorProject
+        }
+        var layers = editorProject.layers
+        let applied = layers.compactMap { TransitionWrappers.parse($0.id) }
+        for intent in applied {
+            guard let outgoing = layers.first(where: { $0.id == intent.outgoingId }),
+                  let incoming = layers.first(where: { $0.id == intent.incomingId }),
+                  outgoing.type == "video", incoming.type == "video" else { continue }
+            let cut = outgoing.timing.start + outgoing.timing.duration
+            guard abs(incoming.timing.start - cut) < 1 else { continue }
+            let duration = min(intent.durationMs, outgoing.timing.duration, incoming.timing.duration)
+            guard duration > 0 else { continue }
+            let start = cut - duration / 2
+            let incomingEnd = incoming.timing.start + incoming.timing.duration
+            let windowTiming = V2Timing(start: start, duration: duration)
+            let incomingLifetime = V2Timing(start: start, duration: max(duration, incomingEnd - start))
+            let wrapperId = TransitionWrappers.wrapperId(outgoingId: intent.outgoingId,
+                                                         incomingId: intent.incomingId,
+                                                         kind: intent.kind, durationMs: intent.durationMs)
+            for index in layers.indices {
+                if layers[index].id == wrapperId {
+                    layers[index].timing = incomingLifetime
+                    layers[index].frame = incoming.frame
+                    layers[index].order = incoming.order
+                } else if layers[index].id == wrapperId + TransitionWrappers.fadeContentMarker {
+                    layers[index].timing = incomingLifetime
+                    layers[index].frame = incoming.frame
+                    layers[index].order = incoming.order
+                } else if layers[index].id == wrapperId + TransitionWrappers.fadeBlackMarker {
+                    layers[index].timing = windowTiming
+                    layers[index].order = incoming.order
+                }
+            }
+            let outgoingWrapperId = TransitionWrappers.outgoingWrapperId(intent)
+            if let index = layers.firstIndex(where: { $0.id == outgoingWrapperId }) {
+                layers[index].timing = windowTiming
+                layers[index].frame = outgoing.frame
+                layers[index].order = outgoing.order
+            }
+        }
+        return editorProject.withLayers(layers)
     }
+}
+
+/// Temporary transition tracing for simulator diagnosis. Logs the V2 JSON
+/// round-trip and the values the preview sampler should draw at key points.
+enum TransitionDiagnostics {
+    static func log(_ message: String) {
+        #if DEBUG
+        NSLog("[TransitionDiag] %@", message as NSString)
+        #endif
+    }
+
+    #if DEBUG
+    static func logProject(_ project: V2Project, stage: String) {
+        let transitions = TransitionWrappers.applied(in: project.layers).values.sorted {
+            ($0.outgoingId, $0.incomingId) < ($1.outgoingId, $1.incomingId)
+        }
+        guard !transitions.isEmpty else { return }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let jsonState: String
+        do {
+            let encoded = try encoder.encode(project)
+            let decoded = try JSONDecoder().decode(V2Project.self, from: encoded)
+            let reencoded = try encoder.encode(decoded)
+            let roundTripTransitions = TransitionWrappers.applied(in: decoded.layers).count
+            jsonState = "jsonBytes=\(encoded.count) decode=ok stable=\(encoded == reencoded) transitionsAfterDecode=\(roundTripTransitions)"
+        } catch {
+            jsonState = "jsonRoundTrip=FAILED error=\(error.localizedDescription)"
+        }
+
+        NSLog("[TransitionDiag] stage=%@ %@", stage, jsonState)
+        for applied in transitions {
+            let outgoing = project.layers.first { $0.id == applied.outgoingId }
+            let incoming = project.layers.first { $0.id == applied.incomingId }
+            let incomingWrapper = project.layers.first { TransitionWrappers.parse($0.id)?.incomingId == applied.incomingId }
+            let outgoingWrapper = project.layers.first { TransitionWrappers.parseOutgoing($0.id)?.outgoingId == applied.outgoingId }
+            let cut = outgoing.map { $0.timing.start + $0.timing.duration } ?? 0
+            let wrapperDetails = [incomingWrapper, outgoingWrapper].compactMap { layer -> String? in
+                guard let layer else { return nil }
+                let trackText = (layer.tracks ?? []).map { track in
+                    let frames = track.keyframes.map { keyframe in
+                        let time = resolveKeyframeTime(keyframe.time, boundMs: layer.timing.duration)
+                        return String(format: "%.0f:%.3f", time, keyframe.value.asNumber ?? .nan)
+                    }.joined(separator: ",")
+                    return "\(track.path)[\(frames)]"
+                }.joined(separator: ";")
+                return "wrapper{type=\(layer.type),parent=\(layer.parentLayerId ?? "root"),start=\(Int(layer.timing.start)),dur=\(Int(layer.timing.duration)),tracks=\(trackText)}"
+            }.joined(separator: " ")
+            NSLog("[TransitionDiag] pair=%@->%@ kind=%@ duration=%.1f cut=%.1f out={start=%.1f,dur=%.1f,order=%d} in={start=%.1f,dur=%.1f,order=%d} %@",
+                  applied.outgoingId, applied.incomingId, applied.kind.rawValue, applied.durationMs, cut,
+                  outgoing?.timing.start ?? -0.1, outgoing?.timing.duration ?? -0.1, outgoing?.order ?? -1,
+                  incoming?.timing.start ?? -0.1, incoming?.timing.duration ?? -0.1, incoming?.order ?? -1,
+                  wrapperDetails)
+        }
+    }
+
+    static func logCompiledPlan(source: V2Project, render: V2Project, plan: TransitionFramePlan) {
+        guard !plan.windows.isEmpty else {
+            for applied in TransitionWrappers.applied(in: source.layers).values {
+                let outgoing = source.layers.first { $0.id == applied.outgoingId }
+                let incoming = source.layers.first { $0.id == applied.incomingId }
+                let reason: String
+                if outgoing == nil || incoming == nil { reason = "source-layer-missing" }
+                else if outgoing?.type != "video" || incoming?.type != "video" { reason = "not-video" }
+                else if outgoing?.order != incoming?.order { reason = "lane-mismatch" }
+                else if let outgoing, let incoming,
+                        abs(incoming.timing.start - (outgoing.timing.start + outgoing.timing.duration)) >= 1 {
+                    reason = "cut-not-contiguous gap=\(incoming.timing.start - (outgoing.timing.start + outgoing.timing.duration))"
+                } else { reason = "invalid-duration-or-window" }
+                log("compile.reject pair=\(applied.outgoingId)->\(applied.incomingId) reason=\(reason)")
+            }
+            return
+        }
+        for window in plan.windows {
+            NSLog("[TransitionDiag] compile=OK pair=%@->%@ kind=%@ window=[%.1f,%.1f,%.1f] renderProjectDuration=%.1f",
+                  window.outgoingId, window.incomingId, window.kind.rawValue,
+                  window.startMs, window.cutMs, window.endMs,
+                  render.layers.map { $0.timing.start + $0.timing.duration }.max() ?? 0)
+            for fraction in [0.0, 0.25, 0.5, 0.75, 0.999] {
+                let time = window.startMs + window.durationMs * fraction
+                let incoming = render.layers.first { TransitionWrappers.parse($0.id)?.incomingId == window.incomingId }
+                let outgoing = render.layers.first { TransitionWrappers.parseOutgoing($0.id)?.outgoingId == window.outgoingId }
+                let inFrame = incoming.map { sampleLayer(plan.renderLayer($0, at: time, layers: render.layers), atMs: time) }
+                let outFrame = outgoing.map { sampleLayer(plan.renderLayer($0, at: time, layers: render.layers), atMs: time) }
+                NSLog("[TransitionDiag] v2Sample p=%.3f t=%.1f inOpacity=%.3f inX=%.1f outX=%.1f",
+                      fraction, time, inFrame?.opacity ?? -1, inFrame?.translateX ?? 0, outFrame?.translateX ?? 0)
+            }
+        }
+    }
+
+    static func logPlayback(plan: TransitionFramePlan, project: V2Project, timeMs: Double, playerState: String) {
+        guard let window = plan.activeWindow(at: timeMs) else { return }
+        let progress = window.progress(at: timeMs)
+        let incoming = project.layers.first { TransitionWrappers.parse($0.id)?.incomingId == window.incomingId }
+        let outgoing = project.layers.first { TransitionWrappers.parseOutgoing($0.id)?.outgoingId == window.outgoingId }
+        let inFrame = incoming.map { sampleLayer(plan.renderLayer($0, at: timeMs, layers: project.layers), atMs: timeMs) }
+        let outFrame = outgoing.map { sampleLayer(plan.renderLayer($0, at: timeMs, layers: project.layers), atMs: timeMs) }
+        NSLog("[TransitionDiag] preview t=%.1f p=%.3f inOpacity=%.3f inX=%.1f outX=%.1f players={%@}",
+              timeMs, progress, inFrame?.opacity ?? -1, inFrame?.translateX ?? 0,
+              outFrame?.translateX ?? 0, playerState)
+    }
+    #else
+    static func logProject(_ project: V2Project, stage: String) {}
+    static func logCompiledPlan(source: V2Project, render: V2Project, plan: TransitionFramePlan) {}
+    static func logPlayback(plan: TransitionFramePlan, project: V2Project, timeMs: Double, playerState: String) {}
+    #endif
 }
 
 /// One undoable editor action. The intent is lowered by the same path used when loading EditorDocument JSON.

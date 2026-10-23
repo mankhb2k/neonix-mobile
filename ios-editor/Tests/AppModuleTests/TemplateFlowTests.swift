@@ -201,7 +201,8 @@ final class TemplateFlowTests: XCTestCase {
     func testChargeThenRender() async throws {
         let log = ExportLog()
         let paid = try result(charged: true, balance: 14)
-        let gate = ExportGate(charge: { _ in log.charged += 1; return paid }, exporter: StubExporter(available: true, log: log), chargesWithoutExporter: false)
+        let gate = ExportGate(charge: { _ in log.charged += 1; return paid }, exporter: StubExporter(available: true, log: log),
+                              chargesWithoutExporter: false, saveToPhotos: { _ in })
         await gate.export(project: compile(try repoTemplate("photo-slideshow").document), context: context,
                           settings: ExportSettings(resolution: .p720, frameRate: 50, bitrateMbps: 20))
         XCTAssertEqual(log.charged, 1)

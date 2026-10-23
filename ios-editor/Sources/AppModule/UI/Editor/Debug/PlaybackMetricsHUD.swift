@@ -1,26 +1,22 @@
 import SwiftUI
 
-/// Overlay for the editor that shows `PlaybackMetrics` live and controls a
-/// recording run. Shown only when "Playback metrics HUD" is switched on in
-/// Account > Developer. Layout of what each number means:
+/// Debug-only overlay for the editor that shows `PlaybackMetrics` live and controls a
+/// recording run. Layout of what each number means:
 /// `PLAYBACK_PIPELINE.md` § 4.
 ///
 /// Collapsed it is a tiny pill, so a measured run can be done with almost no
 /// HUD drawing at all (observer effect — see the doc).
 struct PlaybackMetricsHUD: View {
-    @AppStorage("playbackMetricsArmed") private var armed = false
     @State private var expanded = false
     private let model = PlaybackMetricsHUDModel.shared
 
     var body: some View {
-        if armed {
-            VStack(alignment: .leading, spacing: 6) {
-                pill
-                if expanded { panel }
-            }
-            .padding(.top, 6)
-            .frame(maxWidth: .infinity, alignment: .center)
+        VStack(alignment: .leading, spacing: 6) {
+            pill
+            if expanded { panel }
         }
+        .padding(.top, 6)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var pill: some View {
@@ -133,6 +129,8 @@ struct PlaybackMetricsHUD: View {
                 main-hop ms \(p("seek_hop_ms", "%.1f"))
                 landing err ms \(p("seek_landing_error_ms"))
         DISPLAY age ms \(p("display_age_ms"))  settle ms \(p("settle_ms"))
+        TRANS   active ticks/s \(v("transition_active_ticks")) progress \(v("transition_progress", "%.2f")) regress/s \(v("playback_regressions"))
+                rate writes/s \(v("player_rate_writes"))
         PRESENT metal draws/s \(v("metal_draws")) empty/s \(v("metal_empty_buffers")) draw ms \(p("metal_draw_ms", "%.1f"))
         UI      frame gap ms \(p("frame_gap_ms", "%.1f")) dropped/s \(v("dropped_frames"))
                 body/s shell \(v("shell_body_evals")) timeline \(v("timeline_body_evals")) layer \(v("layer_body_evals"))

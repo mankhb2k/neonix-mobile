@@ -103,6 +103,8 @@ struct TimelineView: View {
     /// user explicitly scoped audio as its own exception when lanes were
     /// designed — see CLAUDE.md's "Timeline lanes" note.
     let audio: V2AudioDomain
+    /// EditorDocument transition intents associated with adjacent primary-lane clips.
+    var transitionIntents: [EditorTransitionIntent] = []
     /// The playhead lives in the engine — this view only reads it and sends
     /// scrub gestures to it (`beginScrub`/`scrub`/`endScrub`).
     let engine: EditorPlaybackEngine
@@ -633,8 +635,9 @@ struct TimelineView: View {
             guard outgoing.type == "video", incoming.type == "video" else { return nil }
             // CapCut only shows the transition affordance while neither clip at this cut is selected.
             guard transitionControlIsVisible(outgoingId: outgoing.id, incomingId: incoming.id, selectedLayerId: selectedLayerId) else { return nil }
-            let transition = TransitionWrappers.applied(for: incoming.id, in: layers)
-                .flatMap { $0.outgoingId == outgoing.id ? $0 : nil }
+            let transition = transitionIntents.first {
+                $0.outgoingId == outgoing.id && $0.incomingId == incoming.id
+            }
             // The timeline keeps the authored split point visible. The transition's
             // render overlap is private to the preview/export schedule.
             let center = outgoing.timing.start + outgoing.timing.duration

@@ -1,11 +1,15 @@
 import SwiftUI
+import AuthenticationServices
+import CryptoKit
+import Security
 
-/// Dedicated second step of the guest-account flow. Google is the only sign-in provider.
+/// Dedicated second step of the guest-account flow.
 struct GoogleLoginView: View {
     @ObservedObject var account: GoogleAccountSession
     let onSignedIn: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var appleNonce: String?
 
     var body: some View {
         NavigationStack {
@@ -45,7 +49,7 @@ struct GoogleLoginView: View {
                             .font(.system(size: 30, weight: .bold, design: .rounded))
                             .tracking(-0.7)
                             .multilineTextAlignment(.center)
-                        Text("Sign in to Neonix with Google")
+                        Text("Sign in to Neonix")
                             .font(.body)
                             .foregroundStyle(.secondary)
                     }
@@ -86,6 +90,21 @@ struct GoogleLoginView: View {
                     .frame(height: 54)
                     .disabled(account.isLoading)
                     .accessibilityIdentifier("google-sign-in-button")
+
+                    SignInWithAppleButton(.signIn) { request in
+                        let nonce = Self.randomNonce() ?? UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+                        appleNonce = nonce
+                        request.requestedScopes = [.email, .fullName]
+                        request.nonce = Self.sha256(nonce)
+                    } onCompletion: { result in
+                        handleAppleSignIn(result)
+                    }
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .disabled(account.isLoading)
+                    .accessibilityIdentifier("apple-sign-in-button")
 
                     if account.isLoading {
                         ProgressView("Connecting to Neonix…")
@@ -161,5 +180,36 @@ struct GoogleLoginView: View {
             await account.signIn(presenting: presenter)
             if account.isSignedIn { await onSignedIn() }
         }
+    }
+
+    private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let nonce = appleNonce else {
+                account.errorMessage = "Could not complete Apple Sign-In. Please try again."
+                return
+            }
+            appleNonce = nil
+            Task {
+                await account.signInWithApple(credential: credential, nonce: nonce)
+                if account.isSignedIn { await onSignedIn() }
+            }
+        case .failure(let error):
+            appleNonce = nil
+            if (error as? ASAuthorizationError)?.code != .canceled {
+                account.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private static func randomNonce() -> String? {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return nil }
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
